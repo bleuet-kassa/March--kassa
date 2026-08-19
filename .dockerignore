@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/build
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+**/*.log
+.git
+.gitignore
+legacy
+*.bat
+kassa-demo.html

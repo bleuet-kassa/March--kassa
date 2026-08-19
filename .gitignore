@@ -1,0 +1,22 @@
+# Node
+**/node_modules
+**/dist
+**/build
+
+# Omgeving / geheimen — NOOIT mee in git
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs & tijdelijk
+**/*.log
+pg.log
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# gegenereerd tijdens de Docker-build
+backend/public

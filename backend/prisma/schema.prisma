@@ -1,0 +1,484 @@
+// Datamodel voor het kassa-, stock- en webshopsysteem.
+// Zie blauwdruk-kassa-webshop.md voor de context achter elke tabel.
+// Database: PostgreSQL. ORM: Prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+//  Website-inhoud (publieke site marché.eu — zelf aanpasbaar via het beheer)
+// ---------------------------------------------------------------------------
+
+// Vrije teksten van de publieke site, per sleutel (bv. "hero_titel").
+model SiteTekst {
+  sleutel String @id
+  waarde  String @db.Text
+}
+
+// Openingsuren per weekdag (1 = maandag … 7 = zondag).
+model Openingsuur {
+  id       String  @id @default(cuid())
+  dag      Int     @unique
+  gesloten Boolean @default(false)
+  van      String? // "08:30"
+  tot      String? // "18:30"
+}
+
+// Geüploade afbeeldingen voor de site (bytes in de DB, geserveerd via /site/afbeelding/:id).
+model SiteAfbeelding {
+  id        String   @id @default(cuid())
+  mimetype  String
+  data      Bytes
+  createdAt DateTime @default(now())
+}
+
+// Partners die op de site getoond worden.
+model Partner {
+  id        String   @id @default(cuid())
+  naam      String
+  website   String?
+  logoUrl   String?
+  volgorde  Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+//  Lopende rekeningen (B2B "op rekening": bedrijf + personeelsleden, maandelijks factureren)
+// ---------------------------------------------------------------------------
+
+model RekeningBedrijf {
+  id        String        @id @default(cuid())
+  naam      String
+  btwNummer String?
+  adres     String?
+  email     String?
+  actief    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  leden     RekeningLid[]
+  verkopen  Verkoop[]
+}
+
+model RekeningLid {
+  id        String          @id @default(cuid())
+  bedrijf   RekeningBedrijf @relation(fields: [bedrijfId], references: [id])
+  bedrijfId String
+  naam      String
+  budget    Decimal?        @db.Decimal(10, 2) // optioneel (maand)budget
+  actief    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  verkopen  Verkoop[]
+}
+
+// ---------------------------------------------------------------------------
+//  Ondernemingen (multi-entiteit: import-onderneming + winkel)
+// ---------------------------------------------------------------------------
+
+model Onderneming {
+  id                String   @id @default(cuid())
+  naam              String
+  ondernemingsnummer String  @unique
+  btwNummer         String?
+  adres             String?  // voor op het (wettelijke) dagontvangsten-ticket
+  isImporteur       Boolean  @default(false) // true = de import-onderneming (A)
+  createdAt         DateTime @default(now())
+
+  verkopen          Verkoop[]
+  importbestellingen Importbestelling[]
+  dagafsluitingen   Dagafsluiting[]
+}
+
+// ---------------------------------------------------------------------------
+//  Stocklocaties (winkel, restaurant, magazijn ...)
+// ---------------------------------------------------------------------------
+
+enum LocatieType {
+  WINKEL
+  RESTAURANT
+  MAGAZIJN
+}
+
+model StockLocatie {
+  id        String      @id @default(cuid())
+  naam      String
+  type      LocatieType
+  actief    Boolean     @default(true)
+
+  voorraad          Voorraad[]
+  verplaatsingenVan Voorraadverplaatsing[] @relation("vanLocatie")
+  verplaatsingenNaar Voorraadverplaatsing[] @relation("naarLocatie")
+  verkopen          Verkoop[]
+  dagafsluitingen   Dagafsluiting[]
+}
+
+// ---------------------------------------------------------------------------
+//  BTW-tarieven (centraal beheerd i.v.m. tariefwijzigingen)
+// ---------------------------------------------------------------------------
+
+model BtwTarief {
+  id         String    @id @default(cuid())
+  naam       String    // bv. "Voeding 6%", "Alcohol 21%"
+  percentage Decimal   @db.Decimal(5, 2)
+  actief     Boolean   @default(true)
+
+  producten  Product[]
+}
+
+// ---------------------------------------------------------------------------
+//  Producten & voorraad
+// ---------------------------------------------------------------------------
+
+enum Eenheid {
+  STUK
+  KG
+}
+
+// Afdeling = het bovenste niveau van de stock (bv. Wijnkelder, Traiteur,
+// Voeding, Dranken, Non-food). Elke categorie hoort bij één afdeling.
+model Afdeling {
+  id        String      @id @default(cuid())
+  naam      String      @unique
+  volgorde  Int         @default(0) // voor de weergavevolgorde (bv. tegels)
+  createdAt DateTime    @default(now())
+  categorieen Categorie[]
+  producten Product[]
+}
+
+model Categorie {
+  id       String    @id @default(cuid())
+  naam     String    @unique
+  afdeling   Afdeling? @relation(fields: [afdelingId], references: [id])
+  afdelingId String?
+  producten Product[]
+}
+
+model Leverancier {
+  id       String   @id @default(cuid())
+  naam     String
+  contact  String?
+  land     String?  // relevant voor import (intra-EU vs. buiten EU)
+  producten Product[]
+  importbestellingen Importbestelling[]
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  naam         String
+  interneCode  String?  @unique
+  barcode      String?  @unique // EAN of eigen barcode
+  verkoopprijs Decimal  @db.Decimal(10, 2)
+  inkoopprijs  Decimal? @db.Decimal(10, 2) // landed cost bij import
+  isAlcohol    Boolean  @default(false)    // triggert leeftijdscontrole
+  eenheid      Eenheid  @default(STUK)
+  allergenen   String?
+  actief       Boolean  @default(true)
+  webshopZichtbaar Boolean @default(false) // toont dit product in de webshop (enkel indien ook actief)
+  vrijePrijs   Boolean  @default(false) // "diversen"/vrij-bedrag-knop: kassier tikt zelf het bedrag in
+  fotoUrl      String?  // productfoto voor de webshop
+  weegNummer   Int?     @unique // kort nummer voor de weeg-etiketbarcode (KG-producten)
+  createdAt    DateTime @default(now())
+
+  btwTarief    BtwTarief   @relation(fields: [btwTariefId], references: [id])
+  btwTariefId  String
+  // Een product hangt rechtstreeks aan een afdeling (winkelsectie). De
+  // categorie is een optionele, fijnere onderverdeling binnen die afdeling.
+  afdeling     Afdeling?   @relation(fields: [afdelingId], references: [id])
+  afdelingId   String?
+  categorie    Categorie?  @relation(fields: [categorieId], references: [id])
+  categorieId  String?
+  leverancier  Leverancier? @relation(fields: [leverancierId], references: [id])
+  leverancierId String?
+
+  voorraad         Voorraad[]
+  verkoopLijnen    VerkoopLijn[]
+  prijslijstItems  PrijslijstItem[]
+  importLijnen     ImportbestellingLijn[]
+  verplaatsingen   Voorraadverplaatsing[]
+}
+
+model Voorraad {
+  id             String   @id @default(cuid())
+  product        Product      @relation(fields: [productId], references: [id])
+  productId      String
+  locatie        StockLocatie @relation(fields: [locatieId], references: [id])
+  locatieId      String
+  aantal         Decimal  @default(0) @db.Decimal(12, 3)
+  minimumDrempel Decimal? @db.Decimal(12, 3)
+
+  @@unique([productId, locatieId])
+}
+
+model Voorraadverplaatsing {
+  id           String   @id @default(cuid())
+  product      Product      @relation(fields: [productId], references: [id])
+  productId    String
+  vanLocatie   StockLocatie @relation("vanLocatie", fields: [vanLocatieId], references: [id])
+  vanLocatieId String
+  naarLocatie  StockLocatie @relation("naarLocatie", fields: [naarLocatieId], references: [id])
+  naarLocatieId String
+  aantal       Decimal  @db.Decimal(12, 3)
+  datum        DateTime @default(now())
+  gebruiker    Gebruiker? @relation(fields: [gebruikerId], references: [id])
+  gebruikerId  String?
+}
+
+// ---------------------------------------------------------------------------
+//  Klanten & prijslijsten (intercompany + externe B2B)
+// ---------------------------------------------------------------------------
+
+enum KlantType {
+  PARTICULIER
+  B2B
+}
+
+model Prijslijst {
+  id     String           @id @default(cuid())
+  naam   String           // bv. "Eigen winkel", "Horeca", "Wederverkoper"
+  items  PrijslijstItem[]
+  klanten Klant[]
+}
+
+model PrijslijstItem {
+  id           String   @id @default(cuid())
+  prijslijst   Prijslijst @relation(fields: [prijslijstId], references: [id])
+  prijslijstId String
+  product      Product    @relation(fields: [productId], references: [id])
+  productId    String
+  prijs        Decimal  @db.Decimal(10, 2)
+
+  @@unique([prijslijstId, productId])
+}
+
+model Klant {
+  id           String    @id @default(cuid())
+  naam         String
+  type         KlantType @default(PARTICULIER)
+  btwNummer    String?   // voor Peppol-facturen via Scrada
+  email        String?
+  adres        String?
+  prijslijst   Prijslijst? @relation(fields: [prijslijstId], references: [id])
+  prijslijstId String?
+  createdAt    DateTime  @default(now())
+
+  verkopen     Verkoop[]
+}
+
+// ---------------------------------------------------------------------------
+//  Gebruikers
+// ---------------------------------------------------------------------------
+
+enum GebruikerRol {
+  KASSA
+  BEHEER
+  BEHEERDER
+}
+
+model Gebruiker {
+  id           String       @id @default(cuid())
+  naam         String
+  email        String       @unique
+  wachtwoordHash String
+  rol          GebruikerRol @default(KASSA)
+  actief       Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  verkopen       Verkoop[]
+  verplaatsingen Voorraadverplaatsing[]
+  dagafsluitingen Dagafsluiting[]
+  cadeaubonnen   Cadeaubon[]
+}
+
+// ---------------------------------------------------------------------------
+//  Kortingsregelingen (personeel, friends & family, ...) + begunstigden-register
+//  (e-mailadressen) voor automatische toepassing in de webshop (Fase 4).
+// ---------------------------------------------------------------------------
+
+model Kortingsregeling {
+  id         String   @id @default(cuid())
+  naam       String   @unique      // bv. "Personeel", "Friends & Family"
+  pct        Decimal  @db.Decimal(5, 2) // kortingspercentage
+  actief     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  begunstigden KortingsBegunstigde[]
+}
+
+model KortingsBegunstigde {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  naam          String?
+  regeling      Kortingsregeling @relation(fields: [regelingId], references: [id])
+  regelingId    String
+  createdAt     DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+//  Cadeaubonnen — register met nummer en uitgiftedatum. Uitgifte is BTW-vrij
+//  (0%); de BTW volgt bij inwisseling op de verkochte goederen.
+// ---------------------------------------------------------------------------
+
+model Cadeaubon {
+  id            String    @id @default(cuid())
+  nummer        String    @unique
+  bedrag        Decimal   @db.Decimal(10, 2)
+  datumUitgifte DateTime  @default(now())
+  ingewisseld   Boolean   @default(false)
+  ingewisseldOp DateTime?
+  gebruiker     Gebruiker? @relation(fields: [gebruikerId], references: [id])
+  gebruikerId   String?
+  createdAt     DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------------------
+//  Verkopen (kassa + webshop) — onwijzigbaar bewaard (bewaarplicht 7 jaar)
+// ---------------------------------------------------------------------------
+
+enum Betaalwijze {
+  CASH
+  BANCONTACT
+  KAART
+  OVERSCHRIJVING
+  ONLINE
+  EIGEN_REKENING // eigen gebruik — telt NIET mee als omzet/inkomst
+  QR             // betaald via QR-code
+}
+
+enum VerkoopKanaal {
+  KASSA
+  WEBSHOP
+}
+
+enum ScradaStatus {
+  NIET_VERSTUURD
+  VERSTUURD
+  FOUT
+}
+
+model Verkoop {
+  id            String        @id @default(cuid())
+  onderneming   Onderneming   @relation(fields: [ondernemingId], references: [id])
+  ondernemingId String
+  locatie       StockLocatie? @relation(fields: [locatieId], references: [id])
+  locatieId     String?
+  klant         Klant?        @relation(fields: [klantId], references: [id])
+  klantId       String?
+  // "Op rekening"-verkoop: geboekt op een bedrijf + personeelslid, maandelijks te factureren
+  rekeningBedrijf   RekeningBedrijf? @relation(fields: [rekeningBedrijfId], references: [id])
+  rekeningBedrijfId String?
+  rekeningLid       RekeningLid?     @relation(fields: [rekeningLidId], references: [id])
+  rekeningLidId     String?
+  gefactureerd      Boolean          @default(false)
+  gefactureerdOp    DateTime?
+  gebruiker     Gebruiker?    @relation(fields: [gebruikerId], references: [id])
+  gebruikerId   String?
+  kanaal        VerkoopKanaal @default(KASSA)
+  betaalwijze   Betaalwijze?
+  totaal        Decimal       @db.Decimal(10, 2)
+  datum         DateTime      @default(now())
+  // webshop-specifiek
+  leverwijze    String?       // AFHALEN | LEVEREN
+  status        String?       // NIEUW | BETAALD | KLAAR | AFGEHAALD ...
+  // online betaling (webshop, bv. Axepta)
+  betaald       Boolean       @default(false)
+  betaalRef     String?
+  // koppeling
+  scradaStatus  ScradaStatus  @default(NIET_VERSTUURD)
+  scradaRef     String?
+  // korting op de hele verkoop (bv. "Personeel 20%") — reden voor traceerbaarheid
+  kortingReden  String?
+  verkoopKortingPct Decimal? @db.Decimal(5, 2) // verkoopbrede korting (los van lijnkorting)
+  // dagafsluiting: true zodra deze verkoop in een Z-rapport is meegeteld
+  afgesloten    Boolean       @default(false)
+  dagafsluiting   Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
+  dagafsluitingId String?
+  // geannuleerd/geschrapt ticket: telt NIET mee in de dagafsluiting of omzet;
+  // de voorraad wordt bij de annulatie teruggeboekt.
+  geannuleerd    Boolean      @default(false)
+  geannuleerdOp  DateTime?
+  geannuleerdReden String?
+  // offline-buffer: unieke sleutel per verkoop, zodat een sync nooit dubbel boekt
+  idempotencyKey String?      @unique
+
+  lijnen        VerkoopLijn[]
+}
+
+model VerkoopLijn {
+  id            String   @id @default(cuid())
+  verkoop       Verkoop  @relation(fields: [verkoopId], references: [id])
+  verkoopId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  productId     String
+  aantal        Decimal  @db.Decimal(12, 3)
+  eenheidsprijs Decimal  @db.Decimal(10, 2)   // effectieve verkoopprijs/stuk incl. BTW (na korting)
+  inkoopprijs   Decimal? @db.Decimal(10, 2)   // momentopname, voor margeberekening
+  kortingPct    Decimal? @db.Decimal(5, 2)    // toegepaste korting in % (informatief)
+  btwPercentage Decimal  @db.Decimal(5, 2)
+  btwBedrag     Decimal  @db.Decimal(10, 2)
+}
+
+// ---------------------------------------------------------------------------
+//  Import (import-onderneming): bestellingen pushen + landed cost
+// ---------------------------------------------------------------------------
+
+enum ImportStatus {
+  CONCEPT
+  VERSTUURD
+  ONTVANGEN
+  GEANNULEERD
+}
+
+model Importbestelling {
+  id            String       @id @default(cuid())
+  onderneming   Onderneming  @relation(fields: [ondernemingId], references: [id])
+  ondernemingId String
+  leverancier   Leverancier  @relation(fields: [leverancierId], references: [id])
+  leverancierId String
+  status        ImportStatus @default(CONCEPT)
+  datum         DateTime     @default(now())
+  referentie    String?
+
+  lijnen        ImportbestellingLijn[]
+}
+
+model ImportbestellingLijn {
+  id                 String   @id @default(cuid())
+  importbestelling   Importbestelling @relation(fields: [importbestellingId], references: [id])
+  importbestellingId String
+  product            Product  @relation(fields: [productId], references: [id])
+  productId          String
+  aantal             Decimal  @db.Decimal(12, 3)
+  aankoopprijs       Decimal  @db.Decimal(10, 2)
+  // landed cost componenten
+  accijns            Decimal? @db.Decimal(10, 2)
+  douane             Decimal? @db.Decimal(10, 2)
+  transport          Decimal? @db.Decimal(10, 2)
+}
+
+// ---------------------------------------------------------------------------
+//  Dagafsluiting (Z-rapport): dagtotaal per betaalwijze en per BTW-tarief.
+//  Onwijzigbaar bewaard; markeert welke verkopen "afgesloten" zijn.
+// ---------------------------------------------------------------------------
+
+model Dagafsluiting {
+  id             String       @id @default(cuid())
+  volgnummer     Int?         // oplopend dagnummer voor het dagontvangstenboek
+  locatie        StockLocatie @relation(fields: [locatieId], references: [id])
+  locatieId      String
+  onderneming    Onderneming? @relation(fields: [ondernemingId], references: [id])
+  ondernemingId  String?
+  gebruiker      Gebruiker?   @relation(fields: [gebruikerId], references: [id])
+  gebruikerId    String?
+  vanaf          DateTime     // begin van de afgesloten periode
+  tot            DateTime     // einde (moment van afsluiten)
+  aantalVerkopen Int
+  totaal         Decimal      @db.Decimal(10, 2)
+  perBetaalwijze Json         // { CASH: 123.45, BANCONTACT: ... }
+  perBtwTarief   Json         // [{ percentage, maatstaf, btw }]
+  createdAt      DateTime     @default(now())
+
+  verkopen       Verkoop[]
+}

@@ -1,0 +1,16 @@
+# Start een lokale PostgreSQL-database met: docker compose up -d
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kassa
+      POSTGRES_PASSWORD: kassa
+      POSTGRES_DB: kassa
+    ports:
+      - "5432:5432"
+    volumes:
+      - kassa_db:/var/lib/postgresql/data
+
+volumes:
+  kassa_db:

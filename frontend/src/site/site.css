@@ -1,0 +1,196 @@
+/* Publieke Marché-site. Alle regels gescoped onder .marche-site zodat ze
+   de interne kassa-app niet raken. Enkel lichte modus (klantwens). */
+body { margin: 0; }
+
+.marche-site {
+  --brand: #0d4589;
+  --brand-600: #134f9e;
+  --brand-700: #0a356b;
+  --warm: #6d0f2a;
+  --warm-soft: #f2dbe1;
+  --ink: #0d1c33;
+  --muted: #5a6a82;
+  --paper: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #efeeea;
+  --line: #e6e4de;
+  --shadow: 22px 30px 60px -34px rgba(40, 40, 45, .18);
+  --radius: 16px;
+  --maxw: 1120px;
+  --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.marche-site *, .marche-site *::before, .marche-site *::after { box-sizing: border-box; }
+.marche-site .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+.marche-site a { color: inherit; text-decoration: none; }
+.marche-site h1, .marche-site h2, .marche-site h3 {
+  font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -.01em;
+}
+.marche-site .eyebrow {
+  font-size: .72rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--brand); display: inline-flex; align-items: center; gap: .55em;
+}
+.marche-site .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--warm); border-radius: 2px; }
+
+/* Topbar */
+.marche-site .top {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+}
+.marche-site .topbar { display: flex; align-items: center; gap: 18px; height: 70px; }
+.marche-site .brand { display: inline-flex; align-items: center; gap: 11px; margin-right: auto; }
+.marche-site .brand .mark { color: var(--brand); flex: none; }
+.marche-site .brand .mark text { font-family: var(--display); }
+.marche-site .brand .word { font-family: var(--display); font-size: 1.7rem; font-weight: 600; color: var(--brand); letter-spacing: .01em; line-height: 1; }
+.marche-site .brand .word-wrap { display: flex; flex-direction: column; gap: 3px; line-height: 1; }
+.marche-site .brand .ph { font-size: .58rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-family: var(--sans); font-weight: 600; }
+.marche-site nav.main { display: flex; align-items: center; gap: 4px; }
+.marche-site nav.main a { padding: 9px 14px; border-radius: 10px; font-size: .95rem; font-weight: 500; color: var(--ink); transition: background .18s, color .18s; }
+.marche-site nav.main a:hover { background: var(--surface-2); color: var(--brand); }
+.marche-site .btn {
+  display: inline-flex; align-items: center; gap: .5em; padding: 11px 20px; border-radius: 11px;
+  font-weight: 600; font-size: .95rem; cursor: pointer; border: 1px solid transparent;
+  transition: transform .15s, box-shadow .2s, background .2s;
+}
+.marche-site .btn-primary { background: var(--brand); color: #fff; box-shadow: 0 10px 24px -12px var(--brand); }
+.marche-site .btn-primary:hover { transform: translateY(-1px); background: var(--brand-600); }
+.marche-site .btn-ghost { background: transparent; color: var(--brand); border-color: var(--line); }
+.marche-site .btn-ghost:hover { border-color: var(--brand); background: var(--surface); }
+
+/* Hero */
+.marche-site .hero { padding: 68px 0 40px; }
+.marche-site .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 54px; align-items: center; }
+.marche-site .hero h1 { font-size: clamp(2.6rem, 5.4vw, 4.15rem); line-height: 1.02; }
+.marche-site .hero h1 em { font-style: normal; color: var(--brand); }
+.marche-site .hero p.lead { font-size: 1.16rem; color: var(--muted); max-width: 46ch; margin: 22px 0 30px; }
+.marche-site .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.marche-site .trust { display: flex; gap: 26px; margin-top: 34px; flex-wrap: wrap; }
+.marche-site .trust .t { display: flex; flex-direction: column; }
+.marche-site .trust .t b { font-family: var(--display); font-size: 1.5rem; color: var(--ink); }
+.marche-site .trust .t span { font-size: .82rem; color: var(--muted); }
+
+/* Hero-visual */
+.marche-site .hero-foto { width: 100%; height: 100%; max-height: 440px; object-fit: cover; border-radius: var(--radius); box-shadow: var(--shadow); display: block; }
+.marche-site .plogo-img { max-width: 100%; max-height: 60px; object-fit: contain; }
+.marche-site .showcase { position: relative; min-height: 380px; }
+.marche-site .card { position: absolute; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+.marche-site .card .row { display: flex; align-items: center; gap: 12px; }
+.marche-site .thumb { width: 50px; height: 50px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--surface-2); color: var(--brand); }
+.marche-site .card .nm { font-weight: 600; font-size: 1rem; }
+.marche-site .card .pr { margin-left: auto; font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; }
+.marche-site .card .sub { font-size: .82rem; color: var(--muted); }
+.marche-site .card.c1 { top: 8px; left: 0; width: 74%; transform: rotate(-3deg); }
+.marche-site .card.c2 { top: 120px; right: 0; width: 72%; transform: rotate(2.5deg); z-index: 3; }
+.marche-site .card.c3 { bottom: 4px; left: 8%; width: 70%; transform: rotate(-1.5deg); }
+.marche-site .ribbon {
+  position: absolute; top: -14px; right: 18px; z-index: 5;
+  background: var(--warm); color: #fff; font-weight: 700; font-size: .74rem;
+  letter-spacing: .06em; text-transform: uppercase; padding: 7px 13px; border-radius: 999px;
+  box-shadow: 0 8px 20px -8px rgba(109,15,42,.6);
+}
+
+/* Secties */
+.marche-site section { padding: 60px 0; }
+.marche-site .sec-head { max-width: 60ch; margin-bottom: 34px; }
+.marche-site .sec-head h2 { font-size: clamp(1.8rem, 3.4vw, 2.5rem); margin: 12px 0 10px; }
+.marche-site .sec-head p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+.marche-site .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.marche-site .cat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 18px; display: flex; flex-direction: column; gap: 10px; transition: transform .16s, border-color .16s, box-shadow .2s; }
+.marche-site .cat:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); box-shadow: var(--shadow); }
+.marche-site .cat .ic { width: 34px; height: 34px; color: var(--brand); }
+.marche-site .cat-foto { width: 100%; height: 110px; object-fit: cover; border-radius: 10px; }
+
+/* Webshop */
+.marche-site .shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+.marche-site .shop-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.marche-site .shop-foto { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+.marche-site .shop-foto img { width: 100%; height: 100%; object-fit: cover; }
+.marche-site .shop-foto-leeg { font-size: 34px; opacity: .5; }
+.marche-site .shop-body { padding: 12px; display: flex; flex-direction: column; }
+.marche-site .shop-naam { font-weight: 600; }
+.marche-site .shop-prijs { color: var(--brand); font-weight: 700; margin-top: 2px; }
+.marche-site .form-veld { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.marche-site .form-veld label { font-size: .82rem; color: var(--muted); font-weight: 600; }
+.marche-site .form-veld input { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+@media (max-width: 760px) { .marche-site .checkout-grid { grid-template-columns: 1fr !important; } }
+
+/* Sfeergalerij */
+.marche-site .galerij { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.marche-site .galerij-foto { width: 100%; height: 220px; object-fit: cover; border-radius: 14px; border: 1px solid var(--line); }
+.marche-site .cat b { font-size: 1.06rem; font-family: var(--display); font-weight: 600; }
+.marche-site .cat span { font-size: .86rem; color: var(--muted); }
+
+/* Webshop-band */
+.marche-site .band {
+  background:
+    radial-gradient(120% 140% at 90% 10%, color-mix(in srgb, var(--warm) 12%, transparent), transparent 55%),
+    linear-gradient(135deg, var(--surface), var(--surface-2));
+  color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow);
+  border-radius: 22px; padding: 46px; display: grid; grid-template-columns: 1.3fr .7fr; gap: 30px;
+  align-items: center; overflow: hidden; position: relative;
+}
+.marche-site .band h2 { color: var(--ink); font-size: clamp(1.7rem, 3vw, 2.3rem); }
+.marche-site .band h2 em { font-style: normal; color: var(--brand); }
+.marche-site .band p { color: var(--muted); margin: 12px 0 0; max-width: 48ch; }
+.marche-site .band .actions { justify-content: flex-end; }
+
+/* Openingsuren + Contact */
+.marche-site .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.marche-site .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; }
+.marche-site .panel h3 { font-size: 1.4rem; margin-bottom: 6px; }
+.marche-site .hours { width: 100%; border-collapse: collapse; margin-top: 14px; }
+.marche-site .hours td { padding: 11px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.marche-site .hours tr:last-child td { border-bottom: 0; }
+.marche-site .hours td.day { color: var(--muted); }
+.marche-site .hours td.val { text-align: right; font-weight: 600; }
+.marche-site .hours tr.today td { color: var(--brand); }
+.marche-site .hours tr.today td.day::before { content: "● "; color: var(--warm); font-size: .7em; vertical-align: middle; }
+.marche-site .hours td.closed { color: var(--muted); font-weight: 500; }
+.marche-site .contact-list { display: flex; flex-direction: column; gap: 16px; margin-top: 14px; }
+.marche-site .cl { display: flex; gap: 13px; align-items: flex-start; }
+.marche-site .cl .ci { color: var(--brand); flex: none; margin-top: 2px; }
+.marche-site .cl b { display: block; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.marche-site .cl span { font-size: 1.02rem; }
+
+/* Partners */
+.marche-site .partners { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.marche-site .plogo { height: 84px; border: 1px dashed var(--line); border-radius: 12px; display: grid; place-items: center; color: var(--muted); font-weight: 600; font-size: .92rem; background: var(--surface); text-align: center; padding: 8px; }
+
+/* Footer */
+.marche-site .foot { background: var(--surface); border-top: 1px solid var(--line); margin-top: 40px; padding: 40px 0 28px; }
+.marche-site .foot-grid { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.marche-site .foot-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.marche-site .foot-nav a { color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: .92rem; }
+.marche-site .foot-nav a:hover { color: var(--brand); background: var(--surface-2); }
+.marche-site .foot-legal { color: var(--muted); font-size: .82rem; margin-top: 20px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.marche-site .badge-ph { display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--warm); background: var(--warm-soft); padding: 2px 8px; border-radius: 6px; margin-left: 8px; vertical-align: middle; }
+
+/* Reveal-animatie (verschijnt bij het scrollen). */
+.marche-site .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+.marche-site .reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .marche-site .reveal { opacity: 1 !important; transform: none !important; transition: none; }
+  .marche-site .btn, .marche-site .cat { transition: none; }
+}
+.marche-site :focus-visible { outline: 3px solid var(--warm); outline-offset: 2px; border-radius: 6px; }
+
+@media (max-width: 900px) {
+  .marche-site .hero-grid, .marche-site .two, .marche-site .band { grid-template-columns: 1fr; }
+  .marche-site .band .actions { justify-content: flex-start; }
+  .marche-site .cats { grid-template-columns: repeat(2, 1fr); }
+  .marche-site .partners { grid-template-columns: repeat(3, 1fr); }
+  .marche-site nav.main, .marche-site .brand .ph { display: none; }
+  .marche-site .showcase { min-height: 340px; margin-top: 8px; }
+}
+@media (max-width: 520px) {
+  .marche-site .cats, .marche-site .partners { grid-template-columns: 1fr 1fr; }
+  .marche-site .hero { padding-top: 40px; }
+}
