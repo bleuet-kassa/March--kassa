@@ -146,7 +146,16 @@ export function Dagafsluiting() {
 function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: boolean }) {
   const d = rapport.dagontvangsten;
   return (
-    <div style={{ border: '1px solid #ddd', borderRadius: 10, padding: 18, fontFamily: 'ui-monospace,Consolas,monospace' }}>
+    <div className="dagticket" style={{ border: '1px solid #ddd', borderRadius: 10, padding: 18, fontFamily: 'ui-monospace,Consolas,monospace' }}>
+      {/* Bij het afdrukken enkel dit ticket tonen — geen kassa-menu of schermknoppen. */}
+      <style>{`
+        @media print {
+          nav { display: none !important; }
+          body * { visibility: hidden !important; }
+          .dagticket, .dagticket * { visibility: visible !important; }
+          .dagticket { position: absolute; left: 0; top: 0; width: 100%; border: none !important; padding: 0 !important; }
+        }
+      `}</style>
       <div style={{ textAlign: 'center' }}>
         <strong>{rapport.onderneming?.naam ?? 'Onderneming'}</strong><br />
         {rapport.onderneming?.adres && <span style={{ fontSize: 12 }}>{rapport.onderneming.adres}<br /></span>}
@@ -166,20 +175,33 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
       <hr />
 
       <div style={{ fontWeight: 600, fontSize: 13 }}>BTW-uitsplitsing — {d.aantal} verkopen</div>
-      <table style={{ width: '100%', fontSize: 13 }}>
+      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ color: '#666', fontSize: 11 }}>
+            <th style={{ textAlign: 'left' }}></th>
+            <th style={{ textAlign: 'right' }}>maatstaf</th>
+            <th style={{ textAlign: 'right' }}>btw</th>
+            <th style={{ textAlign: 'right' }}>incl.</th>
+          </tr>
+        </thead>
         <tbody>
           {d.perBtwTarief.map((b) => (
             <tr key={b.percentage}>
               <td>BTW {b.percentage}%</td>
-              <td style={{ textAlign: 'right' }}>maatstaf {euro(b.maatstaf)}</td>
+              <td style={{ textAlign: 'right' }}>{euro(b.maatstaf)}</td>
               <td style={{ textAlign: 'right' }}>{euro(b.btw)}</td>
+              <td style={{ textAlign: 'right' }}>{euro(b.maatstaf + b.btw)}</td>
             </tr>
           ))}
-          {d.perBtwTarief.length === 0 && <tr><td colSpan={3} style={{ color: '#999' }}>—</td></tr>}
+          {d.perBtwTarief.length === 0 && <tr><td colSpan={4} style={{ color: '#999' }}>—</td></tr>}
+          <tr style={{ fontWeight: 700, borderTop: '1px solid #999' }}>
+            <td>Totaal</td>
+            <td style={{ textAlign: 'right' }}>{euro(d.totaalExcl)}</td>
+            <td style={{ textAlign: 'right' }}>{euro(d.totaalBtw)}</td>
+            <td style={{ textAlign: 'right' }}>{euro(d.totaalExcl + d.totaalBtw)}</td>
+          </tr>
         </tbody>
       </table>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>Totaal excl. BTW</span><span>{euro(d.totaalExcl)}</span></div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>Totaal BTW</span><span>{euro(d.totaalBtw)}</span></div>
 
       {d.perCategorie.length > 0 && (
         <>
