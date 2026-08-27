@@ -14,8 +14,8 @@ export class RekeningenController {
     return this.rekeningen.voorKassa();
   }
 
-  // --- Beheer (enkel beheerders) ---
-  @Rollen(...ADMIN)
+  // Overzicht van de lopende rekeningen — leesbaar voor elke ingelogde
+  // medewerker (ook vanuit de kassa). Het beheren blijft voor beheerders.
   @Get('overzicht')
   overzicht() {
     return this.rekeningen.overzicht();
@@ -51,7 +51,7 @@ export class RekeningenController {
     return this.rekeningen.updateLid(id, body);
   }
 
-  @Rollen(...ADMIN)
+  // Detail van de verkopen op een bedrijf — ook leesbaar vanuit de kassa.
   @Get('bedrijven/:id/verkopen')
   verkopen(@Param('id') id: string) {
     return this.rekeningen.verkopen(id);

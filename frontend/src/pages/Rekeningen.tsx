@@ -4,6 +4,7 @@ import {
   getBedrijfVerkopen, factureerBedrijf,
   type RekeningBedrijf, type RekeningVerkoop,
 } from '../api/client';
+import { getVerkoper } from '../auth';
 
 const euro = (n: number | null | undefined) => '€ ' + Number(n ?? 0).toFixed(2);
 
@@ -18,6 +19,9 @@ export function Rekeningen() {
   const [nieuwAdres, setNieuwAdres] = useState('');
   const [nieuwEmail, setNieuwEmail] = useState('');
   const [verkopen, setVerkopen] = useState<Record<string, RekeningVerkoop[]>>({});
+  // Beheren (bedrijf/lid toevoegen, factureren) blijft voor beheerders; het
+  // overzicht zelf is leesbaar voor elke medewerker (ook vanuit de kassa).
+  const isAdmin = ['BEHEER', 'BEHEERDER'].includes((getVerkoper()?.rol ?? '').toUpperCase());
 
   async function laad() { setBedrijven(await getRekeningOverzicht()); }
   useEffect(() => { laad().catch((e) => setFout(String(e))); }, []);
@@ -68,6 +72,7 @@ export function Rekeningen() {
       <p style={{ color: '#6b7280', marginTop: 4 }}>Bedrijven waarvan personeelsleden "op rekening" kopen. Op het einde van de maand factureer je het openstaande bedrag.</p>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
 
+      {isAdmin && (
       <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14, margin: '12px 0 20px', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div><div style={muted}>Bedrijf</div><input value={nieuwNaam} onChange={(e) => setNieuwNaam(e.target.value)} style={{ ...inp, width: 180 }} /></div>
         <div><div style={muted}>BTW-nummer</div><input value={nieuwBtw} onChange={(e) => setNieuwBtw(e.target.value)} placeholder="BE0..." style={{ ...inp, width: 140 }} /></div>
@@ -75,6 +80,7 @@ export function Rekeningen() {
         <div><div style={muted}>E-mail</div><input value={nieuwEmail} onChange={(e) => setNieuwEmail(e.target.value)} style={{ ...inp, width: 160 }} /></div>
         <button onClick={voegBedrijfToe} style={btnBlauw}>Bedrijf toevoegen</button>
       </div>
+      )}
 
       {bedrijven.map((b) => (
         <div key={b.id} style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 12 }}>
@@ -88,7 +94,7 @@ export function Rekeningen() {
               <div style={{ fontWeight: 700, fontSize: 18, color: (b.openstaand ?? 0) > 0 ? '#b45309' : '#166534' }}>{euro(b.openstaand)}</div>
             </div>
             <button onClick={() => toonVerkopen(b.id)} style={btnMini}>{verkopen[b.id] ? 'Verberg' : 'Verkopen'}</button>
-            <button onClick={() => factureer(b)} disabled={(b.openstaand ?? 0) <= 0} style={{ ...btnBlauw, opacity: (b.openstaand ?? 0) <= 0 ? 0.5 : 1 }}>Factureren</button>
+            {isAdmin && <button onClick={() => factureer(b)} disabled={(b.openstaand ?? 0) <= 0} style={{ ...btnBlauw, opacity: (b.openstaand ?? 0) <= 0 ? 0.5 : 1 }}>Factureren</button>}
           </div>
 
           <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
@@ -101,7 +107,7 @@ export function Rekeningen() {
                 </div>
               </div>
             ))}
-            <button onClick={() => voegLidToe(b.id)} style={{ ...btnMini, border: '1px dashed #94a3b8', color: '#2563eb' }}>+ Personeelslid</button>
+            {isAdmin && <button onClick={() => voegLidToe(b.id)} style={{ ...btnMini, border: '1px dashed #94a3b8', color: '#2563eb' }}>+ Personeelslid</button>}
           </div>
 
           {verkopen[b.id] && (

@@ -101,7 +101,7 @@ function StaffApp() {
         {isAdmin && <Link to="/kassa/rapporten">Rapporten</Link>}
         {isAdmin && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
         {isAdmin && <Link to="/kassa/bestellingen">Bestellingen</Link>}
-        {isAdmin && <Link to="/kassa/rekeningen">Rekeningen</Link>}
+        <Link to="/kassa/rekeningen">Rekeningen</Link>
         {isAdmin && <Link to="/kassa/kortingen">Kortingen</Link>}
         {isAdmin && <Link to="/kassa/personeel">Personeel</Link>}
         {isAdmin && <Link to="/kassa/website">Website</Link>}
@@ -130,7 +130,7 @@ function StaffApp() {
           <Route path="kortingen" element={isAdmin ? <Kortingen /> : <div>Enkel voor beheerders.</div>} />
           <Route path="webshop-assortiment" element={isAdmin ? <WebshopAssortiment /> : <div>Enkel voor beheerders.</div>} />
           <Route path="bestellingen" element={isAdmin ? <Bestellingen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="rekeningen" element={isAdmin ? <Rekeningen /> : <div>Enkel voor beheerders.</div>} />
+          <Route path="rekeningen" element={<Rekeningen />} />
           <Route path="personeel" element={isAdmin ? <Personeel /> : <div>Enkel voor beheerders.</div>} />
           <Route path="website" element={isAdmin ? <Website /> : <div>Enkel voor beheerders.</div>} />
           <Route path="instellingen" element={isAdmin ? <Instellingen /> : <div>Enkel voor beheerders.</div>} />
