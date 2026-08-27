@@ -1,63 +1,56 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { RekeningenService } from './rekeningen.service';
-import { Rollen } from '../auth/auth.guard';
 
-const ADMIN = ['BEHEER', 'BEHEERDER'];
-
+// Lopende rekeningen ("op rekening"). Zowel het overzicht als het beheer
+// (bedrijven/personeel toevoegen en aanpassen, factureren) is toegankelijk voor
+// elke ingelogde medewerker — de kassa draait op een KASSA-account.
 @Controller('rekeningen')
 export class RekeningenController {
   constructor(private readonly rekeningen: RekeningenService) {}
 
-  // Voor de kassa: actieve bedrijven + leden (elke ingelogde verkoper).
+  // Voor de kassa: actieve bedrijven + leden.
   @Get('kassa')
   voorKassa() {
     return this.rekeningen.voorKassa();
   }
 
-  // Overzicht van de lopende rekeningen — leesbaar voor elke ingelogde
-  // medewerker (ook vanuit de kassa). Het beheren blijft voor beheerders.
+  // Overzicht van de lopende rekeningen (openstaand per bedrijf + per persoon).
   @Get('overzicht')
   overzicht() {
     return this.rekeningen.overzicht();
   }
 
-  @Rollen(...ADMIN)
   @Get('bedrijven')
   bedrijven() {
     return this.rekeningen.bedrijven();
   }
 
-  @Rollen(...ADMIN)
   @Post('bedrijven')
   nieuwBedrijf(@Body() body: { naam: string; btwNummer?: string; adres?: string; email?: string }) {
     return this.rekeningen.nieuwBedrijf(body);
   }
 
-  @Rollen(...ADMIN)
   @Patch('bedrijven/:id')
   updateBedrijf(@Param('id') id: string, @Body() body: any) {
     return this.rekeningen.updateBedrijf(id, body);
   }
 
-  @Rollen(...ADMIN)
   @Post('leden')
   nieuwLid(@Body() body: { bedrijfId: string; naam: string; budget?: number }) {
     return this.rekeningen.nieuwLid(body);
   }
 
-  @Rollen(...ADMIN)
   @Patch('leden/:id')
   updateLid(@Param('id') id: string, @Body() body: any) {
     return this.rekeningen.updateLid(id, body);
   }
 
-  // Detail van de verkopen op een bedrijf — ook leesbaar vanuit de kassa.
+  // Detail van de verkopen op een bedrijf.
   @Get('bedrijven/:id/verkopen')
   verkopen(@Param('id') id: string) {
     return this.rekeningen.verkopen(id);
   }
 
-  @Rollen(...ADMIN)
   @Post('bedrijven/:id/factureer')
   factureer(@Param('id') id: string) {
     return this.rekeningen.factureer(id);
