@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -114,5 +114,20 @@ export class RekeningenService {
       data: { gefactureerd: true, gefactureerdOp: new Date() },
     });
     return { aantal: open.length, totaal: Math.round(totaal * 100) / 100 };
+  }
+
+  // Verschuift een (nog niet gefactureerde) verkoop naar een andere rekening
+  // (bedrijf + personeelslid). Handig voor correcties.
+  async verplaatsVerkoop(verkoopId: string, bedrijfId: string, lidId: string) {
+    const v = await this.prisma.verkoop.findUnique({ where: { id: verkoopId } });
+    if (!v) throw new NotFoundException('Verkoop niet gevonden.');
+    if (v.gefactureerd) throw new BadRequestException('Deze verkoop is al gefactureerd en kan niet meer verschoven worden.');
+    const lid = await this.prisma.rekeningLid.findUnique({ where: { id: lidId } });
+    if (!lid || lid.bedrijfId !== bedrijfId) throw new BadRequestException('Het personeelslid hoort niet bij het gekozen bedrijf.');
+    await this.prisma.verkoop.update({
+      where: { id: verkoopId },
+      data: { rekeningBedrijfId: bedrijfId, rekeningLidId: lidId },
+    });
+    return { ok: true as const };
   }
 }

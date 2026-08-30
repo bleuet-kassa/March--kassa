@@ -700,3 +700,7 @@ export async function getBedrijfVerkopen(id: string): Promise<RekeningVerkoop[]>
 export async function factureerBedrijf(id: string): Promise<{ aantal: number; totaal: number }> {
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/factureer`, { method: 'POST' }));
 }
+// Een (nog niet gefactureerde) verkoop verschuiven naar een andere rekening (bedrijf + lid).
+export async function verplaatsRekeningVerkoop(verkoopId: string, bedrijfId: string, lidId: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/rekeningen/verkopen/${verkoopId}/verplaats`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bedrijfId, lidId }) }));
+}

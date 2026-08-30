@@ -1,8 +1,9 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getRekeningOverzicht, nieuwRekeningBedrijf, nieuwRekeningLid,
+  updateRekeningBedrijf, updateRekeningLid, verplaatsRekeningVerkoop,
   getBedrijfVerkopen, factureerBedrijf,
-  type RekeningBedrijf, type RekeningVerkoop,
+  type RekeningBedrijf, type RekeningLid, type RekeningVerkoop,
 } from '../api/client';
 
 const euro = (n: number | null | undefined) => '€ ' + Number(n ?? 0).toFixed(2);
@@ -18,6 +19,7 @@ export function Rekeningen() {
   const [nieuwAdres, setNieuwAdres] = useState('');
   const [nieuwEmail, setNieuwEmail] = useState('');
   const [verkopen, setVerkopen] = useState<Record<string, RekeningVerkoop[]>>({});
+  const [verplaatsId, setVerplaatsId] = useState<string | null>(null); // verkoop die verschoven wordt
 
   async function laad() { setBedrijven(await getRekeningOverzicht()); }
   useEffect(() => { laad().catch((e) => setFout(String(e))); }, []);
@@ -47,6 +49,51 @@ export function Rekeningen() {
     if (verkopen[bedrijfId]) { setVerkopen((v) => { const k = { ...v }; delete k[bedrijfId]; return k; }); return; }
     const rows = await getBedrijfVerkopen(bedrijfId);
     setVerkopen((v) => ({ ...v, [bedrijfId]: rows }));
+  }
+
+  // Bedrijf aanpassen (naam / BTW / adres / e-mail).
+  async function bewerkBedrijf(b: RekeningBedrijf) {
+    const naam = window.prompt('Naam van het bedrijf:', b.naam);
+    if (naam === null || !naam.trim()) return;
+    const btw = window.prompt('BTW-nummer (leeg = geen):', b.btwNummer ?? '');
+    if (btw === null) return;
+    const adres = window.prompt('Adres (leeg = geen):', b.adres ?? '');
+    if (adres === null) return;
+    const email = window.prompt('E-mail (leeg = geen):', b.email ?? '');
+    if (email === null) return;
+    try {
+      await updateRekeningBedrijf(b.id, { naam: naam.trim(), btwNummer: btw.trim() || null, adres: adres.trim() || null, email: email.trim() || null });
+      await laad();
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Aanpassen mislukt'); }
+  }
+
+  // Personeelslid aanpassen (naam / maandbudget).
+  async function bewerkLid(l: RekeningLid) {
+    const naam = window.prompt('Naam van het personeelslid:', l.naam);
+    if (naam === null || !naam.trim()) return;
+    const budgetTxt = window.prompt('Maandbudget (leeg = geen budget):', l.budget != null ? String(l.budget) : '');
+    if (budgetTxt === null) return;
+    const budget = budgetTxt.trim() ? Number(budgetTxt.replace(',', '.')) : null;
+    try {
+      await updateRekeningLid(l.id, { naam: naam.trim(), budget: budget && budget > 0 ? budget : null });
+      await laad();
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Aanpassen mislukt'); }
+  }
+
+  // Een verkoop verschuiven naar een ander personeelslid (evt. ander bedrijf).
+  async function verplaatsNaar(verkoopId: string, lidId: string) {
+    const doelBedrijf = bedrijven.find((bb) => bb.leden.some((ll) => ll.id === lidId));
+    if (!doelBedrijf) return;
+    try {
+      await verplaatsRekeningVerkoop(verkoopId, doelBedrijf.id, lidId);
+      setVerplaatsId(null);
+      await laad();
+      // ververs alle open verkopen-lijsten
+      for (const bid of Object.keys(verkopen)) {
+        const rows = await getBedrijfVerkopen(bid);
+        setVerkopen((v) => ({ ...v, [bid]: rows }));
+      }
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Verplaatsen mislukt'); }
   }
 
   async function factureer(b: RekeningBedrijf) {
@@ -87,6 +134,7 @@ export function Rekeningen() {
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>
               <div style={{ fontWeight: 700, fontSize: 18, color: (b.openstaand ?? 0) > 0 ? '#b45309' : '#166534' }}>{euro(b.openstaand)}</div>
             </div>
+            <button onClick={() => bewerkBedrijf(b)} style={btnMini}>✎ Bewerken</button>
             <button onClick={() => toonVerkopen(b.id)} style={btnMini}>{verkopen[b.id] ? 'Verberg' : 'Verkopen'}</button>
             <button onClick={() => factureer(b)} disabled={(b.openstaand ?? 0) <= 0} style={{ ...btnBlauw, opacity: (b.openstaand ?? 0) <= 0 ? 0.5 : 1 }}>Factureren</button>
           </div>
@@ -94,7 +142,10 @@ export function Rekeningen() {
           <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
             {b.leden.map((l) => (
               <div key={l.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 10px', opacity: l.actief === false ? 0.5 : 1 }}>
-                <div style={{ fontWeight: 600 }}>{l.naam}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600 }}>{l.naam}</span>
+                  <button onClick={() => bewerkLid(l)} title="Personeelslid aanpassen" style={{ ...btnMini, padding: '2px 7px', fontSize: 12 }}>✎</button>
+                </div>
                 <div style={{ fontSize: 13, color: '#374151' }}>
                   Verbruikt: <strong>{euro(l.verbruikt)}</strong>
                   {l.budget != null && <> / budget {euro(l.budget)}{(l.verbruikt ?? 0) > l.budget && <span style={{ color: 'crimson' }}> ⚠</span>}</>}
@@ -108,7 +159,7 @@ export function Rekeningen() {
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 10, fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #eee' }}>
-                  <th style={{ padding: 4 }}>Datum</th><th style={{ padding: 4 }}>Lid</th><th style={{ padding: 4 }}>Artikels</th><th style={{ padding: 4, textAlign: 'right' }}>Bedrag</th>
+                  <th style={{ padding: 4 }}>Datum</th><th style={{ padding: 4 }}>Lid</th><th style={{ padding: 4 }}>Artikels</th><th style={{ padding: 4, textAlign: 'right' }}>Bedrag</th><th style={{ padding: 4 }} />
                 </tr>
               </thead>
               <tbody>
@@ -118,9 +169,26 @@ export function Rekeningen() {
                     <td style={{ padding: 4 }}>{v.lid ?? '-'}</td>
                     <td style={{ padding: 4, color: '#6b7280' }}>{v.artikels.join(' · ')}</td>
                     <td style={{ padding: 4, textAlign: 'right' }}>{euro(v.totaal)}</td>
+                    <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {verplaatsId === v.id ? (
+                        <>
+                          <select defaultValue="" onChange={(e) => { if (e.target.value) verplaatsNaar(v.id, e.target.value); }} style={{ fontSize: 12, padding: 2 }}>
+                            <option value="">→ naar wie…</option>
+                            {bedrijven.map((bb) => (
+                              <optgroup key={bb.id} label={bb.naam}>
+                                {bb.leden.map((ll) => <option key={ll.id} value={ll.id}>{ll.naam}</option>)}
+                              </optgroup>
+                            ))}
+                          </select>
+                          <button onClick={() => setVerplaatsId(null)} title="Annuleren" style={{ ...btnMini, padding: '2px 7px', fontSize: 12, marginLeft: 4 }}>×</button>
+                        </>
+                      ) : (
+                        <button onClick={() => setVerplaatsId(v.id)} disabled={v.gefactureerd} style={{ ...btnMini, padding: '3px 9px', fontSize: 12 }}>Verplaats</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {verkopen[b.id].length === 0 && <tr><td colSpan={4} style={{ padding: 8, color: '#999' }}>Geen openstaande verkopen.</td></tr>}
+                {verkopen[b.id].length === 0 && <tr><td colSpan={5} style={{ padding: 8, color: '#999' }}>Geen openstaande verkopen.</td></tr>}
               </tbody>
             </table>
           )}

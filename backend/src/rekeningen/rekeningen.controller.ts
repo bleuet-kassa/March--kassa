@@ -55,4 +55,10 @@ export class RekeningenController {
   factureer(@Param('id') id: string) {
     return this.rekeningen.factureer(id);
   }
+
+  // Een verkoop verschuiven naar een andere rekening (bedrijf + lid).
+  @Patch('verkopen/:id/verplaats')
+  verplaatsVerkoop(@Param('id') id: string, @Body() body: { bedrijfId: string; lidId: string }) {
+    return this.rekeningen.verplaatsVerkoop(id, body.bedrijfId, body.lidId);
+  }
 }
