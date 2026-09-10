@@ -41,6 +41,7 @@ export function Verkopen() {
   const stap = useRef(0); // 0 = wacht op D, 1 = D gehad (wacht op +), 2 = + gehad (wacht op Enter)
   useEffect(() => {
     function opToets(e: KeyboardEvent) {
+      console.log('[verwijder-sneltoets]', 'key=', e.key, 'code=', e.code, 'stap=', stap.current);
       const doel = e.target as HTMLElement | null;
       const tag = doel?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // niet tijdens typen
