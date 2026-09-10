@@ -681,7 +681,11 @@ export type RekeningBedrijf = {
   id: string; naam: string; btwNummer?: string | null; adres?: string | null; email?: string | null;
   actief?: boolean; openstaand?: number; leden: RekeningLid[];
 };
-export type RekeningVerkoop = { id: string; datum: string; totaal: number; gefactureerd: boolean; lid: string | null; artikels: string[] };
+export type RekeningVerkoop = {
+  id: string; datum: string; totaal: number; gefactureerd: boolean; geannuleerd?: boolean;
+  lid: string | null; lidId?: string | null; artikels: string[];
+  lijnen?: { naam: string; aantal: number; eenheidsprijs: number; totaal: number }[]; // lijndetail
+};
 
 export async function getRekeningenKassa(): Promise<RekeningBedrijf[]> {
   return (await fetch(`${BASE}/rekeningen/kassa`)).json();
@@ -701,8 +705,16 @@ export async function nieuwRekeningLid(input: { bedrijfId: string; naam: string;
 export async function updateRekeningLid(id: string, input: any): Promise<RekeningLid> {
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/leden/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
 }
-export async function getBedrijfVerkopen(id: string): Promise<RekeningVerkoop[]> {
-  return (await fetch(`${BASE}/rekeningen/bedrijven/${id}/verkopen`)).json();
+// Verkopen op rekening van een bedrijf. Standaard enkel de openstaande; met
+// alle=true ook het verleden (gefactureerd), optioneel per periode en personeelslid.
+export async function getBedrijfVerkopen(id: string, opties: { alle?: boolean; van?: string; tot?: string; lidId?: string } = {}): Promise<RekeningVerkoop[]> {
+  const q = new URLSearchParams();
+  if (opties.alle) q.set('alle', '1');
+  if (opties.van) q.set('van', opties.van);
+  if (opties.tot) q.set('tot', opties.tot);
+  if (opties.lidId) q.set('lidId', opties.lidId);
+  const qs = q.toString();
+  return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/verkopen${qs ? '?' + qs : ''}`));
 }
 export async function factureerBedrijf(id: string): Promise<{ aantal: number; totaal: number }> {
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/factureer`, { method: 'POST' }));

@@ -87,18 +87,36 @@ export class RekeningenService {
     }));
   }
 
-  // Alle verkopen van een bedrijf (standaard enkel de openstaande).
-  async verkopen(bedrijfId: string, alleen = true) {
+  // Verkopen van een bedrijf. Standaard enkel de openstaande (nog niet
+  // gefactureerde); met alleenOpen=false ook het verleden (gefactureerd), en
+  // optioneel binnen een periode ("tot" is exclusief: geef de dag erna door) en
+  // per personeelslid. Met lijndetail, zodat je achteraf alles kan nakijken.
+  async verkopen(bedrijfId: string, opties: { alleenOpen?: boolean; van?: Date; tot?: Date; lidId?: string } = {}) {
+    const alleenOpen = opties.alleenOpen ?? true;
+    const datum: { gte?: Date; lt?: Date } = {};
+    if (opties.van) datum.gte = opties.van;
+    if (opties.tot) datum.lt = opties.tot;
     const rows = await this.prisma.verkoop.findMany({
-      where: { rekeningBedrijfId: bedrijfId, ...(alleen ? { gefactureerd: false } : {}) },
+      where: {
+        rekeningBedrijfId: bedrijfId,
+        ...(alleenOpen ? { gefactureerd: false } : {}),
+        ...(opties.lidId ? { rekeningLidId: opties.lidId } : {}),
+        ...(opties.van || opties.tot ? { datum } : {}),
+      },
       include: { rekeningLid: true, lijnen: { include: { product: true } } },
       orderBy: { datum: 'desc' },
-      take: 500,
+      take: 1000,
     });
     return rows.map((v) => ({
-      id: v.id, datum: v.datum, totaal: Number(v.totaal), gefactureerd: v.gefactureerd,
-      lid: v.rekeningLid?.naam ?? null,
+      id: v.id, datum: v.datum, totaal: Number(v.totaal), gefactureerd: v.gefactureerd, geannuleerd: v.geannuleerd,
+      lid: v.rekeningLid?.naam ?? null, lidId: v.rekeningLidId ?? null,
       artikels: v.lijnen.map((l) => `${Number(l.aantal)}× ${l.product.naam}`),
+      lijnen: v.lijnen.map((l) => ({
+        naam: l.product.naam,
+        aantal: Number(l.aantal),
+        eenheidsprijs: Number(l.eenheidsprijs),
+        totaal: l.lijnTotaal != null ? Number(l.lijnTotaal) : Math.round(Number(l.eenheidsprijs) * Number(l.aantal) * 100) / 100,
+      })),
     }));
   }
 

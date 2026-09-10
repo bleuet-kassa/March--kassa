@@ -1506,14 +1506,16 @@ function filterKnop(actief: boolean): CSSProperties {
 }
 
 // Ticket met BTW-uitsplitsing, betaalwijze en (bij cash) teruggave.
-export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop' }: { ticket: TicketData; onNieuw: () => void; nieuwLabel?: string }) {
+export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop', autoPrint = true }: { ticket: TicketData; onNieuw: () => void; nieuwLabel?: string; autoPrint?: boolean }) {
   // Druk het ticket automatisch af zodra de verkoop klaar is (bonprinter).
-  // Uit te zetten met localStorage 'kassa.autoprint' = 'uit'.
+  // Uit te zetten met localStorage 'kassa.autoprint' = 'uit', of per gebruik
+  // met autoPrint={false} (bv. enkel bekijken, zoals bij de rekeningen).
   useEffect(() => {
+    if (!autoPrint) return;
     if (localStorage.getItem('kassa.autoprint') === 'uit') return;
     const t = setTimeout(() => { try { window.print(); } catch { /* geen printer */ } }, 300);
     return () => clearTimeout(t);
-  }, []);
+  }, [autoPrint]);
 
   const betaalLabel = betaalNaam(ticket.betaalwijze);
   return (

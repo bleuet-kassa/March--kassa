@@ -19,10 +19,12 @@
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/serve-static": "^4.0.0",
     "@prisma/client": "^5.0.0",
+    "@types/web-push": "^3.6.4",
     "bcryptjs": "^2.4.3",
     "pdf-parse": "^1.1.1",
     "reflect-metadata": "^0.2.0",
-    "rxjs": "^7.8.0"
+    "rxjs": "^7.8.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

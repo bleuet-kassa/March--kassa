@@ -2,11 +2,22 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getRekeningOverzicht, nieuwRekeningBedrijf, nieuwRekeningLid,
   updateRekeningBedrijf, updateRekeningLid, verplaatsRekeningVerkoop,
-  getBedrijfVerkopen, factureerBedrijf,
-  type RekeningBedrijf, type RekeningLid, type RekeningVerkoop,
+  getBedrijfVerkopen, factureerBedrijf, getTicket,
+  type RekeningBedrijf, type RekeningLid, type RekeningVerkoop, type Ticket,
 } from '../api/client';
+import { TicketWeergave } from './Kassa';
 
 const euro = (n: number | null | undefined) => '€ ' + Number(n ?? 0).toFixed(2);
+
+// Filter op de verkopenlijst van een bedrijf: enkel openstaand (standaard) of
+// ook het verleden (gefactureerd), binnen een periode en optioneel per lid.
+type Filter = { alle: boolean; van: string; tot: string; lidId: string };
+const standaardFilter = (): Filter => {
+  const nu = new Date();
+  const van = new Date(nu.getFullYear(), nu.getMonth() - 3, 1); // laatste 3 maanden
+  const dag = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { alle: false, van: dag(van), tot: dag(nu), lidId: '' };
+};
 
 // Lopende rekeningen: bedrijven met personeelsleden die "op rekening" kopen.
 // Overzicht van het openstaande bedrag per bedrijf en per lid, met een
@@ -20,6 +31,9 @@ export function Rekeningen() {
   const [nieuwEmail, setNieuwEmail] = useState('');
   const [verkopen, setVerkopen] = useState<Record<string, RekeningVerkoop[]>>({});
   const [verplaatsId, setVerplaatsId] = useState<string | null>(null); // verkoop die verschoven wordt
+  const [filters, setFilters] = useState<Record<string, Filter>>({}); // filter per bedrijf
+  const [detail, setDetail] = useState<Ticket | null>(null); // volledig ticket van één verkoop
+  const [laadBezig, setLaadBezig] = useState<string | null>(null); // bedrijf waarvan de lijst laadt
 
   async function laad() { setBedrijven(await getRekeningOverzicht()); }
   useEffect(() => { laad().catch((e) => setFout(String(e))); }, []);
@@ -45,10 +59,33 @@ export function Rekeningen() {
     } catch (e) { setFout(e instanceof Error ? e.message : 'Toevoegen mislukt'); }
   }
 
+  // Verkopen van een bedrijf laden volgens het (huidige) filter.
+  async function laadVerkopen(bedrijfId: string, f?: Filter) {
+    const filter = f ?? filters[bedrijfId] ?? standaardFilter();
+    setLaadBezig(bedrijfId); setFout('');
+    try {
+      const rows = await getBedrijfVerkopen(bedrijfId, filter.alle
+        ? { alle: true, van: filter.van || undefined, tot: filter.tot || undefined, lidId: filter.lidId || undefined }
+        : { lidId: filter.lidId || undefined });
+      setVerkopen((v) => ({ ...v, [bedrijfId]: rows }));
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt'); }
+    finally { setLaadBezig(null); }
+  }
+  function zetFilter(bedrijfId: string, wijziging: Partial<Filter>) {
+    const nieuw = { ...(filters[bedrijfId] ?? standaardFilter()), ...wijziging };
+    setFilters((f) => ({ ...f, [bedrijfId]: nieuw }));
+    laadVerkopen(bedrijfId, nieuw);
+  }
   async function toonVerkopen(bedrijfId: string) {
     if (verkopen[bedrijfId]) { setVerkopen((v) => { const k = { ...v }; delete k[bedrijfId]; return k; }); return; }
-    const rows = await getBedrijfVerkopen(bedrijfId);
-    setVerkopen((v) => ({ ...v, [bedrijfId]: rows }));
+    if (!filters[bedrijfId]) setFilters((f) => ({ ...f, [bedrijfId]: standaardFilter() }));
+    await laadVerkopen(bedrijfId);
+  }
+  // Volledig ticket (alle lijnen, prijzen, BTW) van één verkoop bekijken.
+  async function toonDetail(id: string) {
+    setFout('');
+    try { setDetail(await getTicket(id)); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Ticket ophalen mislukt'); }
   }
 
   // Bedrijf aanpassen (naam / BTW / adres / e-mail).
@@ -106,6 +143,11 @@ export function Rekeningen() {
 
   const totaalOpenstaand = bedrijven.reduce((s, b) => s + (b.openstaand ?? 0), 0);
 
+  // Detail van één verkoop: het volledige ticket (zonder automatisch afdrukken).
+  if (detail) {
+    return <TicketWeergave ticket={detail} autoPrint={false} onNieuw={() => setDetail(null)} nieuwLabel="← Terug naar de rekeningen" />;
+  }
+
   return (
     <div style={{ maxWidth: 860 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
@@ -155,43 +197,100 @@ export function Rekeningen() {
             <button onClick={() => voegLidToe(b.id)} style={{ ...btnMini, border: '1px dashed #94a3b8', color: '#2563eb' }}>+ Personeelslid</button>
           </div>
 
-          {verkopen[b.id] && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 10, fontSize: 13 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #eee' }}>
-                  <th style={{ padding: 4 }}>Datum</th><th style={{ padding: 4 }}>Lid</th><th style={{ padding: 4 }}>Artikels</th><th style={{ padding: 4, textAlign: 'right' }}>Bedrag</th><th style={{ padding: 4 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {verkopen[b.id].map((v) => (
-                  <tr key={v.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                    <td style={{ padding: 4 }}>{new Date(v.datum).toLocaleString('nl-BE')}</td>
-                    <td style={{ padding: 4 }}>{v.lid ?? '-'}</td>
-                    <td style={{ padding: 4, color: '#6b7280' }}>{v.artikels.join(' · ')}</td>
-                    <td style={{ padding: 4, textAlign: 'right' }}>{euro(v.totaal)}</td>
-                    <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {verplaatsId === v.id ? (
-                        <>
-                          <select defaultValue="" onChange={(e) => { if (e.target.value) verplaatsNaar(v.id, e.target.value); }} style={{ fontSize: 12, padding: 2 }}>
-                            <option value="">→ naar wie…</option>
-                            {bedrijven.map((bb) => (
-                              <optgroup key={bb.id} label={bb.naam}>
-                                {bb.leden.map((ll) => <option key={ll.id} value={ll.id}>{ll.naam}</option>)}
-                              </optgroup>
-                            ))}
-                          </select>
-                          <button onClick={() => setVerplaatsId(null)} title="Annuleren" style={{ ...btnMini, padding: '2px 7px', fontSize: 12, marginLeft: 4 }}>×</button>
-                        </>
-                      ) : (
-                        <button onClick={() => setVerplaatsId(v.id)} disabled={v.gefactureerd} style={{ ...btnMini, padding: '3px 9px', fontSize: 12 }}>Verplaats</button>
+          {verkopen[b.id] && (() => {
+            const f = filters[b.id] ?? standaardFilter();
+            const rows = verkopen[b.id];
+            const som = (rs: RekeningVerkoop[]) => rs.reduce((s, v) => s + v.totaal, 0);
+            const actief = rows.filter((v) => !v.geannuleerd);
+            const open = actief.filter((v) => !v.gefactureerd);
+            const gefact = actief.filter((v) => v.gefactureerd);
+            return (
+              <div style={{ marginTop: 10 }}>
+                {/* Filter: enkel openstaand, of ook het verleden (gefactureerd) binnen een periode / per lid */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, marginBottom: 6 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={f.alle} onChange={(e) => zetFilter(b.id, { alle: e.target.checked })} />
+                    Ook gefactureerde (verleden)
+                  </label>
+                  {f.alle && (
+                    <>
+                      <span style={{ color: '#6b7280' }}>van</span>
+                      <input type="date" value={f.van} onChange={(e) => zetFilter(b.id, { van: e.target.value })} style={{ ...inp, padding: 4, fontSize: 13 }} />
+                      <span style={{ color: '#6b7280' }}>tot</span>
+                      <input type="date" value={f.tot} onChange={(e) => zetFilter(b.id, { tot: e.target.value })} style={{ ...inp, padding: 4, fontSize: 13 }} />
+                    </>
+                  )}
+                  <select value={f.lidId} onChange={(e) => zetFilter(b.id, { lidId: e.target.value })} style={{ ...inp, padding: 4, fontSize: 13 }}>
+                    <option value="">Alle personeelsleden</option>
+                    {b.leden.map((l) => <option key={l.id} value={l.id}>{l.naam}</option>)}
+                  </select>
+                  {laadBezig === b.id && <span style={{ color: '#6b7280' }}>Laden…</span>}
+                </div>
+                {/* Op smartphone scrolt de tabel horizontaal binnen deze kader */}
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 560 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #eee' }}>
+                        <th style={{ padding: 4 }}>Datum</th><th style={{ padding: 4 }}>Lid</th><th style={{ padding: 4 }}>Artikels</th><th style={{ padding: 4 }}>Status</th><th style={{ padding: 4, textAlign: 'right' }}>Bedrag</th><th style={{ padding: 4 }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((v) => (
+                        <tr key={v.id} style={{ borderBottom: '1px solid #f5f5f5', opacity: v.geannuleerd ? 0.55 : 1 }}>
+                          <td style={{ padding: 4, whiteSpace: 'nowrap' }}>{new Date(v.datum).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                          <td style={{ padding: 4 }}>{v.lid ?? '-'}</td>
+                          <td style={{ padding: 4, color: '#6b7280' }}>{v.artikels.join(' · ')}</td>
+                          <td style={{ padding: 4, whiteSpace: 'nowrap' }}>
+                            {v.geannuleerd
+                              ? <span style={{ color: '#b91c1c', fontWeight: 600 }}>Geannuleerd</span>
+                              : v.gefactureerd
+                                ? <span style={{ color: '#166534' }}>Gefactureerd</span>
+                                : <span style={{ color: '#b45309', fontWeight: 600 }}>Open</span>}
+                          </td>
+                          <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap', textDecoration: v.geannuleerd ? 'line-through' : 'none' }}>{euro(v.totaal)}</td>
+                          <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button onClick={() => toonDetail(v.id)} title="Volledig ticket bekijken" style={{ ...btnMini, padding: '3px 9px', fontSize: 12 }}>Detail</button>
+                            {verplaatsId === v.id ? (
+                              <>
+                                <select defaultValue="" onChange={(e) => { if (e.target.value) verplaatsNaar(v.id, e.target.value); }} style={{ fontSize: 12, padding: 2, marginLeft: 4 }}>
+                                  <option value="">→ naar wie…</option>
+                                  {bedrijven.map((bb) => (
+                                    <optgroup key={bb.id} label={bb.naam}>
+                                      {bb.leden.map((ll) => <option key={ll.id} value={ll.id}>{ll.naam}</option>)}
+                                    </optgroup>
+                                  ))}
+                                </select>
+                                <button onClick={() => setVerplaatsId(null)} title="Annuleren" style={{ ...btnMini, padding: '2px 7px', fontSize: 12, marginLeft: 4 }}>×</button>
+                              </>
+                            ) : (
+                              !v.gefactureerd && !v.geannuleerd && (
+                                <button onClick={() => setVerplaatsId(v.id)} style={{ ...btnMini, padding: '3px 9px', fontSize: 12, marginLeft: 4 }}>Verplaats</button>
+                              )
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {rows.length === 0 && (
+                        <tr><td colSpan={6} style={{ padding: 8, color: '#999' }}>{f.alle ? 'Geen verkopen in deze periode.' : 'Geen openstaande verkopen.'}</td></tr>
                       )}
-                    </td>
-                  </tr>
-                ))}
-                {verkopen[b.id].length === 0 && <tr><td colSpan={5} style={{ padding: 8, color: '#999' }}>Geen openstaande verkopen.</td></tr>}
-              </tbody>
-            </table>
-          )}
+                    </tbody>
+                    {rows.length > 0 && (
+                      <tfoot>
+                        <tr style={{ borderTop: '2px solid #e5e7eb', fontWeight: 600 }}>
+                          <td colSpan={4} style={{ padding: 4 }}>
+                            {actief.length} verkopen
+                            {f.alle && <span style={{ fontWeight: 400, color: '#6b7280' }}> · open {euro(som(open))} · gefactureerd {euro(som(gefact))}</span>}
+                          </td>
+                          <td style={{ padding: 4, textAlign: 'right' }}>{euro(som(actief))}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ))}
       {bedrijven.length === 0 && <p style={{ color: '#999' }}>Nog geen bedrijven. Voeg er hierboven een toe.</p>}
