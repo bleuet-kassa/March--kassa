@@ -1,8 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getScradaStatus, getScradaOpenstaande, getScradaPreview,
-  scradaVerstuurEen, scradaVerstuurAlles,
-  type ScradaStatus, type OpenstaandeVerkoop, type ScradaFactuur,
+  scradaVerstuurEen, scradaVerstuurAlles, getScradaVerbinding,
+  type ScradaStatus, type OpenstaandeVerkoop, type ScradaFactuur, type ScradaConfig, type ScradaVerbinding,
 } from '../api/client';
 
 // Boekhouding (Fase 3): verkopen "Scrada-klaar" doorsturen (facturen/kasboek/
@@ -13,10 +13,21 @@ export function Boekhouding() {
   const [preview, setPreview] = useState<ScradaFactuur | null>(null);
   const [melding, setMelding] = useState('');
   const [bezig, setBezig] = useState(false);
+  const [config, setConfig] = useState<ScradaConfig | null>(null); // welke instellingen op de server staan
+  const [verbinding, setVerbinding] = useState<ScradaVerbinding | null>(null);
 
   async function laad() {
-    setStatus(await getScradaStatus());
+    const s = await getScradaStatus();
+    setStatus(s);
+    setConfig(s.geconfigureerd ?? null);
     setOpen(await getScradaOpenstaande());
+  }
+  // Test of Scrada de API-sleutel/wachtwoord/bedrijf aanvaardt (verstuurt niets).
+  async function testVerbinding() {
+    setBezig(true); setVerbinding(null);
+    try { setVerbinding(await getScradaVerbinding()); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Test mislukt'); }
+    finally { setBezig(false); }
   }
   useEffect(() => { laad(); }, []);
 
@@ -51,13 +62,33 @@ export function Boekhouding() {
               background: status.modus === 'live' ? '#dcfce7' : '#fef3c7',
               color: status.modus === 'live' ? '#166534' : '#92400e',
             }}>
-              {status.modus === 'live' ? '● Live (Scrada gekoppeld)' : '● Testmodus (geen API-sleutel)'}
+              {status.modus === 'live'
+                ? `● Gekoppeld${config?.test ? ' met de Scrada-TESTomgeving' : ' (Scrada live)'}`
+                : '● Nog niet gekoppeld (dry-run)'}
             </span>
-            <div style={{ marginTop: 10, display: 'flex', gap: 16, fontSize: 14 }}>
+            {/* Welke serverinstellingen ontbreken (waarden zelf worden nooit getoond) */}
+            {config && status.modus !== 'live' && (
+              <div style={{ marginTop: 8, fontSize: 13, color: '#92400e' }}>
+                Ontbreekt op de server:{' '}
+                {[!config.sleutel && 'SCRADA_API_KEY', !config.wachtwoord && 'SCRADA_API_PASSWORD', !config.bedrijf && 'SCRADA_COMPANY_ID'].filter(Boolean).join(', ') || '—'}
+                {' '}· server: {config.basis}
+              </div>
+            )}
+            <div style={{ marginTop: 10, display: 'flex', gap: 16, fontSize: 14, flexWrap: 'wrap', alignItems: 'center' }}>
               <span>Nog te versturen: <strong>{status.NIET_VERSTUURD}</strong></span>
               <span style={{ color: '#166534' }}>Verstuurd: {status.VERSTUURD}</span>
               {status.FOUT > 0 && <span style={{ color: 'crimson' }}>Fout: {status.FOUT}</span>}
+              <button onClick={testVerbinding} disabled={bezig} style={{ padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+                Verbinding testen
+              </button>
             </div>
+            {verbinding && (
+              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: verbinding.ok ? '#166534' : 'crimson' }}>
+                {verbinding.ok
+                  ? `✔ Verbinding OK${verbinding.bedrijf ? ` — onderneming in Scrada: ${verbinding.bedrijf}` : ''}`
+                  : `✖ ${verbinding.melding ?? 'Verbinding mislukt'}`}
+              </div>
+            )}
           </div>
         )}
 

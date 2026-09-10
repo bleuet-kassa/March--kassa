@@ -566,8 +566,15 @@ export type OpenstaandeVerkoop = {
   klant: { naam: string } | null;
 };
 
-export async function getScradaStatus(): Promise<ScradaStatus> {
+export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig }> {
   return (await fetch(`${BASE}/scrada/status`)).json();
+}
+// Welke Scrada-instellingen op de server aanwezig zijn (nooit de waarden zelf).
+export type ScradaConfig = { sleutel: boolean; wachtwoord: boolean; bedrijf: boolean; basis: string; test: boolean };
+export type ScradaVerbinding = { ok: boolean; modus: string; geconfigureerd: ScradaConfig; status?: number; bedrijf?: string | null; melding?: string };
+// Test de verbinding met Scrada (API-sleutel/wachtwoord/bedrijf) — enkel beheerder.
+export async function getScradaVerbinding(): Promise<ScradaVerbinding> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/verbinding`));
 }
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();
