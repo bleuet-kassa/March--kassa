@@ -210,30 +210,70 @@ export class DagafsluitingService {
     });
   }
 
-  // Herbouwt het rapport van een bewaarde afsluiting (om opnieuw te bekijken/printen).
+  // Toont een bewaarde afsluiting ONVERANDERLIJK: exact de cijfers die bij het
+  // afsluiten geregistreerd werden (totaal, per betaalwijze, per BTW-tarief).
+  // Zo verandert een reeds officieel geregistreerde dagontvangst nooit meer,
+  // ook niet na latere codewijzigingen. Enkel de categorie-uitsplitsing en het
+  // "eigen gebruik" (louter informatief, niet-officieel) worden herberekend.
   async rapport(id: string) {
     const a = await this.prisma.dagafsluiting.findUnique({
       where: { id },
       include: { onderneming: true, locatie: true, gebruiker: true },
     });
     if (!a) throw new NotFoundException('Afsluiting niet gevonden.');
+
+    const perBetaalwijze = ((a.perBetaalwijze as unknown) as Record<string, number>) ?? {};
+    const perBtwTarief = ((a.perBtwTarief as unknown) as { percentage: number; maatstaf: number; btw: number }[]) ?? [];
+    const totaalBtw = r2(perBtwTarief.reduce((s, t) => s + Number(t.btw), 0));
+    const totaalExcl = r2(perBtwTarief.reduce((s, t) => s + Number(t.maatstaf), 0));
+    const totaalIncl = Number(a.totaal);
+
+    // Niet-officiële extra's (informatief) herberekenen uit de gekoppelde verkopen.
     const verkopen = (await this.prisma.verkoop.findMany({
       where: { dagafsluitingId: id },
       include: LIJN_INCLUDE,
       orderBy: { datum: 'asc' },
     })) as VerkoopVol[];
+    const perCat = new Map<string, number>();
+    let eigenAantal = 0, eigenIncl = 0;
+    for (const v of verkopen) {
+      if (v.betaalwijze === 'EIGEN_REKENING') {
+        eigenAantal++;
+        eigenIncl += this.lijnBedragen(v).incl;
+        continue;
+      }
+      for (const l of v.lijnen) {
+        const cat = l.product.categorie?.naam ?? 'Overig';
+        perCat.set(cat, (perCat.get(cat) ?? 0) + r2(Number(l.eenheidsprijs) * Number(l.aantal)));
+      }
+    }
+    const perCategorie = [...perCat.entries()]
+      .map(([categorie, omzetIncl]) => ({ categorie, omzetIncl: r2(omzetIncl) }))
+      .sort((x, y) => y.omzetIncl - x.omzetIncl);
+
     return {
       id: a.id,
-      ...this.bouwRapport(verkopen, {
-        volgnummer: a.volgnummer,
-        vanaf: a.vanaf,
-        tot: a.tot,
-        verkoper: a.gebruiker?.naam ?? null,
-        onderneming: a.onderneming
-          ? { naam: a.onderneming.naam, ondernemingsnummer: a.onderneming.ondernemingsnummer, btwNummer: a.onderneming.btwNummer, adres: a.onderneming.adres }
-          : null,
-        locatie: a.locatie.naam,
-      }),
+      volgnummer: a.volgnummer,
+      onderneming: a.onderneming
+        ? { naam: a.onderneming.naam, ondernemingsnummer: a.onderneming.ondernemingsnummer, btwNummer: a.onderneming.btwNummer, adres: a.onderneming.adres }
+        : null,
+      locatie: a.locatie.naam,
+      verkoper: a.gebruiker?.naam ?? null,
+      vanaf: a.vanaf,
+      tot: a.tot,
+      dagontvangsten: {
+        aantal: a.aantalVerkopen,
+        perBetaalwijze,
+        perBtwTarief,
+        perCategorie,
+        totaalExcl,
+        totaalBtw,
+        totaalIncl,
+      },
+      eigenGebruik: { aantal: eigenAantal, incl: r2(eigenIncl) },
+      facturen: [] as { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[],
+      facturenTotaal: { aantal: 0, excl: 0, btw: 0, incl: 0 },
+      algemeenTotaalIncl: totaalIncl,
     };
   }
 

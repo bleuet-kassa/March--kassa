@@ -18,6 +18,9 @@ function betaalNaam(b?: string | null): string {
     case 'QR': return 'QR-code';
     case 'EIGEN_REKENING': return 'Eigen rekening';
     case 'OP_REKENING': return 'Op rekening';
+    // Oudere afsluitingen bewaarden 'op rekening'-verkopen onder de sleutel ONBEKEND;
+    // dit is enkel een labelweergave — de geregistreerde bedragen blijven ongewijzigd.
+    case 'ONBEKEND': return 'Op rekening';
     case 'ONLINE': return 'Online';
     default: return b ?? '—';
   }
