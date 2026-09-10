@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
-  getVerkopen, getTicket, annuleerVerkoop, wijzigVerkoopBetaalwijze,
+  getVerkopen, getTicket, annuleerVerkoop, wijzigVerkoopBetaalwijze, verwijderVerkoop,
   type VerkoopKort, type Ticket, type Betaalwijze,
 } from '../api/client';
 import { TicketWeergave } from './Kassa';
@@ -53,6 +53,24 @@ export function Verkopen() {
     setBezig(true); setFout('');
     try { await annuleerVerkoop(v.id, reden || undefined); await laad(); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Annuleren mislukt'); }
+    finally { setBezig(false); }
+  }
+
+  // Verkoop definitief verwijderen (harde delete). Enkel de beheerder, met wachtwoord.
+  async function verwijder(v: VerkoopKort) {
+    const waarschuwing = v.afgesloten
+      ? '\n\n⚠ Deze verkoop zit in een AFGESLOTEN dagafsluiting (reeds officieel geregistreerd). Het bewaarde dagafsluitingsrapport blijft ongewijzigd, maar de verkoop zelf verdwijnt.'
+      : '';
+    if (!window.confirm(
+      `Verkoop van ${euro(v.totaal)} DEFINITIEF verwijderen?\n\n` +
+      'Dit kan niet ongedaan gemaakt worden.' + waarschuwing + '\n\n' +
+      'Heb je deze wijziging ook in Scrada doorgevoerd? Klik OK om te bevestigen.',
+    )) return;
+    const wachtwoord = window.prompt('Beheerderswachtwoord om het verwijderen te bevestigen:');
+    if (!wachtwoord) return;
+    setBezig(true); setFout('');
+    try { await verwijderVerkoop(v.id, wachtwoord); await laad(); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
     finally { setBezig(false); }
   }
 
@@ -137,6 +155,7 @@ export function Verkopen() {
                       : <button onClick={() => annuleer(v)} disabled={bezig} style={btnRood}>Annuleren</button>}
                   </>
                 )}
+                <button onClick={() => verwijder(v)} disabled={bezig} title="Verkoop definitief verwijderen (enkel beheerder, met wachtwoord)" style={btnVerwijder}>Verwijderen</button>
               </td>
             </tr>
             );
@@ -153,3 +172,4 @@ const btnGrijs: CSSProperties = { padding: '7px 12px', border: '1px solid #cbd5e
 const btnGrijsMini: CSSProperties = { marginLeft: 8, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13 };
 const btnBlauw: CSSProperties = { padding: '6px 12px', border: 'none', borderRadius: 6, background: '#2563eb', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 13 };
 const btnRood: CSSProperties = { marginLeft: 8, padding: '6px 10px', border: '1px solid #b91c1c', borderRadius: 6, background: '#fff', color: '#b91c1c', cursor: 'pointer', fontWeight: 600, fontSize: 13 };
+const btnVerwijder: CSSProperties = { marginLeft: 8, padding: '6px 10px', border: 'none', borderRadius: 6, background: '#b91c1c', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 13 };

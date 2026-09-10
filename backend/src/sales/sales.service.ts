@@ -322,6 +322,40 @@ export class SalesService {
     return this.metTicket(bij);
   }
 
+  // Verwijdert een verkoop volledig uit het systeem (harde delete). Enkel de
+  // beheerder mag dit (wachtwoord). Mag ook voor een reeds afgesloten verkoop:
+  // het reeds geregistreerde dagafsluitingsrapport blijft ongewijzigd (dat toont
+  // een bewaarde momentopname), maar de onderliggende verkoop verdwijnt. De
+  // beheerder past de wijziging dan ook in Scrada aan.
+  async verwijder(id: string, wachtwoord: string) {
+    await this.beheerderCheck(wachtwoord);
+    const verkoop = await this.prisma.verkoop.findUnique({
+      where: { id },
+      include: { lijnen: { include: { product: true } } },
+    });
+    if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
+
+    return this.prisma.$transaction(async (tx) => {
+      // Voorraad terugboeken, maar enkel als de verkoop nog NIET geannuleerd was
+      // (bij een annulatie is de stock al teruggeboekt — anders zou hij dubbel tellen).
+      if (!verkoop.geannuleerd) {
+        for (const l of verkoop.lijnen) {
+          if (l.product?.vrijePrijs) continue;
+          if (!verkoop.locatieId) continue;
+          await tx.voorraad.upsert({
+            where: { productId_locatieId: { productId: l.productId, locatieId: verkoop.locatieId } },
+            create: { productId: l.productId, locatieId: verkoop.locatieId, aantal: new Prisma.Decimal(Number(l.aantal)) },
+            update: { aantal: { increment: Number(l.aantal) } },
+          });
+        }
+      }
+      // Betalingen verdwijnen via cascade; de lijnen hebben geen cascade en wissen we zelf.
+      await tx.verkoopLijn.deleteMany({ where: { verkoopId: id } });
+      await tx.verkoop.delete({ where: { id } });
+      return { ok: true, id };
+    });
+  }
+
   // Haalt een bestaande verkoop op om het ticket opnieuw te tonen/printen.
   async ticket(id: string) {
     const verkoop = await this.prisma.verkoop.findUnique({

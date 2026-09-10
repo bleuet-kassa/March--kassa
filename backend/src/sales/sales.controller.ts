@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Betaalwijze } from '@prisma/client';
 import { SalesService, AfrekenInput } from './sales.service';
 
@@ -35,5 +35,11 @@ export class SalesController {
   @Patch(':id/betaalwijze')
   wijzigBetaalwijze(@Param('id') id: string, @Body() body: { betaalwijze: Betaalwijze; wachtwoord: string }) {
     return this.sales.wijzigBetaalwijze(id, body.betaalwijze, body.wachtwoord);
+  }
+
+  // DELETE /verkopen/:id  -> verkoop volledig verwijderen (enkel beheerder, met wachtwoord)
+  @Delete(':id')
+  verwijder(@Param('id') id: string, @Body() body: { wachtwoord: string }) {
+    return this.sales.verwijder(id, body?.wachtwoord);
   }
 }

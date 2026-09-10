@@ -110,6 +110,12 @@ export async function wijzigVerkoopBetaalwijze(id: string, betaalwijze: Betaalwi
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ betaalwijze, wachtwoord }),
   }));
 }
+// Een verkoop volledig verwijderen (harde delete, enkel beheerder met wachtwoord).
+export async function verwijderVerkoop(id: string, wachtwoord: string): Promise<{ ok: true; id: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkopen/${id}`, {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wachtwoord }),
+  }));
+}
 
 // --- Auth (verkoper) ---
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean };
