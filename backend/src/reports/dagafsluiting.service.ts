@@ -41,7 +41,9 @@ export class DagafsluitingService {
     const perTarief = new Map<string, { percentage: number; maatstaf: number; btw: number }>();
     for (const l of v.lijnen) {
       const pct = Number(l.btwPercentage);
-      const lijnIncl = Number(l.eenheidsprijs) * Number(l.aantal);
+      // Per lijn op de cent afronden (zoals bij de verkoop zelf), anders wijken
+      // fractie-centen (bv. bij weegproducten) af van het echt betaalde dagtotaal.
+      const lijnIncl = r2(Number(l.eenheidsprijs) * Number(l.aantal));
       const lijnBtw = Number(l.btwBedrag);
       incl += lijnIncl;
       btw += lijnBtw;
@@ -101,7 +103,7 @@ export class DagafsluitingService {
       }
       for (const l of v.lijnen) {
         const cat = l.product.categorie?.naam ?? 'Overig';
-        perCat.set(cat, (perCat.get(cat) ?? 0) + Number(l.eenheidsprijs) * Number(l.aantal));
+        perCat.set(cat, (perCat.get(cat) ?? 0) + r2(Number(l.eenheidsprijs) * Number(l.aantal)));
       }
     }
 
