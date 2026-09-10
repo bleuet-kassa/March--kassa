@@ -36,11 +36,12 @@ export type AfrekenInput = {
 const naarCent = (n: number) => Math.round(n * 100);
 const naarEuro = (c: number) => c / 100;
 
-// Rondt een bedrag (in centen) naar boven af op 10 cent — op de grootte, zodat
-// een retour (negatief) symmetrisch afrondt. Bv. 447 -> 450, -447 -> -450.
-const naarBoven10 = (cent: number) => {
+// Rondt een bedrag (in centen) naar boven af op een stap (bv. 5 cent of 100 =
+// hele euro) — op de grootte, zodat een retour (negatief) symmetrisch afrondt.
+// Bv. naarBoven(447, 5) -> 450, naarBoven(-442, 5) -> -445, naarBoven(2347, 100) -> 2400.
+const naarBoven = (cent: number, stap: number) => {
   const teken = cent < 0 ? -1 : 1;
-  return teken * Math.ceil(Math.abs(cent) / 10) * 10;
+  return teken * Math.ceil(Math.abs(cent) / stap) * stap;
 };
 
 @Injectable()
@@ -110,16 +111,23 @@ export class SalesService {
       // "Diversen"/vrij-bedrag: enkel producten met vrijePrijs mogen een eigen
       // bedrag meesturen (kassier tikt het in). Anders altijd de vaste prijs.
       const vrij = product.vrijePrijs && Number(l.bedrag) > 0;
+      const isKg = product.eenheid === 'KG';
+      const isCadeaubon = product.interneCode === 'CADEAU';
+      const aanKassa = (kanaal ?? 'KASSA') === 'KASSA';
       let stukCent = vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
-      // Afronding op 10 cent naar boven op de VERKOOPPRIJS zelf (geen extra bedrag),
-      // enkel aan de kassa (niet in de webshop, waar de klant de catalogusprijs ziet).
-      // Stukproduct: stukprijs · weegproduct: prijs/kg · diversen: ingetikt bedrag.
-      if ((kanaal ?? 'KASSA') === 'KASSA') stukCent = naarBoven10(stukCent);
+      // Afronding naar boven aan de kassa (geen extra bedrag; niet in de webshop):
+      //  - cadeaubon: op hele euro (nooit centen)
+      //  - stukproduct/diversen: op 5 cent, op de stukprijs
+      //  - weegproduct: op 5 cent, maar op het gewogen lijntotaal (zie hieronder)
+      if (aanKassa && isCadeaubon) stukCent = naarBoven(stukCent, 100);
+      else if (aanKassa && !isKg) stukCent = naarBoven(stukCent, 5);
       const aantal = l.aantal; // bedrag is de stukprijs; aantal telt (ook bij diversen)
       // Eerst de lijnkorting, dan de verkoopbrede korting (gestapeld).
       const naLijnKortingCent = stukCent * (1 - korting / 100);
       const effUnitCent = Math.round(naLijnKortingCent * (1 - verkoopKorting / 100));
-      const brutoCent = Math.round(effUnitCent * aantal);
+      let brutoCent = Math.round(effUnitCent * aantal);
+      // Weegproduct: het gewogen lijntotaal (prijs/kg × gewicht) op 5 cent afronden.
+      if (aanKassa && isKg) brutoCent = naarBoven(brutoCent, 5);
       // BTW uit een incl.-prijs: btw = bruto - bruto / (1 + pct/100)
       const exclCent = Math.round(brutoCent / (1 + pct / 100));
       const btwCent = brutoCent - exclCent;
@@ -129,6 +137,9 @@ export class SalesService {
         productId: product.id,
         aantal: new Prisma.Decimal(aantal),
         eenheidsprijs: new Prisma.Decimal(naarEuro(effUnitCent)),
+        // Exact aangerekend lijntotaal (voor ticket + dagafsluiting; vermijdt
+        // cent-verschillen bij weegproducten waar eenheidsprijs × aantal afwijkt).
+        lijnTotaal: new Prisma.Decimal(naarEuro(brutoCent)),
         inkoopprijs: product.inkoopprijs ?? null, // momentopname voor margeberekening
         kortingPct: korting > 0 ? new Prisma.Decimal(korting) : null,
         btwPercentage: product.btwTarief.percentage,
@@ -295,7 +306,7 @@ export class SalesService {
 
     for (const l of verkoop.lijnen) {
       const pct = Number(l.btwPercentage);
-      const bruto = Number(l.eenheidsprijs) * Number(l.aantal);
+      const bruto = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * Number(l.aantal);
       const btw = Number(l.btwBedrag);
       const key = pct.toFixed(2);
       const rij = perTarief.get(key) ?? { percentage: pct, maatstaf: 0, btw: 0 };
@@ -326,7 +337,7 @@ export class SalesService {
     const saleFactor = 1 - saleKorting / 100;
     const lijnen = verkoop.lijnen.map((l) => {
       const aantal = Number(l.aantal);
-      const finalLineTotal = Number(l.eenheidsprijs) * aantal; // beide kortingen
+      const finalLineTotal = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * aantal; // beide kortingen
       const naLijnTotal = saleKorting > 0 ? finalLineTotal / saleFactor : finalLineTotal; // vóór verkoopkorting
       const lineKorting = l.kortingPct != null ? Number(l.kortingPct) : 0;
       const origineelTotaal = lineKorting > 0 ? r2(naLijnTotal / (1 - lineKorting / 100)) : null;

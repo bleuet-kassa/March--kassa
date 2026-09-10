@@ -414,6 +414,7 @@ model VerkoopLijn {
   productId     String
   aantal        Decimal  @db.Decimal(12, 3)
   eenheidsprijs Decimal  @db.Decimal(10, 2)   // effectieve verkoopprijs/stuk incl. BTW (na korting)
+  lijnTotaal    Decimal? @db.Decimal(10, 2)   // exact aangerekend lijntotaal incl. BTW (na afronding)
   inkoopprijs   Decimal? @db.Decimal(10, 2)   // momentopname, voor margeberekening
   kortingPct    Decimal? @db.Decimal(5, 2)    // toegepaste korting in % (informatief)
   btwPercentage Decimal  @db.Decimal(5, 2)

@@ -49,14 +49,16 @@ type Lijn = {
 // van het totaal (en van een lopende rekening) wordt afgetrokken.
 const tekenAantal = (l: Lijn) => (l.retour ? -Math.abs(l.aantal) : l.aantal);
 
-// Rondt een prijs (in euro) naar boven af op 10 cent — op de grootte, zodat het
-// symmetrisch is voor negatieve bedragen. Bv. 4,47 -> 4,50 · 1,99 -> 2,00.
-// Zelfde logica als de server, zodat de kassa hetzelfde toont als wat geboekt wordt.
-const rond10 = (euro: number) => {
+// Rondt een prijs (in euro) naar boven af op een stap (5 cent, of 100 = hele euro)
+// — op de grootte, symmetrisch voor negatieve bedragen. Zelfde logica als de
+// server, zodat de kassa hetzelfde toont als wat geboekt wordt.
+const rondBoven = (euro: number, stapCent: number) => {
   const cent = Math.round(euro * 100);
   const teken = cent < 0 ? -1 : 1;
-  return (teken * Math.ceil(Math.abs(cent) / 10) * 10) / 100;
+  return (teken * Math.ceil(Math.abs(cent) / stapCent) * stapCent) / 100;
 };
+const rond5 = (euro: number) => rondBoven(euro, 5);
+const rondEuro = (euro: number) => rondBoven(euro, 100);
 
 const ADMIN_ROLLEN = ['BEHEER', 'BEHEERDER'];
 
@@ -275,7 +277,7 @@ export function Kassa() {
         key: genKey(),
         productId: p.id,
         naam: `Prijs/kg (${gewicht.toFixed(3)} kg)`,
-        prijs: rond10(prijsPerKg), // prijs/kg op 10 cent naar boven
+        prijs: prijsPerKg, // prijs/kg ongewijzigd; het gewogen lijntotaal wordt op 5 cent afgerond
         btwPercentage: Number(p.btwTarief.percentage),
         isAlcohol: false,
         aantal: gewicht,
@@ -297,7 +299,7 @@ export function Kassa() {
         key: genKey(),
         productId: sp.id,
         naam: sp.naam,
-        prijs: rond10(bedrag), // op 10 cent naar boven
+        prijs: sp.interneCode === 'CADEAU' ? rondEuro(bedrag) : rond5(bedrag), // cadeaubon: hele euro · diversen: 5 cent
         btwPercentage: Number(sp.btwTarief.percentage),
         isAlcohol: false,
         aantal: aantal > 0 ? aantal : 1,
@@ -329,7 +331,7 @@ export function Kassa() {
           key: genKey(),
           productId: p.id,
           naam: p.naam,
-          prijs: rond10(Number(p.verkoopprijs)), // verkoopprijs (per stuk of per kg) op 10 cent naar boven
+          prijs: weeg ? Number(p.verkoopprijs) : rond5(Number(p.verkoopprijs)), // stuk: stukprijs op 5 cent; weeg: prijs/kg ongewijzigd (lijntotaal wordt afgerond)
           btwPercentage: Number(p.btwTarief.percentage),
           isAlcohol: p.isAlcohol,
           aantal,
@@ -459,9 +461,17 @@ export function Kassa() {
   // de verkoopbrede korting komt daar bovenop op het subtotaal.
   const lijnKorting = (l: Lijn) => Math.min(100, Math.max(l.kortingPct || 0, 0));
   const nettoPrijs = (l: Lijn) => l.prijs * (1 - lijnKorting(l) / 100);
+  // Weeglijn (prijs/kg × gewicht): het gewogen lijntotaal wordt op 5 cent afgerond.
+  const isWeegLijn = (l: Lijn) => (!!l.vrijBedrag && !!l.vastAantal) || producten.find((p) => p.id === l.productId)?.eenheid === 'KG';
+  // Het aangerekende lijnbedrag (ná lijnkorting, vóór verkoopkorting): bij een
+  // weeglijn afgerond op 5 cent; bij stuk/diversen is de prijs zelf al afgerond.
+  const lijnBedrag = (l: Lijn) => {
+    const ruw = nettoPrijs(l) * tekenAantal(l);
+    return isWeegLijn(l) ? rond5(ruw) : ruw;
+  };
 
   const subtotaal = useMemo(
-    () => lijnen.reduce((s, l) => s + nettoPrijs(l) * tekenAantal(l), 0),
+    () => lijnen.reduce((s, l) => s + lijnBedrag(l), 0),
     [lijnen],
   );
   const totaal = Math.round(subtotaal * saleFactor * 100) / 100;
@@ -471,7 +481,7 @@ export function Kassa() {
   const btwOverzicht = useMemo(() => {
     const per = new Map<number, { maatstaf: number; btw: number }>();
     for (const l of lijnen) {
-      const bruto = nettoPrijs(l) * tekenAantal(l);
+      const bruto = lijnBedrag(l);
       const excl = bruto / (1 + l.btwPercentage / 100);
       const rij = per.get(l.btwPercentage) ?? { maatstaf: 0, btw: 0 };
       rij.maatstaf += excl;
@@ -556,7 +566,7 @@ export function Kassa() {
         aantal: tekenAantal(l),
         eenheidsprijs: Math.round(nettoPrijs(l) * 100) / 100, // ná lijnkorting
         btwPercentage: l.btwPercentage,
-        totaal: Math.round(nettoPrijs(l) * tekenAantal(l) * 100) / 100, // ná lijnkorting, vóór verkoopkorting
+        totaal: Math.round(lijnBedrag(l) * 100) / 100, // ná lijnkorting (weeg afgerond), vóór verkoopkorting
         kortingPct: l.kortingPct || null,
         origineelTotaal: l.kortingPct ? Math.round(l.prijs * tekenAantal(l) * 100) / 100 : null,
       })),
@@ -822,7 +832,7 @@ export function Kassa() {
                     {l.kortingPct ? `${l.kortingPct}%` : '−%'}
                   </button>
                 </td>
-                <td style={{ padding: '8px 4px', textAlign: 'right', color: l.retour ? '#b91c1c' : undefined, fontWeight: l.retour ? 700 : undefined }}>€ {(nettoPrijs(l) * tekenAantal(l)).toFixed(2)}</td>
+                <td style={{ padding: '8px 4px', textAlign: 'right', color: l.retour ? '#b91c1c' : undefined, fontWeight: l.retour ? 700 : undefined }}>€ {lijnBedrag(l).toFixed(2)}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button
                     onClick={() => wisselRetour(l.key)}
