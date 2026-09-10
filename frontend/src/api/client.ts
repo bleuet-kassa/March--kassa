@@ -26,7 +26,7 @@ export type Gebruiker = { id: string; naam: string; rol: string };
 export type Ticket = {
   id: string;
   datum: string;
-  betaalwijze: Betaalwijze;
+  betaalwijze: Betaalwijze | null; // null bij "op rekening" of gesplitste betaling
   betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling
   verkoper: string | null;
   offline?: boolean; // true = lokaal bewaard, nog te synchroniseren
