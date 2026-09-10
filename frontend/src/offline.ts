@@ -11,7 +11,8 @@ const QUEUE_KEY = 'kassa.offline.queue';
 
 export type WachtPayload = {
   lijnen: { productId: string; aantal: number; kortingPct?: number; bedrag?: number }[];
-  betaalwijze?: Betaalwijze; // weglaten bij "op rekening"
+  betaalwijze?: Betaalwijze; // weglaten bij "op rekening" of gesplitste betaling
+  betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling (max. 2)
   ontvangen?: number;
   gebruikerId?: string;
   kortingReden?: string;

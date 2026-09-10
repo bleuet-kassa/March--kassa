@@ -27,6 +27,7 @@ export type Ticket = {
   id: string;
   datum: string;
   betaalwijze: Betaalwijze;
+  betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling
   verkoper: string | null;
   offline?: boolean; // true = lokaal bewaard, nog te synchroniseren
   kortingReden?: string | null; // verkoopbrede korting (bv. "Korting 10%")
@@ -61,6 +62,7 @@ export async function getProducten(): Promise<Product[]> {
 export async function afrekenen(input: {
   lijnen: AfrekenLijn[];
   betaalwijze?: Betaalwijze; // weglaten bij "op rekening"
+  betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling (max. 2)
   ontvangen?: number;
   gebruikerId?: string;
   kortingReden?: string;

@@ -18,6 +18,9 @@ export type AfrekenLijn = { productId: string; aantal: number; kortingPct?: numb
 export type AfrekenInput = {
   lijnen: AfrekenLijn[];
   betaalwijze?: Betaalwijze; // optioneel bij webshop (betalen bij afhaling/levering)
+  // Gesplitste betaling (max. 2 betaalwijzen), elk met een bedrag. Een bedrag mag
+  // negatief zijn (teveel dat via een andere betaalwijze wordt terugbetaald).
+  betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[];
   ontvangen?: number; // enkel bij CASH, om het wisselgeld te berekenen
   gebruikerId?: string;
   kortingReden?: string; // bv. "Personeel 20%" — reden van de korting
@@ -54,9 +57,12 @@ export class SalesService {
   // winkelstock en berekent de BTW per lijn. Alles in één transactie zodat
   // een verkoop nooit half wordt bewaard.
   async afrekenen(input: AfrekenInput) {
-    const { lijnen, betaalwijze, ontvangen, gebruikerId, kortingReden, kanaal, klantId, leverwijze, status, rekeningBedrijfId, rekeningLidId, idempotencyKey } = input;
+    const { lijnen, betaalwijze, betalingen, ontvangen, gebruikerId, kortingReden, kanaal, klantId, leverwijze, status, rekeningBedrijfId, rekeningLidId, idempotencyKey } = input;
     // Verkoopbrede korting (geldt op elke lijn, bovenop een eventuele lijnkorting).
     const verkoopKorting = Math.min(Math.max(Number(input.verkoopKortingPct) || 0, 0), 100);
+    if (betalingen && betalingen.length > 2) {
+      throw new BadRequestException('Maximaal 2 betaalwijzen per verkoop.');
+    }
 
     if (!lijnen?.length) {
       throw new BadRequestException('Geen verkoopregels.');
@@ -67,7 +73,7 @@ export class SalesService {
     if (idempotencyKey) {
       const bestaande = await this.prisma.verkoop.findUnique({
         where: { idempotencyKey },
-        include: { lijnen: { include: { product: true } }, gebruiker: true },
+        include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
       });
       if (bestaande) return this.metTicket(bestaande, ontvangen);
     }
@@ -151,6 +157,22 @@ export class SalesService {
 
     const totaal = naarEuro(totaalCent);
 
+    // Betaling(en) bepalen: bij een gesplitste betaling moeten de deelbedragen
+    // samen exact het totaal zijn (een deelbedrag mag negatief zijn = terugbetaald
+    // teveel). Anders: één betaling met het volledige totaal op de gekozen betaalwijze.
+    let betaalLijnen: { betaalwijze: Betaalwijze; bedrag: number }[] = [];
+    if (betalingen && betalingen.length) {
+      const som = betalingen.reduce((s, b) => s + Number(b.bedrag), 0);
+      if (Math.abs(som - totaal) > 0.01) {
+        throw new BadRequestException(`De betalingen (€ ${som.toFixed(2)}) komen niet overeen met het te betalen totaal (€ ${totaal.toFixed(2)}).`);
+      }
+      betaalLijnen = betalingen.map((b) => ({ betaalwijze: b.betaalwijze, bedrag: Math.round(Number(b.bedrag) * 100) / 100 }));
+    } else if (betaalwijze) {
+      betaalLijnen = [{ betaalwijze, bedrag: totaal }];
+    }
+    // Hoofdbetaalwijze (voor weergave/terugvalwaarde): de eerste betaling.
+    const hoofdBetaalwijze = betaalLijnen[0]?.betaalwijze ?? betaalwijze ?? null;
+
     // Cash-limiet €3.000 (wettelijk).
     if (betaalwijze === 'CASH' && totaal > CASH_LIMIET) {
       throw new BadRequestException(
@@ -166,7 +188,7 @@ export class SalesService {
           gebruikerId: gebruikerId ?? null,
           klantId: klantId ?? null,
           kanaal: kanaal ?? 'KASSA',
-          betaalwijze: betaalwijze ?? null,
+          betaalwijze: hoofdBetaalwijze,
           leverwijze: leverwijze ?? null,
           status: status ?? null,
           rekeningBedrijfId: rekeningBedrijfId ?? null,
@@ -176,8 +198,11 @@ export class SalesService {
           verkoopKortingPct: verkoopKorting > 0 ? new Prisma.Decimal(verkoopKorting) : null,
           idempotencyKey: idempotencyKey ?? null,
           lijnen: { create: lijnData },
+          betalingen: betaalLijnen.length
+            ? { create: betaalLijnen.map((b) => ({ betaalwijze: b.betaalwijze, bedrag: new Prisma.Decimal(b.bedrag) })) }
+            : undefined,
         },
-        include: { lijnen: { include: { product: true } }, gebruiker: true },
+        include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
       });
 
       // Winkelstock verlagen. Bestaat er nog geen voorraadregel voor dit
@@ -261,7 +286,7 @@ export class SalesService {
       const bij = await tx.verkoop.update({
         where: { id },
         data: { geannuleerd: true, geannuleerdOp: new Date(), geannuleerdReden: reden ?? null },
-        include: { lijnen: { include: { product: true } }, gebruiker: true },
+        include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
       });
       return this.metTicket(bij);
     });
@@ -292,7 +317,7 @@ export class SalesService {
     const bij = await this.prisma.verkoop.update({
       where: { id },
       data: { betaalwijze },
-      include: { lijnen: { include: { product: true } }, gebruiker: true },
+      include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
     });
     return this.metTicket(bij);
   }
@@ -301,7 +326,7 @@ export class SalesService {
   async ticket(id: string) {
     const verkoop = await this.prisma.verkoop.findUnique({
       where: { id },
-      include: { lijnen: { include: { product: true } }, gebruiker: true },
+      include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
     });
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
     return this.metTicket(verkoop);
@@ -310,7 +335,7 @@ export class SalesService {
   // Bouwt het ticket-overzicht: BTW gegroepeerd per tarief + wisselgeld.
   private metTicket(
     verkoop: Prisma.VerkoopGetPayload<{
-      include: { lijnen: { include: { product: true } }; gebruiker: true };
+      include: { lijnen: { include: { product: true } }; gebruiker: true; betalingen: true };
     }>,
     ontvangen?: number,
   ) {
@@ -375,6 +400,8 @@ export class SalesService {
       id: verkoop.id,
       datum: verkoop.datum,
       betaalwijze: verkoop.betaalwijze,
+      // Gesplitste betaling: de deelbetalingen (betaalwijze + bedrag) voor op het ticket.
+      betalingen: (verkoop.betalingen ?? []).map((b) => ({ betaalwijze: b.betaalwijze, bedrag: Number(b.bedrag) })),
       verkoper: verkoop.gebruiker?.naam ?? null,
       kortingReden: verkoop.kortingReden ?? null,
       verkoopKortingPct: saleKorting > 0 ? saleKorting : null,

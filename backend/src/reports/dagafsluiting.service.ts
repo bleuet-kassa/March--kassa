@@ -2,12 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-// Verkoop met lijnen + product-categorie + klant (voor het dagontvangsten-rapport).
+// Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
-  include: { lijnen: { include: { product: { include: { categorie: true } } } }; klant: true };
+  include: { lijnen: { include: { product: { include: { categorie: true } } } }; klant: true; betalingen: true };
 }>;
 
-const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: true } } } }, klant: true } as const;
+const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: true } } } }, klant: true, betalingen: true } as const;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -92,10 +92,17 @@ export class DagafsluitingService {
       }
       ontvAantal++;
       ontvIncl += incl; ontvBtw += btw; ontvExcl += incl - btw;
-      // Verkopen zonder directe betaalwijze zijn "op rekening" (later gefactureerd);
-      // enkel als er écht geen rekening én geen betaalwijze is, blijft het onbekend.
-      const bw = v.betaalwijze ?? (v.rekeningBedrijfId ? 'OP_REKENING' : 'ONBEKEND');
-      perBetaalwijze[bw] = r2((perBetaalwijze[bw] ?? 0) + incl);
+      // Per betaalwijze: bij een gesplitste betaling elk deelbedrag bij de juiste
+      // betaalwijze; anders het volledige bedrag. Verkopen zonder betaling(en) én
+      // zonder betaalwijze zijn "op rekening" (later gefactureerd).
+      if (v.betalingen && v.betalingen.length) {
+        for (const b of v.betalingen) {
+          perBetaalwijze[b.betaalwijze] = r2((perBetaalwijze[b.betaalwijze] ?? 0) + Number(b.bedrag));
+        }
+      } else {
+        const bw = v.betaalwijze ?? (v.rekeningBedrijfId ? 'OP_REKENING' : 'ONBEKEND');
+        perBetaalwijze[bw] = r2((perBetaalwijze[bw] ?? 0) + incl);
+      }
       for (const t of perTarief.values()) {
         const k = t.percentage.toFixed(2);
         const rij = perBtw.get(k) ?? { percentage: t.percentage, maatstaf: 0, btw: 0 };

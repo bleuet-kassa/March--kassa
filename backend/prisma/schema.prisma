@@ -405,6 +405,21 @@ model Verkoop {
   idempotencyKey String?      @unique
 
   lijnen        VerkoopLijn[]
+  betalingen    Betaling[]
+}
+
+// Betaling(en) van een verkoop. Meestal één, maar een verkoop kan gesplitst
+// betaald worden (max. 2 betaalwijzen), bv. €15 cadeaubon + €21,55 bancontact.
+// Een bedrag kan negatief zijn: een teveel (bv. cadeaubon groter dan het totaal)
+// dat via een andere betaalwijze wordt terugbetaald.
+model Betaling {
+  id          String      @id @default(cuid())
+  verkoop     Verkoop     @relation(fields: [verkoopId], references: [id], onDelete: Cascade)
+  verkoopId   String
+  betaalwijze Betaalwijze
+  bedrag      Decimal     @db.Decimal(10, 2)
+
+  @@index([verkoopId])
 }
 
 model VerkoopLijn {

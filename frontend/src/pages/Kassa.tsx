@@ -116,9 +116,15 @@ type Bon = {
   rekeningBedrijfId: string;
   rekeningLidId: string;
   retourModus?: boolean; // negatieve rekening: alles wat je toevoegt wordt afgetrokken (-)
+  // Gesplitste betaling (max. 2 betaalwijzen, bv. cadeaubon + bancontact).
+  gesplitst?: boolean;
+  split1Bw?: Betaalwijze;
+  split1Bedrag?: string;
+  split2Bw?: Betaalwijze;
+  split2Bedrag?: string;
 };
 function maakBon(): Bon {
-  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false };
+  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '' };
 }
 
 // Kassascherm (Fase 2): scannen, aantallen, betaalwijze, BTW-uitsplitsing,
@@ -152,6 +158,7 @@ export function Kassa() {
   const [nieuwArtikel, setNieuwArtikel] = useState<string | null>(null);
   // Cijferklavier voor het cash-ontvangen bedrag (touchscreen).
   const [ontvangstKlavier, setOntvangstKlavier] = useState(false);
+  const [splitKlavier, setSplitKlavier] = useState<1 | 2 | null>(null); // welk split-bedrag met het cijferklavier
   // Cijferklavier voor de manuele korting (%).
   const [kortingKlavier, setKortingKlavier] = useState(false);
   // Welke lijn krijgt een lijnkorting via het klavier (key van de lijn).
@@ -532,7 +539,7 @@ export function Kassa() {
     betaalwijze === 'CASH' && ontvangen && !Number.isNaN(ontvangenNum)
       ? ontvangenNum - totaal
       : null;
-  const cash = betaalwijze === 'CASH' && !bon.opRekening;
+  const cash = betaalwijze === 'CASH' && !bon.opRekening && !bon.gesplitst;
   // Netto terugbetaling (retour groter dan de verkoop): dit geld geven we cash
   // terug uit de lade — nooit via Bancontact/Kaart. (Op rekening blijft wel: dan
   // verrekenen we het op de rekening van het bedrijf.)
@@ -543,17 +550,29 @@ export function Kassa() {
   // Bancontact/Kaart kan je niet gebruiken om cash terug te geven: bij een netto
   // terugbetaling (en niet op rekening) zetten we de betaalwijze op Cash.
   useEffect(() => {
-    if (isTerugbetaling && !bon.opRekening && betaalwijze !== 'CASH') setBetaalwijze('CASH');
-  }, [isTerugbetaling, bon.opRekening, betaalwijze]);
+    if (isTerugbetaling && !bon.opRekening && !bon.gesplitst && betaalwijze !== 'CASH') setBetaalwijze('CASH');
+  }, [isTerugbetaling, bon.opRekening, bon.gesplitst, betaalwijze]);
+
+  // Gesplitste betaling: betaalwijzen die je kan combineren (incl. cadeaubon).
+  const splitBetaalwijzen: Betaalwijze[] = ['CASH', 'BANCONTACT', 'KAART', 'OVERSCHRIJVING', 'QR', 'CADEAUBON'];
+  const parseBedrag = (s?: string) => { const n = Number((s ?? '').replace(',', '.')); return Number.isNaN(n) ? 0 : n; };
+  const splitBedrag1 = parseBedrag(bon.split1Bedrag);
+  const splitBedrag2 = parseBedrag(bon.split2Bedrag);
+  const splitVerschil = Math.round((splitBedrag1 + splitBedrag2 - totaal) * 100) / 100; // 0 = klopt
+  const splitOk = Math.abs(splitVerschil) < 0.01;
 
   // Bouwt een ticket lokaal (voor het offline-geval), identiek aan het serverticket.
   function lokaalTicket(key: string): TicketData {
     const o = ontvangenNum;
     const cash = betaalwijze === 'CASH' && !Number.isNaN(o);
+    const splitLijnen = bon.gesplitst
+      ? [{ betaalwijze: bon.split1Bw!, bedrag: splitBedrag1 }, { betaalwijze: bon.split2Bw!, bedrag: splitBedrag2 }].filter((b) => Math.abs(b.bedrag) > 0.001)
+      : undefined;
     return {
       id: 'offline-' + key.slice(0, 8),
       datum: new Date().toISOString(),
-      betaalwijze,
+      betaalwijze: bon.gesplitst ? null : betaalwijze,
+      betalingen: splitLijnen,
       verkoper: verkopers.find((v) => v.id === bon.verkoperId)?.naam ?? getVerkoper()?.naam ?? null,
       offline: true,
       totaal: Math.round(totaal * 100) / 100,
@@ -583,6 +602,11 @@ export function Kassa() {
     if (!lijnen.length || bezig || cashTeVeel || cashTeWeinig) return;
     if (!bon.verkoperId) { setFout('Kies eerst de verkoper voor dit ticket.'); return; }
     if (bon.opRekening && (!bon.rekeningBedrijfId || !bon.rekeningLidId)) { setFout('Kies het bedrijf en het personeelslid voor de rekening.'); return; }
+    if (bon.gesplitst && !splitOk) { setFout(`De gesplitste betalingen komen niet overeen met het te betalen bedrag (verschil € ${splitVerschil.toFixed(2)}).`); return; }
+    // Gesplitste betaling: de deelbetalingen (max. 2, lege bedragen weglaten).
+    const betalingen = bon.gesplitst
+      ? [{ betaalwijze: bon.split1Bw!, bedrag: splitBedrag1 }, { betaalwijze: bon.split2Bw!, bedrag: splitBedrag2 }].filter((b) => Math.abs(b.bedrag) > 0.001)
+      : undefined;
     const gesloten = bon.id; // welk ticket we afsluiten
     setBezig(true);
     setFout('');
@@ -597,7 +621,8 @@ export function Kassa() {
         kortingPct: l.kortingPct || undefined, // enkel de lijnkorting
         bedrag: l.vrijBedrag ? l.prijs : undefined, // vrij bedrag voor diversen/cadeaubon
       })),
-      betaalwijze: bon.opRekening ? undefined : betaalwijze,
+      betaalwijze: bon.opRekening || bon.gesplitst ? undefined : betaalwijze,
+      betalingen, // gesplitste betaling (of undefined)
       ontvangen: cash && !isTerugbetaling && ontvangen !== '' && !Number.isNaN(ontvangenNum) ? ontvangenNum : undefined,
       gebruikerId: bon.verkoperId,
       kortingReden,
@@ -939,10 +964,16 @@ export function Kassa() {
                 );
               })}
               <button
-                onClick={() => patchBon(bon.id, { opRekening: true })}
+                onClick={() => patchBon(bon.id, { opRekening: true, gesplitst: false })}
                 style={{ flex: '1 1 45%', padding: '10px 4px', borderRadius: 6, cursor: 'pointer', border: bon.opRekening ? '2px solid #2563eb' : '1px solid #ccc', background: bon.opRekening ? '#eff6ff' : '#fff', fontWeight: bon.opRekening ? 600 : 400 }}
               >
                 Op rekening
+              </button>
+              <button
+                onClick={() => patchBon(bon.id, { gesplitst: !bon.gesplitst, opRekening: false })}
+                style={{ flex: '1 1 45%', padding: '10px 4px', borderRadius: 6, cursor: 'pointer', border: bon.gesplitst ? '2px solid #2563eb' : '1px solid #ccc', background: bon.gesplitst ? '#eff6ff' : '#fff', fontWeight: bon.gesplitst ? 600 : 400 }}
+              >
+                Gesplitst / cadeaubon
               </button>
             </div>
             {bon.opRekening && (
@@ -957,16 +988,42 @@ export function Kassa() {
                 </select>
               </div>
             )}
+            {bon.gesplitst && (
+              <div style={{ marginTop: 10, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>Vul per betaalwijze het betaalde bedrag in (een negatief bedrag = terugbetaald tegoed).</div>
+                {([1, 2] as const).map((n) => {
+                  const bw = n === 1 ? bon.split1Bw : bon.split2Bw;
+                  const bedrag = n === 1 ? (bon.split1Bedrag ?? '') : (bon.split2Bedrag ?? '');
+                  return (
+                    <div key={n} style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                      <select value={bw} onChange={(e) => patchBon(bon.id, n === 1 ? { split1Bw: e.target.value as Betaalwijze } : { split2Bw: e.target.value as Betaalwijze })}
+                        style={{ flex: 1, padding: 8, fontSize: 15, borderRadius: 6, border: '1px solid #cbd5e1' }}>
+                        {splitBetaalwijzen.map((b) => <option key={b} value={b}>{betaalNaam(b)}</option>)}
+                      </select>
+                      <input value={bedrag} onChange={(e) => patchBon(bon.id, n === 1 ? { split1Bedrag: e.target.value } : { split2Bedrag: e.target.value })}
+                        inputMode="decimal" placeholder="0,00" style={{ width: 90, padding: 8, fontSize: 16, boxSizing: 'border-box', textAlign: 'right' }} />
+                      <button onClick={() => setSplitKlavier(n)} title="Cijferklavier" style={{ padding: '8px 12px', fontSize: 16, borderRadius: 8, border: '1px solid #cbd5e1', background: '#eef2ff', cursor: 'pointer' }}>⌨</button>
+                    </div>
+                  );
+                })}
+                <button onClick={() => patchBon(bon.id, { split2Bedrag: (Math.round((totaal - splitBedrag1) * 100) / 100).toFixed(2) })}
+                  style={{ ...knopMini, marginBottom: 8 }}>2e = rest (€ {(Math.round((totaal - splitBedrag1) * 100) / 100).toFixed(2)})</button>
+                <div style={{ fontSize: 13, fontWeight: 600, color: splitOk ? '#166534' : '#b45309' }}>
+                  Som € {(splitBedrag1 + splitBedrag2).toFixed(2)} · Te betalen € {totaal.toFixed(2)}
+                  {!splitOk && <span> — verschil € {splitVerschil.toFixed(2)} {splitVerschil > 0 ? '(teveel)' : '(nog te betalen)'}</span>}
+                </div>
+              </div>
+            )}
           </div>
 
-          {!bon.opRekening && isTerugbetaling && (
+          {!bon.opRekening && !bon.gesplitst && isTerugbetaling && (
             <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
               <div style={{ fontSize: 13, color: '#b91c1c' }}>Terugbetaling — cash uit de lade</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: '#b91c1c' }}>Terug te geven: € {Math.abs(totaal).toFixed(2)}</div>
             </div>
           )}
 
-          {!bon.opRekening && betaalwijze === 'CASH' && !isTerugbetaling && (
+          {!bon.opRekening && !bon.gesplitst && betaalwijze === 'CASH' && !isTerugbetaling && (
             <div style={{ marginTop: 12 }}>
               <label style={{ fontSize: 13, color: '#666' }}>Ontvangen</label>
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
@@ -1002,11 +1059,11 @@ export function Kassa() {
           )}
           <button
             onClick={afrekenenNu}
-            disabled={!lijnen.length || bezig || cashTeVeel || cashTeWeinig || !bon.verkoperId}
+            disabled={!lijnen.length || bezig || cashTeVeel || cashTeWeinig || !bon.verkoperId || (bon.gesplitst && !splitOk)}
             style={{
               width: '100%', marginTop: 12, padding: 14, fontSize: 18, fontWeight: 700,
               borderRadius: 8, border: 'none', cursor: 'pointer', color: '#fff',
-              background: !lijnen.length || bezig || cashTeVeel || cashTeWeinig || !bon.verkoperId ? '#9ca3af' : '#16a34a',
+              background: !lijnen.length || bezig || cashTeVeel || cashTeWeinig || !bon.verkoperId || (bon.gesplitst && !splitOk) ? '#9ca3af' : '#16a34a',
             }}
           >
             {bezig ? 'Bezig…' : 'Afrekenen'}
@@ -1040,6 +1097,16 @@ export function Kassa() {
           bevestigLabel="Bevestigen"
           onBevestig={(b) => { setOntvangen(b.toFixed(2)); setOntvangstKlavier(false); }}
           onSluit={() => setOntvangstKlavier(false)}
+        />
+      )}
+
+      {splitKlavier && (
+        <BedragModal
+          titel={`Bedrag betaalwijze ${splitKlavier}`}
+          subtitel={`Te betalen: € ${totaal.toFixed(2)}`}
+          bevestigLabel="Bevestigen"
+          onBevestig={(b) => { patchBon(bon.id, splitKlavier === 1 ? { split1Bedrag: b.toFixed(2) } : { split2Bedrag: b.toFixed(2) }); setSplitKlavier(null); }}
+          onSluit={() => setSplitKlavier(null)}
         />
       )}
 
@@ -1522,10 +1589,19 @@ export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop' 
           ))}
         </div>
         <hr />
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
-          <span>Betaald ({betaalLabel})</span>
-          <span style={{ whiteSpace: 'nowrap' }}>€ {ticket.totaal.toFixed(2)}</span>
-        </div>
+        {ticket.betalingen && ticket.betalingen.length > 0 ? (
+          ticket.betalingen.map((b, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+              <span>Betaald ({betaalNaam(b.betaalwijze)})</span>
+              <span style={{ whiteSpace: 'nowrap' }}>€ {b.bedrag.toFixed(2)}</span>
+            </div>
+          ))
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
+            <span>Betaald ({betaalLabel})</span>
+            <span style={{ whiteSpace: 'nowrap' }}>€ {ticket.totaal.toFixed(2)}</span>
+          </div>
+        )}
         {ticket.ontvangen != null && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
