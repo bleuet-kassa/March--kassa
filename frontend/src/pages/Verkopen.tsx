@@ -22,7 +22,7 @@ function betaalNaam(b?: string | null): string {
   }
 }
 // Betaalwijzen die je aan de kassa kan kiezen (voor het wijzigen).
-const BETAALWIJZEN: Betaalwijze[] = ['CASH', 'BANCONTACT', 'KAART', 'OVERSCHRIJVING', 'QR', 'EIGEN_REKENING'];
+const BETAALWIJZEN: Betaalwijze[] = ['CASH', 'BANCONTACT', 'KAART', 'OVERSCHRIJVING', 'QR', 'CADEAUBON', 'EIGEN_REKENING'];
 
 // Terugvinden van eerdere verkopen: ticket herafdrukken, en (voor beheerders)
 // een verkoop annuleren of de betaalwijze corrigeren.
@@ -57,8 +57,16 @@ export function Verkopen() {
   }
 
   async function zetBetaalwijze(v: VerkoopKort, bw: Betaalwijze) {
+    if (bw === v.betaalwijze) { setBetaalRij(null); return; }
+    const waarschuwing = v.afgesloten ? '\n\n⚠ Deze verkoop zit in een AFGESLOTEN dagafsluiting (reeds geregistreerd).' : '';
+    if (!window.confirm(
+      `Betaalwijze wijzigen naar "${betaalNaam(bw)}".${waarschuwing}\n\n` +
+      'Heb je deze wijziging ook in Scrada doorgevoerd? Klik OK om te bevestigen.',
+    )) { setBetaalRij(null); return; }
+    const wachtwoord = window.prompt('Beheerderswachtwoord om de wijziging te bevestigen:');
+    if (!wachtwoord) { setBetaalRij(null); return; }
     setBezig(true); setFout('');
-    try { await wijzigVerkoopBetaalwijze(v.id, bw); setBetaalRij(null); await laad(); }
+    try { await wijzigVerkoopBetaalwijze(v.id, bw, wachtwoord); setBetaalRij(null); await laad(); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Wijzigen mislukt'); }
     finally { setBezig(false); }
   }
@@ -72,7 +80,7 @@ export function Verkopen() {
       <h2>Verkopen</h2>
       <p style={{ color: '#6b7280', marginTop: 4 }}>
         Vind een eerdere verkoop terug, druk het ticket opnieuw af, annuleer een verkoop of corrigeer de betaalwijze.
-        Verkopen die al in een afgesloten dagafsluiting zitten (🔒) zijn wettelijk niet meer te wijzigen.
+        Een verkoop in een afgesloten dagafsluiting (🔒) kan enkel de beheerder nog corrigeren (met wachtwoord) — pas de wijziging dan ook in Scrada aan.
       </p>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '12px 0' }}>
@@ -122,14 +130,12 @@ export function Verkopen() {
               <td style={{ padding: 6, textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <button onClick={() => herafdruk(v.id)} style={btnBlauw}>Herafdrukken</button>
                 {!v.geannuleerd && v.kanaal !== 'WEBSHOP' && (
-                  vergrendeld ? (
-                    <span title="Zit in een afgesloten dagafsluiting — wettelijk niet meer wijzigbaar" style={{ marginLeft: 8, fontSize: 11, color: '#9ca3af' }}>🔒 afgesloten</span>
-                  ) : (
-                    <>
-                      <button onClick={() => setBetaalRij(betaalRij === v.id ? null : v.id)} disabled={bezig} style={btnGrijsMini}>Betaalwijze</button>
-                      <button onClick={() => annuleer(v)} disabled={bezig} style={btnRood}>Annuleren</button>
-                    </>
-                  )
+                  <>
+                    <button onClick={() => setBetaalRij(betaalRij === v.id ? null : v.id)} disabled={bezig} style={btnGrijsMini}>Betaalwijze</button>
+                    {vergrendeld
+                      ? <span title="Afgesloten dagafsluiting — enkel de beheerder kan de betaalwijze nog corrigeren (met wachtwoord, en ook in Scrada)" style={{ marginLeft: 6, fontSize: 11, color: '#9ca3af' }}>🔒</span>
+                      : <button onClick={() => annuleer(v)} disabled={bezig} style={btnRood}>Annuleren</button>}
+                  </>
                 )}
               </td>
             </tr>

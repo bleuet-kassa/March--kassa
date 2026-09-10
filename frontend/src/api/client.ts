@@ -11,7 +11,7 @@ export type Product = {
   btwTarief: BtwTarief;
 };
 
-export type Betaalwijze = 'CASH' | 'BANCONTACT' | 'KAART' | 'OVERSCHRIJVING' | 'QR' | 'EIGEN_REKENING';
+export type Betaalwijze = 'CASH' | 'BANCONTACT' | 'KAART' | 'OVERSCHRIJVING' | 'QR' | 'EIGEN_REKENING' | 'CADEAUBON';
 
 export type AfrekenLijn = { productId: string; aantal: number; kortingPct?: number; bedrag?: number };
 
@@ -102,10 +102,10 @@ export async function annuleerVerkoop(id: string, reden?: string): Promise<Ticke
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reden }),
   }));
 }
-// De betaalwijze van een bestaande verkoop wijzigen (admin).
-export async function wijzigVerkoopBetaalwijze(id: string, betaalwijze: Betaalwijze): Promise<Ticket> {
+// De betaalwijze van een bestaande verkoop wijzigen (beheerderswachtwoord vereist).
+export async function wijzigVerkoopBetaalwijze(id: string, betaalwijze: Betaalwijze, wachtwoord: string): Promise<Ticket> {
   return jsonOrThrow(await fetch(`${BASE}/verkopen/${id}/betaalwijze`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ betaalwijze }),
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ betaalwijze, wachtwoord }),
   }));
 }
 

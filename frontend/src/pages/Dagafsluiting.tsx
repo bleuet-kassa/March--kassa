@@ -16,6 +16,7 @@ function betaalNaam(b?: string | null): string {
     case 'KAART': return 'Kaart';
     case 'OVERSCHRIJVING': return 'Overschrijving';
     case 'QR': return 'QR-code';
+    case 'CADEAUBON': return 'Cadeaubon';
     case 'EIGEN_REKENING': return 'Eigen rekening';
     case 'OP_REKENING': return 'Op rekening';
     // Oudere afsluitingen bewaarden 'op rekening'-verkopen onder de sleutel ONBEKEND;

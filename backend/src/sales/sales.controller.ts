@@ -33,7 +33,7 @@ export class SalesController {
 
   // PATCH /verkopen/:id/betaalwijze  -> betaalwijze van een verkoop wijzigen
   @Patch(':id/betaalwijze')
-  wijzigBetaalwijze(@Param('id') id: string, @Body() body: { betaalwijze: Betaalwijze }) {
-    return this.sales.wijzigBetaalwijze(id, body.betaalwijze);
+  wijzigBetaalwijze(@Param('id') id: string, @Body() body: { betaalwijze: Betaalwijze; wachtwoord: string }) {
+    return this.sales.wijzigBetaalwijze(id, body.betaalwijze, body.wachtwoord);
   }
 }

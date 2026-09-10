@@ -70,6 +70,7 @@ function betaalNaam(b?: string | null): string {
     case 'KAART': return 'Kaart';
     case 'OVERSCHRIJVING': return 'Overschrijving';
     case 'QR': return 'QR-code';
+    case 'CADEAUBON': return 'Cadeaubon';
     case 'EIGEN_REKENING': return 'Eigen rekening';
     case 'ONLINE': return 'Online';
     default: return b ?? '—';

@@ -2,8 +2,10 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { Betaalwijze, Prisma } from '@prisma/client';
+import { Betaalwijze, GebruikerRol, Prisma } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Wettelijke cash-limiet in België: max. €3.000 contant per transactie.
@@ -265,15 +267,28 @@ export class SalesService {
     });
   }
 
+  // Verifieert dat het opgegeven wachtwoord van een (actieve) beheerder is.
+  private async beheerderCheck(wachtwoord: string) {
+    const admins = await this.prisma.gebruiker.findMany({
+      where: { actief: true, rol: { in: [GebruikerRol.BEHEER, GebruikerRol.BEHEERDER] } },
+      select: { wachtwoordHash: true },
+    });
+    for (const a of admins) {
+      if (await bcrypt.compare(wachtwoord ?? '', a.wachtwoordHash)) return;
+    }
+    throw new UnauthorizedException('Beheerderswachtwoord ontbreekt of is onjuist.');
+  }
+
   // Wijzigt de betaalwijze van een bestaande verkoop (bv. verkeerd aangeduid).
-  // Niet toegestaan als de verkoop al in een afgesloten dagafsluiting zit.
-  async wijzigBetaalwijze(id: string, betaalwijze: Betaalwijze) {
+  // Vereist het beheerderswachtwoord (bevestiging + autorisatie); mag ook voor
+  // reeds afgesloten verkopen — de beheerder past het dan ook in Scrada aan.
+  async wijzigBetaalwijze(id: string, betaalwijze: Betaalwijze, wachtwoord: string) {
     if (!Object.values(Betaalwijze).includes(betaalwijze)) {
       throw new BadRequestException('Ongeldige betaalwijze.');
     }
+    await this.beheerderCheck(wachtwoord);
     const verkoop = await this.prisma.verkoop.findUnique({ where: { id } });
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
-    if (verkoop.afgesloten) throw new BadRequestException('Deze verkoop zit al in een afgesloten dagafsluiting; de betaalwijze kan niet meer gewijzigd worden.');
     const bij = await this.prisma.verkoop.update({
       where: { id },
       data: { betaalwijze },
@@ -344,7 +359,10 @@ export class SalesService {
       return {
         naam: l.product.naam,
         aantal,
-        eenheidsprijs: r2(naLijnTotal / aantal),
+        // De échte opgeslagen stuk-/kg-prijs (vóór verkoopkorting) tonen — niet
+        // afleiden uit lijntotaal/aantal, want bij een afgerond weeg-lijntotaal
+        // zou dat een verkeerde prijs/kg geven.
+        eenheidsprijs: saleKorting > 0 ? r2(Number(l.eenheidsprijs) / saleFactor) : Number(l.eenheidsprijs),
         btwPercentage: Number(l.btwPercentage),
         totaal: r2(naLijnTotal),
         kortingPct: lineKorting > 0 ? lineKorting : null,

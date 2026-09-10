@@ -345,6 +345,7 @@ enum Betaalwijze {
   ONLINE
   EIGEN_REKENING // eigen gebruik — telt NIET mee als omzet/inkomst
   QR             // betaald via QR-code
+  CADEAUBON      // betaald met een cadeaubon
 }
 
 enum VerkoopKanaal {
