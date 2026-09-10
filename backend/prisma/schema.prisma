@@ -291,6 +291,9 @@ model Gebruiker {
   verplaatsingen Voorraadverplaatsing[]
   dagafsluitingen Dagafsluiting[]
   cadeaubonnen   Cadeaubon[]
+  pushAbonnementen     PushAbonnement[]
+  afsluitAanvragen     DagafsluitingAanvraag[] @relation("AanvraagDoor")
+  afsluitBevestigingen DagafsluitingAanvraag[] @relation("AanvraagBevestigdDoor")
 }
 
 // ---------------------------------------------------------------------------
@@ -498,4 +501,49 @@ model Dagafsluiting {
   createdAt      DateTime     @default(now())
 
   verkopen       Verkoop[]
+  aanvraag       DagafsluitingAanvraag?
+}
+
+// ---------------------------------------------------------------------------
+//  Dagafsluiting op afstand bevestigen + pushmeldingen (beheerder-smartphone)
+// ---------------------------------------------------------------------------
+
+// Sleutel/waarde-instellingen van de server (bv. de VAPID-sleutels voor
+// pushmeldingen, die de server zelf aanmaakt en hier bewaart).
+model Instelling {
+  sleutel   String   @id
+  waarde    String
+  updatedAt DateTime @updatedAt
+}
+
+// Browser-push-abonnement van een beheerder (één per toestel/browser).
+model PushAbonnement {
+  id          String    @id @default(cuid())
+  gebruiker   Gebruiker @relation(fields: [gebruikerId], references: [id], onDelete: Cascade)
+  gebruikerId String
+  endpoint    String    @unique
+  p256dh      String
+  auth        String
+  toestel     String?   // user-agent, ter herkenning
+  createdAt   DateTime  @default(now())
+}
+
+// Aanvraag om de dag af te sluiten: de kassa vraagt aan, de beheerder
+// bevestigt (op de telefoon via de pushmelding). Pas bij bevestiging wordt de
+// echte Dagafsluiting geregistreerd. Status: OPEN | BEVESTIGD | GEWEIGERD | VERLOPEN.
+model DagafsluitingAanvraag {
+  id                String         @id @default(cuid())
+  token             String         @unique // geheime sleutel in de bevestig-link
+  status            String         @default("OPEN")
+  aangevraagdDoor   Gebruiker?     @relation("AanvraagDoor", fields: [aangevraagdDoorId], references: [id])
+  aangevraagdDoorId String?
+  bevestigdDoor     Gebruiker?     @relation("AanvraagBevestigdDoor", fields: [bevestigdDoorId], references: [id])
+  bevestigdDoorId   String?
+  totaal            Decimal        @db.Decimal(10, 2) // dagtotaal op het moment van de aanvraag (informatief)
+  aantalVerkopen    Int            @default(0)
+  verlooptOp        DateTime
+  bevestigdOp       DateTime?
+  dagafsluiting     Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
+  dagafsluitingId   String?        @unique
+  createdAt         DateTime       @default(now())
 }

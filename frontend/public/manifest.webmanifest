@@ -1,0 +1,15 @@
+{
+  "name": "Marché Kassa & Stock",
+  "short_name": "Kassa",
+  "description": "Kassa, stock en dagafsluiting van Marché",
+  "start_url": "/kassa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0d4589",
+  "lang": "nl",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

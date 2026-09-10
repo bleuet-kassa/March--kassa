@@ -9,6 +9,9 @@ import {
   getSpeciaalProducten,
   getRekeningenKassa,
   createProduct,
+  vraagDagafsluitingAan,
+  getOpenAfsluitAanvraag,
+  type AfsluitAanvraag,
   type Betaalwijze,
   type Ticket as TicketData,
   type ProductVol,
@@ -241,6 +244,34 @@ export function Kassa() {
 
   // Toont kort een bevestiging na het handmatig verversen.
   const [vernieuwd, setVernieuwd] = useState(false);
+
+  // Dagafsluiting aanvragen: de beheerder krijgt een pushmelding op de telefoon
+  // en bevestigt daar; pas dan wordt de dag geregistreerd. We tonen of er al
+  // een aanvraag openstaat (elke 45 s ververst).
+  const [afsluitAanvraag, setAfsluitAanvraag] = useState<AfsluitAanvraag | null>(null);
+  const [afsluitBezig, setAfsluitBezig] = useState(false);
+  useEffect(() => {
+    let actief = true;
+    const laad = () => getOpenAfsluitAanvraag().then((r) => { if (actief) setAfsluitAanvraag(r.aanvraag); }).catch(() => undefined);
+    laad();
+    const t = setInterval(laad, 45_000);
+    return () => { actief = false; clearInterval(t); };
+  }, []);
+  async function vraagAfsluitingAan() {
+    const herinnering = !!afsluitAanvraag;
+    if (!window.confirm(herinnering
+      ? 'Er wacht al een aanvraag op de beheerder. Nog eens een melding sturen?'
+      : 'De dagafsluiting aanvragen?\n\nDe beheerder krijgt een melding op de telefoon en bevestigt; pas dan wordt de dag afgesloten.')) return;
+    setAfsluitBezig(true);
+    try {
+      const r = await vraagDagafsluitingAan();
+      setAfsluitAanvraag(r);
+      window.alert(r.push.toestellen === 0
+        ? 'Aanvraag geregistreerd, maar er is nog geen telefoon aangemeld voor meldingen.\nDe beheerder kan dit inschakelen via Beheerder → Instellingen → "Meldingen op je telefoon".'
+        : `Melding verstuurd naar ${r.push.verstuurd} toestel(len). Zodra de beheerder bevestigt, is de dag afgesloten.`);
+    } catch (e) { window.alert(e instanceof Error ? e.message : 'Aanvragen mislukt'); }
+    finally { setAfsluitBezig(false); }
+  }
   async function vernieuwNu() {
     await laadData();
     setVernieuwd(true);
@@ -696,6 +727,14 @@ export function Kassa() {
         <button onClick={vernieuwNu} title="Producten, knoppen en rekeningen opnieuw ophalen"
           style={{ ...ticketTab(false), marginLeft: 'auto', border: '1px solid #cbd5e1', color: vernieuwd ? '#166534' : '#334155', fontWeight: 600 }}>
           {vernieuwd ? '✓ Vernieuwd' : '⟳ Vernieuwen'}
+        </button>
+        {/* Dagafsluiting aanvragen: de beheerder bevestigt op de telefoon (pushmelding). */}
+        <button onClick={vraagAfsluitingAan} disabled={afsluitBezig}
+          title={afsluitAanvraag
+            ? `Aanvraag van ${new Date(afsluitAanvraag.aangevraagdOp).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })} wacht op de beheerder — klik om nog eens een melding te sturen`
+            : 'De beheerder krijgt een melding op de telefoon en bevestigt de dagafsluiting'}
+          style={{ ...ticketTab(false), border: '1px solid #cbd5e1', color: afsluitAanvraag ? '#b45309' : '#334155', fontWeight: 600 }}>
+          {afsluitBezig ? '…' : afsluitAanvraag ? '⏳ Wacht op beheerder' : '🔒 Dag afsluiten'}
         </button>
       </div>
 

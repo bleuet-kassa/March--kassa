@@ -723,3 +723,49 @@ export async function factureerBedrijf(id: string): Promise<{ aantal: number; to
 export async function verplaatsRekeningVerkoop(verkoopId: string, bedrijfId: string, lidId: string): Promise<{ ok: true }> {
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/verkopen/${verkoopId}/verplaats`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bedrijfId, lidId }) }));
 }
+
+// --- Pushmeldingen (beheerder-smartphone) ---
+export async function getVapidPublicKey(): Promise<{ publicKey: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/push/vapid`));
+}
+export async function getPushStatus(): Promise<{ mijnToestellen: number; totaal: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/push/status`));
+}
+export async function abonneerPush(abonnement: unknown, toestel?: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/push/abonneer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ abonnement, toestel }) }));
+}
+export async function verwijderPushAbonnement(endpoint: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/push/abonneer`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) }));
+}
+export async function stuurPushTest(): Promise<{ verstuurd: number; toestellen: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/push/test`, { method: 'POST' }));
+}
+
+// --- Dagafsluiting op afstand bevestigen ---
+// De kassa vraagt aan; de beheerder bevestigt op de telefoon (geheime link).
+export type AfsluitAanvraag = {
+  id: string;
+  status: 'OPEN' | 'BEVESTIGD' | 'GEWEIGERD' | 'VERLOPEN' | string;
+  totaal: number;
+  aantalVerkopen: number;
+  aangevraagdDoor: string | null;
+  aangevraagdOp: string;
+  verlooptOp: string;
+  bevestigdOp: string | null;
+  dagafsluitingId: string | null;
+};
+export async function vraagDagafsluitingAan(): Promise<AfsluitAanvraag & { push: { verstuurd: number; toestellen: number }; herinnering: boolean }> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/aanvraag`, { method: 'POST' }));
+}
+export async function getOpenAfsluitAanvraag(): Promise<{ aanvraag: AfsluitAanvraag | null }> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/aanvraag/open`));
+}
+export async function getAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport | null }> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}`));
+}
+export async function bevestigAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport }> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}`, { method: 'POST' }));
+}
+export async function weigerAfsluitAanvraag(token: string): Promise<AfsluitAanvraag> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/weiger/${encodeURIComponent(token)}`, { method: 'POST' }));
+}

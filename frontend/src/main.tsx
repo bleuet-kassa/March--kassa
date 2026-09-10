@@ -19,6 +19,7 @@ import { Personeel } from './pages/Personeel';
 import { Website } from './pages/Website';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
+import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
 import { Login } from './pages/Login';
 import { getVerkoper, logout } from './auth';
 import { syncQueue, queueCount } from './offline';
@@ -197,6 +198,8 @@ function App() {
         {/* Publieke website (marché.eu) — geen login */}
         <Route path="/" element={<PublicSite />} />
         <Route path="/webshop" element={<WebshopPubliek />} />
+        {/* Bevestigpagina op de telefoon van de beheerder (geheime link uit de pushmelding) */}
+        <Route path="/bevestig-afsluiting/:token" element={<BevestigAfsluiting />} />
         {/* Interne personeelsapp achter login */}
         <Route path="/kassa/*" element={<StaffApp />} />
       </Routes>

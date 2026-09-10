@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
@@ -13,7 +15,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 @Injectable()
 export class DagafsluitingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private push: PushService) {}
 
   private async winkelLocatie() {
     const locatie = await this.prisma.stockLocatie.findFirst({
@@ -216,6 +218,122 @@ export class DagafsluitingService {
 
       return { id: afsluiting.id, ...rapport };
     });
+  }
+
+  // ---- Dagafsluiting op afstand bevestigen ----
+  // De kassa vraagt de afsluiting aan; de beheerder krijgt een pushmelding op
+  // de telefoon en bevestigt via een geheime link (of als ingelogde beheerder).
+  // Pas bij die bevestiging wordt de echte Dagafsluiting geregistreerd.
+
+  private publiekeUrl() {
+    return (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+  }
+
+  // Compacte weergave van een aanvraag voor de schermen (zonder de geheime token).
+  aanvraagInfo(a: {
+    id: string; status: string; totaal: Prisma.Decimal | number; aantalVerkopen: number;
+    createdAt: Date; verlooptOp: Date; bevestigdOp: Date | null; dagafsluitingId: string | null;
+    aangevraagdDoor?: { naam: string } | null;
+  }) {
+    return {
+      id: a.id, status: a.status, totaal: Number(a.totaal), aantalVerkopen: a.aantalVerkopen,
+      aangevraagdDoor: a.aangevraagdDoor?.naam ?? null, aangevraagdOp: a.createdAt,
+      verlooptOp: a.verlooptOp, bevestigdOp: a.bevestigdOp, dagafsluitingId: a.dagafsluitingId,
+    };
+  }
+
+  // De openstaande aanvraag (verlopen aanvragen worden eerst als VERLOPEN gemarkeerd).
+  async openAanvraag() {
+    await this.prisma.dagafsluitingAanvraag.updateMany({
+      where: { status: 'OPEN', verlooptOp: { lt: new Date() } },
+      data: { status: 'VERLOPEN' },
+    });
+    return this.prisma.dagafsluitingAanvraag.findFirst({
+      where: { status: 'OPEN' },
+      orderBy: { createdAt: 'desc' },
+      include: { aangevraagdDoor: { select: { naam: true } } },
+    });
+  }
+
+  // Nieuwe aanvraag (of de bestaande openstaande) + pushmelding naar de beheerders.
+  async aanvraag(gebruikerId?: string) {
+    const bestaand = await this.openAanvraag();
+    if (bestaand) {
+      // Al aangevraagd: melding nog eens sturen (herinnering), geen dubbele aanvraag.
+      const push = await this.push.naarBeheerders(this.melding(bestaand));
+      return { ...this.aanvraagInfo(bestaand), push, herinnering: true };
+    }
+    const overzicht = await this.overzicht();
+    const aantal = overzicht.dagontvangsten.aantal + overzicht.facturen.length;
+    if (aantal === 0) throw new BadRequestException('Er zijn vandaag nog geen verkopen om af te sluiten.');
+    const token = randomBytes(24).toString('base64url');
+    const a = await this.prisma.dagafsluitingAanvraag.create({
+      data: {
+        token,
+        aangevraagdDoorId: gebruikerId ?? null,
+        totaal: new Prisma.Decimal(r2(overzicht.algemeenTotaalIncl)),
+        aantalVerkopen: aantal,
+        verlooptOp: new Date(Date.now() + 6 * 60 * 60 * 1000), // 6 uur geldig
+      },
+      include: { aangevraagdDoor: { select: { naam: true } } },
+    });
+    const push = await this.push.naarBeheerders(this.melding(a));
+    return { ...this.aanvraagInfo(a), push, herinnering: false };
+  }
+
+  private melding(a: { token: string; totaal: Prisma.Decimal | number; aantalVerkopen: number; aangevraagdDoor?: { naam: string } | null }) {
+    return {
+      titel: 'Dagafsluiting bevestigen',
+      tekst: `${a.aangevraagdDoor?.naam ?? 'De kassa'} vraagt de dag af te sluiten: € ${Number(a.totaal).toFixed(2)} (${a.aantalVerkopen} verkopen). Tik om te bekijken en te bevestigen.`,
+      url: `${this.publiekeUrl()}/bevestig-afsluiting/${a.token}`,
+      tag: 'dagafsluiting',
+    };
+  }
+
+  // Publiek (met geheime token): wat de beheerder op de telefoon te zien krijgt.
+  async aanvraagViaToken(token: string) {
+    const a = await this.prisma.dagafsluitingAanvraag.findUnique({
+      where: { token },
+      include: { aangevraagdDoor: { select: { naam: true } } },
+    });
+    if (!a) throw new NotFoundException('Aanvraag niet gevonden.');
+    if (a.status === 'OPEN' && a.verlooptOp < new Date()) {
+      await this.prisma.dagafsluitingAanvraag.update({ where: { id: a.id }, data: { status: 'VERLOPEN' } });
+      a.status = 'VERLOPEN';
+    }
+    // Zolang de aanvraag openstaat: het actuele voorbeeldrapport meegeven.
+    const rapport = a.status === 'OPEN' ? await this.overzicht() : null;
+    return { ...this.aanvraagInfo(a), rapport };
+  }
+
+  // Bevestigen = de dag effectief afsluiten (registreren) en de aanvraag afronden.
+  async bevestig(token: string, beheerderId?: string) {
+    const a = await this.prisma.dagafsluitingAanvraag.findUnique({ where: { token } });
+    if (!a) throw new NotFoundException('Aanvraag niet gevonden.');
+    if (a.status !== 'OPEN') throw new BadRequestException(`Deze aanvraag is al ${a.status.toLowerCase()}.`);
+    if (a.verlooptOp < new Date()) {
+      await this.prisma.dagafsluitingAanvraag.update({ where: { id: a.id }, data: { status: 'VERLOPEN' } });
+      throw new BadRequestException('Deze aanvraag is verlopen. Vraag aan de kassa een nieuwe aan.');
+    }
+    const rapport = await this.afsluiten(beheerderId ?? a.aangevraagdDoorId ?? undefined);
+    const bij = await this.prisma.dagafsluitingAanvraag.update({
+      where: { id: a.id },
+      data: { status: 'BEVESTIGD', bevestigdOp: new Date(), bevestigdDoorId: beheerderId ?? null, dagafsluitingId: rapport.id },
+      include: { aangevraagdDoor: { select: { naam: true } } },
+    });
+    return { ...this.aanvraagInfo(bij), rapport };
+  }
+
+  async weiger(token: string) {
+    const a = await this.prisma.dagafsluitingAanvraag.findUnique({ where: { token } });
+    if (!a) throw new NotFoundException('Aanvraag niet gevonden.');
+    if (a.status !== 'OPEN') throw new BadRequestException(`Deze aanvraag is al ${a.status.toLowerCase()}.`);
+    const bij = await this.prisma.dagafsluitingAanvraag.update({
+      where: { id: a.id },
+      data: { status: 'GEWEIGERD' },
+      include: { aangevraagdDoor: { select: { naam: true } } },
+    });
+    return this.aanvraagInfo(bij);
   }
 
   // Toont een bewaarde afsluiting ONVERANDERLIJK: exact de cijfers die bij het
