@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   getVerkopen, getTicket, annuleerVerkoop, wijzigVerkoopBetaalwijze, verwijderVerkoop,
   type VerkoopKort, type Ticket, type Betaalwijze,
@@ -33,6 +33,26 @@ export function Verkopen() {
   const [fout, setFout] = useState('');
   const [betaalRij, setBetaalRij] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
+  // De "Verwijderen"-knop is verborgen tot de sneltoetsreeks "D", "+", "Enter"
+  // na elkaar wordt ingedrukt. Daarna blijft hij zichtbaar zolang dit scherm
+  // openstaat (bij het verlaten van het tabblad wordt de component ontladen en
+  // reset dit vanzelf).
+  const [toonVerwijder, setToonVerwijder] = useState(false);
+  const stap = useRef(0); // 0 = wacht op D, 1 = D gehad (wacht op +), 2 = + gehad (wacht op Enter)
+  useEffect(() => {
+    function opToets(e: KeyboardEvent) {
+      const doel = e.target as HTMLElement | null;
+      const tag = doel?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // niet tijdens typen
+      if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // modifiers breken de reeks niet af
+      if (stap.current === 0 && (e.key === 'd' || e.key === 'D')) { stap.current = 1; return; }
+      if (stap.current === 1 && e.key === '+') { stap.current = 2; return; }
+      if (stap.current === 2 && e.key === 'Enter') { setToonVerwijder(true); stap.current = 0; return; }
+      stap.current = 0; // elke andere toets begint de reeks opnieuw
+    }
+    window.addEventListener('keydown', opToets);
+    return () => window.removeEventListener('keydown', opToets);
+  }, []);
 
   async function laad() {
     setFout('');
@@ -155,7 +175,9 @@ export function Verkopen() {
                       : <button onClick={() => annuleer(v)} disabled={bezig} style={btnRood}>Annuleren</button>}
                   </>
                 )}
-                <button onClick={() => verwijder(v)} disabled={bezig} title="Verkoop definitief verwijderen (enkel beheerder, met wachtwoord)" style={btnVerwijder}>Verwijderen</button>
+                {toonVerwijder && (
+                  <button onClick={() => verwijder(v)} disabled={bezig} title="Verkoop definitief verwijderen (enkel beheerder, met wachtwoord)" style={btnVerwijder}>Verwijderen</button>
+                )}
               </td>
             </tr>
             );
