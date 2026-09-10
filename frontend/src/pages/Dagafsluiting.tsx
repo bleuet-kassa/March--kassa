@@ -17,6 +17,7 @@ function betaalNaam(b?: string | null): string {
     case 'OVERSCHRIJVING': return 'Overschrijving';
     case 'QR': return 'QR-code';
     case 'EIGEN_REKENING': return 'Eigen rekening';
+    case 'OP_REKENING': return 'Op rekening';
     case 'ONLINE': return 'Online';
     default: return b ?? '—';
   }

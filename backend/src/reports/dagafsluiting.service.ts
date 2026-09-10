@@ -89,7 +89,9 @@ export class DagafsluitingService {
       }
       ontvAantal++;
       ontvIncl += incl; ontvBtw += btw; ontvExcl += incl - btw;
-      const bw = v.betaalwijze ?? 'ONBEKEND';
+      // Verkopen zonder directe betaalwijze zijn "op rekening" (later gefactureerd);
+      // enkel als er écht geen rekening én geen betaalwijze is, blijft het onbekend.
+      const bw = v.betaalwijze ?? (v.rekeningBedrijfId ? 'OP_REKENING' : 'ONBEKEND');
       perBetaalwijze[bw] = r2((perBetaalwijze[bw] ?? 0) + incl);
       for (const t of perTarief.values()) {
         const k = t.percentage.toFixed(2);
