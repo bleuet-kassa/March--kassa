@@ -1517,7 +1517,8 @@ export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop',
     return () => clearTimeout(t);
   }, [autoPrint]);
 
-  const betaalLabel = betaalNaam(ticket.betaalwijze);
+  // Geen betaalwijze en geen deelbetalingen = verkoop "op rekening".
+  const betaalLabel = ticket.betaalwijze ? betaalNaam(ticket.betaalwijze) : 'Op rekening';
   return (
     <div style={{ maxWidth: 380 }}>
       <style>{`

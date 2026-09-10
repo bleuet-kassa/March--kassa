@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './touchscroll';
@@ -104,6 +104,18 @@ function StaffApp() {
     };
   }, [verkoper]);
 
+  // Beheerder-dropdown in de navigatie: sluit na een klik op een item of buiten het menu.
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const sluitMenu = () => { if (menuRef.current) menuRef.current.open = false; };
+  useEffect(() => {
+    function buiten(e: MouseEvent) {
+      const m = menuRef.current;
+      if (m && m.open && !m.contains(e.target as Node)) m.open = false;
+    }
+    document.addEventListener('click', buiten);
+    return () => document.removeEventListener('click', buiten);
+  }, []);
+
   if (!verkoper) {
     return <Login onIngelogd={() => setVerkoperState(getVerkoper())} />;
   }
@@ -115,19 +127,33 @@ function StaffApp() {
         <strong>Kassa & Stock</strong>
         <Link to="/kassa">Kassa</Link>
         <Link to="/kassa/verkopen">Verkopen</Link>
-        <Link to="/kassa/dagafsluiting">Dagafsluiting</Link>
         <Link to="/kassa/beheer">Beheer</Link>
         <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>
-        <Link to="/kassa/facturen">Facturen</Link>
-        <Link to="/kassa/boekhouding">Boekhouding</Link>
-        {isAdmin && <Link to="/kassa/rapporten">Rapporten</Link>}
         {isAdmin && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
         {isAdmin && <Link to="/kassa/bestellingen">Bestellingen</Link>}
-        <Link to="/kassa/rekeningen">Rekeningen</Link>
         {isAdmin && <Link to="/kassa/kortingen">Kortingen</Link>}
-        {isAdmin && <Link to="/kassa/personeel">Personeel</Link>}
         {isAdmin && <Link to="/kassa/website">Website</Link>}
-        {isAdmin && <Link to="/kassa/instellingen">Instellingen</Link>}
+        {isAdmin && (
+          /* Beheerder-menu: alles wat andere medewerkers niet hoeven te zien, in één dropdown. */
+          <details ref={menuRef} style={{ position: 'relative' }}>
+            <summary style={{ cursor: 'pointer', listStyle: 'none', fontWeight: 700, color: '#0d4589', userSelect: 'none', padding: '4px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+              Beheerder ▾
+            </summary>
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 6, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: 6, display: 'flex', flexDirection: 'column', minWidth: 200 }}>
+              {([
+                ['/kassa/dagafsluiting', 'Dagafsluiting'],
+                ['/kassa/facturen', 'Facturen inlezen'],
+                ['/kassa/boekhouding', 'Boekhouding'],
+                ['/kassa/rapporten', 'Rapporten'],
+                ['/kassa/rekeningen', 'Klant factuur'],
+                ['/kassa/personeel', 'Personeel'],
+                ['/kassa/instellingen', 'Instellingen'],
+              ] as [string, string][]).map(([pad, naam]) => (
+                <Link key={pad} to={pad} onClick={sluitMenu} style={{ padding: '10px 12px', borderRadius: 6, textDecoration: 'none', color: '#111827', fontSize: 15 }}>{naam}</Link>
+              ))}
+            </div>
+          </details>
+        )}
         <span style={{ marginLeft: 'auto' }}><VerbindingStatus /></span>
         <span style={{ color: '#666' }}>
           {verkoper.naam} ({verkoper.rol})
@@ -143,16 +169,17 @@ function StaffApp() {
         <Routes>
           <Route index element={<Kassa />} />
           <Route path="verkopen" element={<Verkopen />} />
-          <Route path="dagafsluiting" element={<Dagafsluiting />} />
+          {/* Beheerder-menu: enkel voor beheerders (ook als iemand de URL rechtstreeks intikt) */}
+          <Route path="dagafsluiting" element={isAdmin ? <Dagafsluiting /> : <div>Enkel voor beheerders.</div>} />
           <Route path="beheer" element={<Beheer />} />
           <Route path="cadeaubonnen" element={<Cadeaubonnen />} />
-          <Route path="facturen" element={<Facturen />} />
-          <Route path="boekhouding" element={<Boekhouding />} />
+          <Route path="facturen" element={isAdmin ? <Facturen /> : <div>Enkel voor beheerders.</div>} />
+          <Route path="boekhouding" element={isAdmin ? <Boekhouding /> : <div>Enkel voor beheerders.</div>} />
           <Route path="rapporten" element={isAdmin ? <Rapporten /> : <div>Enkel voor beheerders.</div>} />
           <Route path="kortingen" element={isAdmin ? <Kortingen /> : <div>Enkel voor beheerders.</div>} />
           <Route path="webshop-assortiment" element={isAdmin ? <WebshopAssortiment /> : <div>Enkel voor beheerders.</div>} />
           <Route path="bestellingen" element={isAdmin ? <Bestellingen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="rekeningen" element={<Rekeningen />} />
+          <Route path="rekeningen" element={isAdmin ? <Rekeningen /> : <div>Enkel voor beheerders.</div>} />
           <Route path="personeel" element={isAdmin ? <Personeel /> : <div>Enkel voor beheerders.</div>} />
           <Route path="website" element={isAdmin ? <Website /> : <div>Enkel voor beheerders.</div>} />
           <Route path="instellingen" element={isAdmin ? <Instellingen /> : <div>Enkel voor beheerders.</div>} />
