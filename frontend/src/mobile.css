@@ -1,0 +1,37 @@
+/* Smartphone-weergave van de kassa-app (alle pagina's onder /kassa en de
+   bevestigpagina). Bewust minimaal: geen andere lay-out, wel leesbaar en
+   bedienbaar op een klein scherm. */
+
+@media (max-width: 640px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-size: 15px; }
+
+  /* Navigatie: compacter, links mogen over meerdere rijen lopen. */
+  nav { padding: 8px 10px !important; gap: 8px 12px !important; font-size: 15px; }
+  nav > strong { width: 100%; }
+  main { padding: 10px !important; }
+
+  /* Formulieren: 16px voorkomt het automatisch inzoomen op iPhone; grotere tikdoelen. */
+  input, select, textarea, button { font-size: 16px !important; }
+  button { min-height: 40px; }
+  input[type="date"], input[type="text"], input[type="number"], select { max-width: 100%; }
+
+  /* Tabellen: horizontaal scrollen binnen de pagina i.p.v. de hele pagina breed maken. */
+  main table { display: block; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  main table th, main table td { white-space: nowrap; }
+  /* Kolommen met artikelnamen mogen wél afbreken (anders eindeloos scrollen). */
+  main table td[style*="wordBreak"], main table td[style*="word-break"] { white-space: normal; }
+
+  /* Kaarten en kolommen: nooit breder dan het scherm. */
+  main > div { max-width: 100% !important; }
+  main h2 { font-size: 20px; }
+
+  /* Kassaticket-weergave: volledige breedte op de telefoon. */
+  .ticket-print { max-width: 100%; }
+}
+
+/* Heel smalle schermen: producttegels in de kassa iets kleiner. */
+@media (max-width: 400px) {
+  main { padding: 8px !important; }
+  nav a { font-size: 14px; }
+}

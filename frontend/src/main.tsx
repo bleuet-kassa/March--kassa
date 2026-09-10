@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './touchscroll';
+import './mobile.css'; // smartphone-weergave (compacte navigatie, scrollende tabellen, grotere tikdoelen)
 import { Kassa } from './pages/Kassa';
 import { Verkopen } from './pages/Verkopen';
 import { Dagafsluiting } from './pages/Dagafsluiting';
