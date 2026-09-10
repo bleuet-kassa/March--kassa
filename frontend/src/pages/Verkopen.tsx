@@ -45,8 +45,11 @@ export function Verkopen() {
       const tag = doel?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // niet tijdens typen
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // modifiers breken de reeks niet af
+      // "+" komt afhankelijk van toetsenbord/lay-out binnen als '+', '=' (Shift+=),
+      // of via de code Equal/NumpadAdd — we aanvaarden ze allemaal.
+      const isPlus = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd' || e.code === 'Equal';
       if (stap.current === 0 && (e.key === 'd' || e.key === 'D')) { stap.current = 1; return; }
-      if (stap.current === 1 && e.key === '+') { stap.current = 2; return; }
+      if (stap.current === 1 && isPlus) { stap.current = 2; return; }
       if (stap.current === 2 && e.key === 'Enter') { setToonVerwijder(true); stap.current = 0; return; }
       stap.current = 0; // elke andere toets begint de reeks opnieuw
     }
