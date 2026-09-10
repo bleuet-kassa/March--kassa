@@ -82,6 +82,28 @@ function TestBanner() {
 function StaffApp() {
   const [verkoper, setVerkoperState] = useState(getVerkoper());
 
+  // Een ingelogde beheerder wordt na 15 minuten zonder activiteit automatisch
+  // uitgelogd. Elke muis-/toets-/touch-actie zet de teller opnieuw op 15 min.
+  // Geldt bewust NIET voor het gewone kassa-account (dat moet de hele dag open blijven).
+  useEffect(() => {
+    const rol = verkoper?.rol;
+    const beheerder = rol === 'BEHEERDER' || rol === 'BEHEER';
+    if (!beheerder) return;
+    const INACTIEF_MS = 15 * 60 * 1000;
+    let timer: number | undefined;
+    const herstart = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { logout(); setVerkoperState(null); }, INACTIEF_MS);
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach((ev) => window.addEventListener(ev, herstart, { passive: true }));
+    herstart(); // teller starten bij (her)inloggen
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, herstart));
+    };
+  }, [verkoper]);
+
   if (!verkoper) {
     return <Login onIngelogd={() => setVerkoperState(getVerkoper())} />;
   }

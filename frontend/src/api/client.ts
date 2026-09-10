@@ -110,11 +110,10 @@ export async function wijzigVerkoopBetaalwijze(id: string, betaalwijze: Betaalwi
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ betaalwijze, wachtwoord }),
   }));
 }
-// Een verkoop volledig verwijderen (harde delete, enkel beheerder met wachtwoord).
-export async function verwijderVerkoop(id: string, wachtwoord: string): Promise<{ ok: true; id: string }> {
-  return jsonOrThrow(await fetch(`${BASE}/verkopen/${id}`, {
-    method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wachtwoord }),
-  }));
+// Een verkoop volledig verwijderen (harde delete). De server laat dit enkel toe
+// voor een ingelogde beheerder (rol BEHEER/BEHEERDER); geen wachtwoord nodig.
+export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkopen/${id}`, { method: 'DELETE' }));
 }
 
 // --- Auth (verkoper) ---

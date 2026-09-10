@@ -3,6 +3,7 @@ import {
   getVerkopen, getTicket, annuleerVerkoop, wijzigVerkoopBetaalwijze, verwijderVerkoop,
   type VerkoopKort, type Ticket, type Betaalwijze,
 } from '../api/client';
+import { getVerkoper } from '../auth';
 import { TicketWeergave } from './Kassa';
 
 const euro = (n: number) => '€ ' + n.toFixed(2);
@@ -33,13 +34,17 @@ export function Verkopen() {
   const [fout, setFout] = useState('');
   const [betaalRij, setBetaalRij] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
+  // Enkel een ingelogde beheerder mag verkopen verwijderen.
+  const rol = getVerkoper()?.rol;
+  const isBeheerder = rol === 'BEHEER' || rol === 'BEHEERDER';
   // De "Verwijderen"-knop is verborgen tot de sneltoetsreeks "D", "+", "Enter"
-  // na elkaar wordt ingedrukt. Daarna blijft hij zichtbaar zolang dit scherm
-  // openstaat (bij het verlaten van het tabblad wordt de component ontladen en
-  // reset dit vanzelf).
+  // na elkaar wordt ingedrukt (en enkel voor een beheerder). Daarna blijft hij
+  // zichtbaar zolang dit scherm openstaat (bij het verlaten van het tabblad wordt
+  // de component ontladen en reset dit vanzelf).
   const [toonVerwijder, setToonVerwijder] = useState(false);
   const stap = useRef(0); // 0 = wacht op D, 1 = D gehad (wacht op +), 2 = + gehad (wacht op Enter)
   useEffect(() => {
+    if (!isBeheerder) return; // geen sneltoets voor niet-beheerders
     function opToets(e: KeyboardEvent) {
       const doel = e.target as HTMLElement | null;
       const tag = doel?.tagName;
@@ -55,7 +60,7 @@ export function Verkopen() {
     }
     window.addEventListener('keydown', opToets);
     return () => window.removeEventListener('keydown', opToets);
-  }, []);
+  }, [isBeheerder]);
 
   async function laad() {
     setFout('');
@@ -89,10 +94,8 @@ export function Verkopen() {
       'Dit kan niet ongedaan gemaakt worden.' + waarschuwing + '\n\n' +
       'Heb je deze wijziging ook in Scrada doorgevoerd? Klik OK om te bevestigen.',
     )) return;
-    const wachtwoord = window.prompt('Beheerderswachtwoord om het verwijderen te bevestigen:');
-    if (!wachtwoord) return;
     setBezig(true); setFout('');
-    try { await verwijderVerkoop(v.id, wachtwoord); await laad(); }
+    try { await verwijderVerkoop(v.id); await laad(); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
     finally { setBezig(false); }
   }
@@ -178,8 +181,8 @@ export function Verkopen() {
                       : <button onClick={() => annuleer(v)} disabled={bezig} style={btnRood}>Annuleren</button>}
                   </>
                 )}
-                {toonVerwijder && (
-                  <button onClick={() => verwijder(v)} disabled={bezig} title="Verkoop definitief verwijderen (enkel beheerder, met wachtwoord)" style={btnVerwijder}>Verwijderen</button>
+                {isBeheerder && toonVerwijder && (
+                  <button onClick={() => verwijder(v)} disabled={bezig} title="Verkoop definitief verwijderen (enkel beheerder)" style={btnVerwijder}>Verwijderen</button>
                 )}
               </td>
             </tr>

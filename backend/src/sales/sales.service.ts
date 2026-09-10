@@ -2,7 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
-  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Betaalwijze, GebruikerRol, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -301,7 +301,9 @@ export class SalesService {
     for (const a of admins) {
       if (await bcrypt.compare(wachtwoord ?? '', a.wachtwoordHash)) return;
     }
-    throw new UnauthorizedException('Beheerderswachtwoord ontbreekt of is onjuist.');
+    // Bewust 403 (niet 401): een fout beheerderswachtwoord mag de kassasessie
+    // NIET uitloggen (de globale 401-interceptor stuurt anders terug naar login).
+    throw new ForbiddenException('Beheerderswachtwoord ontbreekt of is onjuist.');
   }
 
   // Wijzigt de betaalwijze van een bestaande verkoop (bv. verkeerd aangeduid).
@@ -322,13 +324,13 @@ export class SalesService {
     return this.metTicket(bij);
   }
 
-  // Verwijdert een verkoop volledig uit het systeem (harde delete). Enkel de
-  // beheerder mag dit (wachtwoord). Mag ook voor een reeds afgesloten verkoop:
-  // het reeds geregistreerde dagafsluitingsrapport blijft ongewijzigd (dat toont
-  // een bewaarde momentopname), maar de onderliggende verkoop verdwijnt. De
+  // Verwijdert een verkoop volledig uit het systeem (harde delete). De route is
+  // afgeschermd met @Rollen('BEHEER','BEHEERDER'), dus enkel een ingelogde
+  // beheerder komt hier. Mag ook voor een reeds afgesloten verkoop: het reeds
+  // geregistreerde dagafsluitingsrapport blijft ongewijzigd (dat toont een
+  // bewaarde momentopname), maar de onderliggende verkoop verdwijnt. De
   // beheerder past de wijziging dan ook in Scrada aan.
-  async verwijder(id: string, wachtwoord: string) {
-    await this.beheerderCheck(wachtwoord);
+  async verwijder(id: string) {
     const verkoop = await this.prisma.verkoop.findUnique({
       where: { id },
       include: { lijnen: { include: { product: true } } },

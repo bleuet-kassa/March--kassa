@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Betaalwijze } from '@prisma/client';
 import { SalesService, AfrekenInput } from './sales.service';
+import { Rollen } from '../auth/auth.guard';
 
 @Controller('verkopen')
 export class SalesController {
@@ -37,9 +38,11 @@ export class SalesController {
     return this.sales.wijzigBetaalwijze(id, body.betaalwijze, body.wachtwoord);
   }
 
-  // DELETE /verkopen/:id  -> verkoop volledig verwijderen (enkel beheerder, met wachtwoord)
+  // DELETE /verkopen/:id  -> verkoop volledig verwijderen. Enkel voor een
+  // ingelogde beheerder (server-side afgedwongen via @Rollen); geen wachtwoord.
   @Delete(':id')
-  verwijder(@Param('id') id: string, @Body() body: { wachtwoord: string }) {
-    return this.sales.verwijder(id, body?.wachtwoord);
+  @Rollen('BEHEER', 'BEHEERDER')
+  verwijder(@Param('id') id: string) {
+    return this.sales.verwijder(id);
   }
 }
