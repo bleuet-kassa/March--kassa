@@ -189,8 +189,14 @@ export function Rekeningen() {
                   <button onClick={() => bewerkLid(l)} title="Personeelslid aanpassen" style={{ ...btnMini, padding: '2px 7px', fontSize: 12 }}>✎</button>
                 </div>
                 <div style={{ fontSize: 13, color: '#374151' }}>
-                  Verbruikt: <strong>{euro(l.verbruikt)}</strong>
-                  {l.budget != null && <> / budget {euro(l.budget)}{(l.verbruikt ?? 0) > l.budget && <span style={{ color: 'crimson' }}> ⚠</span>}</>}
+                  Openstaand: <strong>{euro(l.verbruikt)}</strong>
+                </div>
+                {/* Maandbudget: maximaal maandbedrag op rekening, afgedwongen aan de kassa. */}
+                <div style={{ fontSize: 13, color: l.budget != null && (l.verbruiktMaand ?? 0) > l.budget ? 'crimson' : '#6b7280' }}>
+                  Deze maand: {euro(l.verbruiktMaand)}
+                  {l.budget != null
+                    ? <> / max. {euro(l.budget)}{(l.verbruiktMaand ?? 0) > l.budget ? ' ⚠ overschreden' : ` (nog ${euro(Math.max(0, l.budget - (l.verbruiktMaand ?? 0)))})`}</>
+                    : ' · geen maandmaximum'}
                 </div>
               </div>
             ))}

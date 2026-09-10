@@ -676,7 +676,8 @@ export async function uploadSiteAfbeelding(bestand: File): Promise<{ id: string;
 }
 
 // --- Lopende rekeningen (B2B "op rekening") ---
-export type RekeningLid = { id: string; naam: string; budget?: number | null; actief?: boolean; verbruikt?: number };
+// budget = maximaal maandbedrag; verbruikt = openstaand (niet gefactureerd); verbruiktMaand = deze kalendermaand.
+export type RekeningLid = { id: string; naam: string; budget?: number | null; actief?: boolean; verbruikt?: number; verbruiktMaand?: number };
 export type RekeningBedrijf = {
   id: string; naam: string; btwNummer?: string | null; adres?: string | null; email?: string | null;
   actief?: boolean; openstaand?: number; leden: RekeningLid[];

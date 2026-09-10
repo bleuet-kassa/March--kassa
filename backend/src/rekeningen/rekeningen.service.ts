@@ -8,13 +8,44 @@ import { PrismaService } from '../prisma/prisma.service';
 export class RekeningenService {
   constructor(private prisma: PrismaService) {}
 
-  // Actieve bedrijven + leden (voor de keuze aan de kassa).
-  voorKassa() {
-    return this.prisma.rekeningBedrijf.findMany({
-      where: { actief: true },
-      include: { leden: { where: { actief: true }, orderBy: { naam: 'asc' } } },
-      orderBy: { naam: 'asc' },
+  // Begin van de huidige kalendermaand (voor het maandbudget per personeelslid).
+  private maandStart() {
+    const nu = new Date();
+    return new Date(nu.getFullYear(), nu.getMonth(), 1);
+  }
+
+  // Verbruik per personeelslid in de huidige kalendermaand (alle niet-geannuleerde
+  // verkopen op rekening, gefactureerd of niet) — de basis voor het maandbudget.
+  private async verbruikDezeMaand() {
+    const rijen = await this.prisma.verkoop.groupBy({
+      by: ['rekeningLidId'],
+      where: { rekeningLidId: { not: null }, geannuleerd: false, datum: { gte: this.maandStart() } },
+      _sum: { totaal: true },
     });
+    const per = new Map<string, number>();
+    for (const r of rijen) if (r.rekeningLidId) per.set(r.rekeningLidId, Math.round(Number(r._sum.totaal ?? 0) * 100) / 100);
+    return per;
+  }
+
+  // Actieve bedrijven + leden (voor de keuze aan de kassa), met per lid het
+  // maandbudget en wat er deze maand al verbruikt is.
+  async voorKassa() {
+    const [bedrijven, maand] = await Promise.all([
+      this.prisma.rekeningBedrijf.findMany({
+        where: { actief: true },
+        include: { leden: { where: { actief: true }, orderBy: { naam: 'asc' } } },
+        orderBy: { naam: 'asc' },
+      }),
+      this.verbruikDezeMaand(),
+    ]);
+    return bedrijven.map((b) => ({
+      id: b.id, naam: b.naam, btwNummer: b.btwNummer, adres: b.adres, email: b.email, actief: b.actief,
+      leden: b.leden.map((l) => ({
+        id: l.id, naam: l.naam, actief: l.actief,
+        budget: l.budget != null ? Number(l.budget) : null,
+        verbruiktMaand: maand.get(l.id) ?? 0,
+      })),
+    }));
   }
 
   // --- Beheer van bedrijven ---
@@ -65,10 +96,13 @@ export class RekeningenService {
       include: { leden: { orderBy: { naam: 'asc' } } },
       orderBy: { naam: 'asc' },
     });
-    const open = await this.prisma.verkoop.findMany({
-      where: { rekeningBedrijfId: { not: null }, gefactureerd: false },
-      select: { rekeningBedrijfId: true, rekeningLidId: true, totaal: true },
-    });
+    const [open, maand] = await Promise.all([
+      this.prisma.verkoop.findMany({
+        where: { rekeningBedrijfId: { not: null }, gefactureerd: false },
+        select: { rekeningBedrijfId: true, rekeningLidId: true, totaal: true },
+      }),
+      this.verbruikDezeMaand(),
+    ]);
     const perBedrijf = new Map<string, number>();
     const perLid = new Map<string, number>();
     for (const v of open) {
@@ -82,7 +116,8 @@ export class RekeningenService {
       leden: b.leden.map((l) => ({
         id: l.id, naam: l.naam, actief: l.actief,
         budget: l.budget != null ? Number(l.budget) : null,
-        verbruikt: Math.round((perLid.get(l.id) ?? 0) * 100) / 100,
+        verbruikt: Math.round((perLid.get(l.id) ?? 0) * 100) / 100, // openstaand (nog niet gefactureerd)
+        verbruiktMaand: maand.get(l.id) ?? 0, // deze kalendermaand (basis voor het maandbudget)
       })),
     }));
   }

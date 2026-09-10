@@ -173,6 +173,28 @@ export class SalesService {
     // Hoofdbetaalwijze (voor weergave/terugvalwaarde): de eerste betaling.
     const hoofdBetaalwijze = betaalLijnen[0]?.betaalwijze ?? betaalwijze ?? null;
 
+    // Maandbudget op rekening: wat dit personeelslid deze kalendermaand al kocht
+    // (niet-geannuleerd, gefactureerd of niet) + deze verkoop mag het ingestelde
+    // maandbudget niet overschrijden. Geen budget ingesteld = geen limiet.
+    if (rekeningLidId) {
+      const lid = await this.prisma.rekeningLid.findUnique({ where: { id: rekeningLidId } });
+      if (lid?.budget != null) {
+        const nu = new Date();
+        const som = await this.prisma.verkoop.aggregate({
+          _sum: { totaal: true },
+          where: { rekeningLidId, geannuleerd: false, datum: { gte: new Date(nu.getFullYear(), nu.getMonth(), 1) } },
+        });
+        const verbruikt = Number(som._sum.totaal ?? 0);
+        const budget = Number(lid.budget);
+        if (verbruikt + totaal > budget + 0.005) {
+          throw new BadRequestException(
+            `Maandbudget van ${lid.naam} overschreden: deze maand al € ${verbruikt.toFixed(2)} + deze verkoop € ${totaal.toFixed(2)} ` +
+            `= € ${(verbruikt + totaal).toFixed(2)}, maandbudget € ${budget.toFixed(2)} (nog € ${Math.max(0, budget - verbruikt).toFixed(2)} beschikbaar).`,
+          );
+        }
+      }
+    }
+
     // Cash-limiet €3.000 (wettelijk).
     if (betaalwijze === 'CASH' && totaal > CASH_LIMIET) {
       throw new BadRequestException(

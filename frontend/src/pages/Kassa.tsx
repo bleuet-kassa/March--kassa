@@ -1025,6 +1025,19 @@ export function Kassa() {
                   <option value="">— personeelslid —</option>
                   {(rekeningBedrijven.find((rb) => rb.id === bon.rekeningBedrijfId)?.leden ?? []).map((l) => <option key={l.id} value={l.id}>{l.naam}</option>)}
                 </select>
+                {/* Maandbudget van het gekozen personeelslid: wat er nog beschikbaar is (de server weigert bij overschrijding). */}
+                {(() => {
+                  const lid = rekeningBedrijven.find((rb) => rb.id === bon.rekeningBedrijfId)?.leden.find((l) => l.id === bon.rekeningLidId);
+                  if (!lid || lid.budget == null) return null;
+                  const rest = Math.round((lid.budget - (lid.verbruiktMaand ?? 0)) * 100) / 100;
+                  const over = totaal > rest + 0.005;
+                  return (
+                    <div style={{ flexBasis: '100%', fontSize: 13, color: over ? '#b91c1c' : '#166534', fontWeight: over ? 700 : 500 }}>
+                      Maandbudget {lid.naam}: nog € {Math.max(0, rest).toFixed(2)} van € {lid.budget.toFixed(2)}
+                      {over && ` — dit ticket (€ ${totaal.toFixed(2)}) overschrijdt het budget`}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {bon.gesplitst && (
