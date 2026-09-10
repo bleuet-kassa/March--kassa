@@ -49,6 +49,15 @@ type Lijn = {
 // van het totaal (en van een lopende rekening) wordt afgetrokken.
 const tekenAantal = (l: Lijn) => (l.retour ? -Math.abs(l.aantal) : l.aantal);
 
+// Rondt een prijs (in euro) naar boven af op 10 cent — op de grootte, zodat het
+// symmetrisch is voor negatieve bedragen. Bv. 4,47 -> 4,50 · 1,99 -> 2,00.
+// Zelfde logica als de server, zodat de kassa hetzelfde toont als wat geboekt wordt.
+const rond10 = (euro: number) => {
+  const cent = Math.round(euro * 100);
+  const teken = cent < 0 ? -1 : 1;
+  return (teken * Math.ceil(Math.abs(cent) / 10) * 10) / 100;
+};
+
 const ADMIN_ROLLEN = ['BEHEER', 'BEHEERDER'];
 
 // Nette naam van een betaalwijze (voor de knoppen, het ticket en de dagafsluiting).
@@ -266,7 +275,7 @@ export function Kassa() {
         key: genKey(),
         productId: p.id,
         naam: `Prijs/kg (${gewicht.toFixed(3)} kg)`,
-        prijs: prijsPerKg,
+        prijs: rond10(prijsPerKg), // prijs/kg op 10 cent naar boven
         btwPercentage: Number(p.btwTarief.percentage),
         isAlcohol: false,
         aantal: gewicht,
@@ -288,7 +297,7 @@ export function Kassa() {
         key: genKey(),
         productId: sp.id,
         naam: sp.naam,
-        prijs: Math.round(bedrag * 100) / 100,
+        prijs: rond10(bedrag), // op 10 cent naar boven
         btwPercentage: Number(sp.btwTarief.percentage),
         isAlcohol: false,
         aantal: aantal > 0 ? aantal : 1,
@@ -320,7 +329,7 @@ export function Kassa() {
           key: genKey(),
           productId: p.id,
           naam: p.naam,
-          prijs: Number(p.verkoopprijs),
+          prijs: rond10(Number(p.verkoopprijs)), // verkoopprijs (per stuk of per kg) op 10 cent naar boven
           btwPercentage: Number(p.btwTarief.percentage),
           isAlcohol: p.isAlcohol,
           aantal,

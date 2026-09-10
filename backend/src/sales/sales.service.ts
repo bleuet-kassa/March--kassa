@@ -36,6 +36,13 @@ export type AfrekenInput = {
 const naarCent = (n: number) => Math.round(n * 100);
 const naarEuro = (c: number) => c / 100;
 
+// Rondt een bedrag (in centen) naar boven af op 10 cent — op de grootte, zodat
+// een retour (negatief) symmetrisch afrondt. Bv. 447 -> 450, -447 -> -450.
+const naarBoven10 = (cent: number) => {
+  const teken = cent < 0 ? -1 : 1;
+  return teken * Math.ceil(Math.abs(cent) / 10) * 10;
+};
+
 @Injectable()
 export class SalesService {
   constructor(private prisma: PrismaService) {}
@@ -103,7 +110,11 @@ export class SalesService {
       // "Diversen"/vrij-bedrag: enkel producten met vrijePrijs mogen een eigen
       // bedrag meesturen (kassier tikt het in). Anders altijd de vaste prijs.
       const vrij = product.vrijePrijs && Number(l.bedrag) > 0;
-      const stukCent = vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
+      let stukCent = vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
+      // Afronding op 10 cent naar boven op de VERKOOPPRIJS zelf (geen extra bedrag),
+      // enkel aan de kassa (niet in de webshop, waar de klant de catalogusprijs ziet).
+      // Stukproduct: stukprijs · weegproduct: prijs/kg · diversen: ingetikt bedrag.
+      if ((kanaal ?? 'KASSA') === 'KASSA') stukCent = naarBoven10(stukCent);
       const aantal = l.aantal; // bedrag is de stukprijs; aantal telt (ook bij diversen)
       // Eerst de lijnkorting, dan de verkoopbrede korting (gestapeld).
       const naLijnKortingCent = stukCent * (1 - korting / 100);
