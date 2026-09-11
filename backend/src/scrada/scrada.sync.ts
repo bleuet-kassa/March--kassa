@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ScradaService, SYNC_UUR } from './scrada.service';
+import { SYNC_UUR } from './scrada.service';
+import { ScradaDagboekService } from './scrada.dagboek.service';
 
 // Dagelijkse automatische synchronisatie naar Scrada om 23:59 (Belgische tijd).
 // Elke minuut kijken we op de klok van Europe/Brussels; precies om SYNC_UUR
@@ -13,7 +14,7 @@ export class ScradaSync implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private bezig = false;
 
-  constructor(private prisma: PrismaService, private scrada: ScradaService) {}
+  constructor(private prisma: PrismaService, private dagboek: ScradaDagboekService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => { void this.tik(); }, 60_000);
@@ -44,7 +45,8 @@ export class ScradaSync implements OnModuleInit, OnModuleDestroy {
 
     this.bezig = true;
     try {
-      const r = await this.scrada.verstuurOpenstaande();
+      // Dagontvangstenboek: alle afgesloten dagen vanaf de startdatum die nog niet verstuurd zijn.
+      const r = await this.dagboek.verstuurOpenstaandeDagen();
       const verslag = { datum, moment: new Date().toISOString(), ...r };
       await this.prisma.instelling.upsert({
         where: { sleutel: 'scrada.laatsteSync' },

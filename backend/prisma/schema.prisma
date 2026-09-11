@@ -502,6 +502,12 @@ model Dagafsluiting {
 
   verkopen       Verkoop[]
   aanvraag       DagafsluitingAanvraag?
+
+  // Scrada-dagontvangstenboek: deze afsluiting als dagboeking versturen.
+  scradaStatus      String    @default("NIET_VERSTUURD") // NIET_VERSTUURD | VERSTUURD | FOUT
+  scradaRef         String?   // laatste journaallijn-ID in Scrada
+  scradaVerstuurdOp DateTime?
+  scradaFout        String?
 }
 
 // ---------------------------------------------------------------------------

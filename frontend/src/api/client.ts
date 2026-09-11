@@ -586,8 +586,54 @@ export async function zetScradaVanaf(vanaf: string): Promise<{ ok: true; vanaf: 
   return jsonOrThrow(await fetch(`${BASE}/scrada/instellingen`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vanaf }) }));
 }
 // Verzendstatus vanaf de startdatum terug op "niet verstuurd" (na testen, vóór live).
-export async function scradaResetStatus(): Promise<{ ok: true; aantal: number }> {
+export async function scradaResetStatus(): Promise<{ ok: true; dagen: number; tickets: number }> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/reset-status`, { method: 'POST' }));
+}
+
+// --- Scrada dagontvangstenboek: per afgesloten dag één dagboeking ---
+export type ScradaDagboekInstellingen = {
+  journalID: string | null; journalNaam: string | null;
+  vatMap: Record<string, string>;   // ons BTW-tarief ("6", "21", ...) -> Scrada BTW-categorie-ID
+  pmMap: Record<string, string>;    // onze betaalwijze -> Scrada betaalmethode-ID
+  betalingen: boolean;              // betaalmethoden meesturen
+};
+export type ScradaDagboek = { id: string; naam: string; actief: boolean; startDatum: string | null; laatsteDatum: string | null };
+export type ScradaCategorie = { id: string; naam: string; vatTypeID: string | null };
+export type ScradaBetaalmethode = { id: string; naam: string; cash: boolean };
+export type ScradaDag = {
+  id: string; volgnummer: number | null; datum: string; tot: string; totaal: number; aantalVerkopen: number;
+  scradaStatus: string; scradaRef: string | null; scradaVerstuurdOp: string | null; scradaFout: string | null; inAanmerking: boolean;
+};
+export type ScradaDagPreview = {
+  id: string; volgnummer: number | null; datum: string; totaal: number; ontbreekt: string[]; status: string; ref: string | null; fout: string | null;
+  boeking: { date: string; lines: { vatPerc: number; amount: number; categoryID: string; remark: string }[]; paymentMethods?: { paymentMethodID: string; amount: number }[] };
+};
+export async function getScradaDagboekInstellingen(): Promise<ScradaDagboekInstellingen> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/instellingen`));
+}
+export async function zetScradaDagboekInstellingen(input: Partial<ScradaDagboekInstellingen>): Promise<ScradaDagboekInstellingen> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/instellingen`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function getScradaDagboeken(): Promise<ScradaDagboek[]> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagboeken`));
+}
+export async function getScradaCategorieen(journalID: string): Promise<ScradaCategorie[]> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagboeken/${encodeURIComponent(journalID)}/categorieen`));
+}
+export async function getScradaBetaalmethoden(journalID: string): Promise<ScradaBetaalmethode[]> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagboeken/${encodeURIComponent(journalID)}/betaalmethoden`));
+}
+export async function getScradaDagen(): Promise<ScradaDag[]> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagen`));
+}
+export async function getScradaDagPreview(id: string): Promise<ScradaDagPreview> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagen/${id}/preview`));
+}
+export async function scradaVerstuurDag(id: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagen/${id}/verstuur`, { method: 'POST' }));
+}
+export async function scradaVerstuurDagen(): Promise<{ modus: string; gevonden: number; verstuurd: number; mislukt: number; geweigerd?: boolean; melding?: string; fout?: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/verstuur`, { method: 'POST' }));
 }
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();

@@ -107,7 +107,8 @@ export class ScradaService {
 
   // --- configuratie ---------------------------------------------------------
 
-  private config() {
+  // Configuratie + HTTP-headers (ook gebruikt door de dagontvangsten-service).
+  config() {
     const key = process.env.SCRADA_API_KEY;
     const wachtwoord = process.env.SCRADA_API_PASSWORD;
     const company = process.env.SCRADA_COMPANY_ID;
@@ -392,7 +393,7 @@ export class ScradaService {
 
   // --- HTTP -------------------------------------------------------------------
 
-  private headers(c: { key: string; wachtwoord: string }) {
+  headers(c: { key: string; wachtwoord: string }) {
     return { 'Content-Type': 'application/json', 'X-API-KEY': c.key, 'X-PASSWORD': c.wachtwoord, Language: 'nl' };
   }
 
