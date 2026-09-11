@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getScradaStatus, getScradaOpenstaande, getScradaPreview,
   scradaVerstuurEen, scradaVerstuurAlles, getScradaVerbinding, zetScradaVanaf, scradaResetStatus,
-  type ScradaStatus, type OpenstaandeVerkoop, type ScradaFactuur, type ScradaConfig, type ScradaVerbinding,
+  type ScradaStatus, type OpenstaandeVerkoop, type ScradaFactuur, type ScradaConfig, type ScradaVerbinding, type ScradaSyncVerslag,
 } from '../api/client';
 
 // Boekhouding (Fase 3): verkopen "Scrada-klaar" doorsturen (facturen/kasboek/
@@ -21,6 +21,8 @@ export function Boekhouding() {
   const [vanaf, setVanaf] = useState('');
   const [vanafOpgeslagen, setVanafOpgeslagen] = useState<string | null>(null);
   const [overgeslagen, setOvergeslagen] = useState(0);
+  // Automatische synchronisatie: dagelijks om autoSync (Belgische tijd) + verslag van de laatste run.
+  const [sync, setSync] = useState<{ uur: string; laatste: ScradaSyncVerslag | null }>({ uur: '23:59', laatste: null });
 
   async function laad() {
     const s = await getScradaStatus();
@@ -29,6 +31,7 @@ export function Boekhouding() {
     setVanafOpgeslagen(s.vanaf ?? null);
     setVanaf(s.vanaf ?? '');
     setOvergeslagen(s.overgeslagen ?? 0);
+    setSync({ uur: s.autoSync ?? '23:59', laatste: s.laatsteSync ?? null });
     setOpen(await getScradaOpenstaande());
   }
   async function bewaarVanaf() {
@@ -120,6 +123,21 @@ export function Boekhouding() {
             )}
           </div>
         )}
+
+        {/* Automatische synchronisatie: dagelijks om 23:59, verslag van de laatste run */}
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, marginBottom: 12, background: '#f8fafc', fontSize: 13 }}>
+          <div style={{ fontWeight: 700 }}>⏰ Automatische synchronisatie: elke dag om {sync.uur}</div>
+          <div style={{ color: '#6b7280', marginTop: 4 }}>
+            Alle openstaande verkopen vanaf de startdatum gaan dan vanzelf naar Scrada. Tussendoor hoef je niets te doen.
+            {sync.laatste
+              ? <> Laatste run: <strong>{new Date(sync.laatste.moment).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })}</strong>
+                  {sync.laatste.geweigerd
+                    ? <span style={{ color: '#b45309' }}> — niet uitgevoerd: {sync.laatste.melding}</span>
+                    : <> — {sync.laatste.verstuurd ?? 0} verstuurd{(sync.laatste.mislukt ?? 0) > 0 && <span style={{ color: 'crimson' }}>, {sync.laatste.mislukt} mislukt ({sync.laatste.fout ?? 'fout'})</span>}{sync.laatste.modus === 'test' && ' (dry-run, niet gekoppeld)'}</>}
+                </>
+              : ' Nog geen automatische run uitgevoerd.'}
+          </div>
+        </div>
 
         {/* Startdatum: beveiliging tegen dubbel boeken van het verleden */}
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, marginBottom: 12, background: vanafOpgeslagen ? '#fff' : '#fef3c7' }}>

@@ -75,6 +75,9 @@ export type ScradaFactuur = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
+// Tijdstip (Europe/Brussels) van de dagelijkse automatische synchronisatie.
+export const SYNC_UUR = '23:59';
+
 // Nette naam + Scrada-type per betaalwijze.
 const BETAALWIJZE: Record<string, { naam: string; type: number }> = {
   CASH: { naam: 'Cash', type: 2 },
@@ -341,18 +344,23 @@ export class ScradaService {
   async status() {
     const v = await this.vanaf();
     const filter = await this.teVersturen();
-    const [groepen, overgeslagen] = await Promise.all([
+    const [groepen, overgeslagen, laatste] = await Promise.all([
       this.prisma.verkoop.groupBy({ by: ['scradaStatus'], where: filter, _count: { _all: true } }),
       // verkopen van vóór de startdatum die nooit verstuurd worden (informatief)
       v ? this.prisma.verkoop.count({ where: { ...this.basisFilter, datum: { lt: v }, scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] } } }) : Promise.resolve(0),
+      this.prisma.instelling.findUnique({ where: { sleutel: 'scrada.laatsteSync' } }),
     ]);
     const tel: Record<string, number> = { NIET_VERSTUURD: 0, VERSTUURD: 0, FOUT: 0 };
     for (const g of groepen) tel[g.scradaStatus] = g._count._all;
+    let laatsteSync: Record<string, unknown> | null = null;
+    try { laatsteSync = laatste?.waarde ? JSON.parse(laatste.waarde) : null; } catch { laatsteSync = null; }
     return {
       modus: this.live ? 'live' : 'test',
       geconfigureerd: this.geconfigureerd(),
       vanaf: v ? v.toISOString().slice(0, 10) : null,
       overgeslagen,
+      autoSync: SYNC_UUR, // dagelijkse automatische synchronisatie (Europe/Brussels)
+      laatsteSync,
       ...tel,
     };
   }

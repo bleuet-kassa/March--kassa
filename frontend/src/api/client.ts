@@ -566,7 +566,12 @@ export type OpenstaandeVerkoop = {
   klant: { naam: string } | null;
 };
 
-export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig; vanaf?: string | null; overgeslagen?: number }> {
+// Verslag van de laatste automatische synchronisatie (dagelijks om autoSync, Europe/Brussels).
+export type ScradaSyncVerslag = {
+  datum: string; moment: string; modus?: string;
+  gevonden?: number; verstuurd?: number; mislukt?: number; geweigerd?: boolean; melding?: string; fout?: string;
+};
+export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig; vanaf?: string | null; overgeslagen?: number; autoSync?: string; laatsteSync?: ScradaSyncVerslag | null }> {
   return (await fetch(`${BASE}/scrada/status`)).json();
 }
 // Welke Scrada-instellingen op de server aanwezig zijn (nooit de waarden zelf).
