@@ -204,6 +204,65 @@ export class ScradaDagboekService {
     return { id: a.id, volgnummer: a.volgnummer, datum: boeking.date, totaal: Number(a.totaal), boeking, ontbreekt, status: a.scradaStatus, ref: a.scradaRef, fout: a.scradaFout };
   }
 
+  // --- chronologie van het dagboek --------------------------------------------
+  // Scrada eist dat een dagontvangstenboek dag na dag, zonder gaten, ingevuld
+  // wordt (eerste ingave = startdatum van het dagboek). Daarom vullen we vóór
+  // elke dagboeking de ontbrekende openingsdagen aan met een nul-boeking;
+  // gesloten weekdagen (instelling van het dagboek in Scrada) worden overgeslagen.
+
+  private async dagboekInfo(journalID: string) {
+    const j = await this.get<Record<string, unknown>>(`/journal/${journalID}`);
+    const open = (k: string) => j[k] !== false; // ontbreekt = open
+    const dag = (v: unknown) => (typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : null);
+    return {
+      startDate: dag(j.startDate),
+      lastLineDate: dag(j.lastLineDate),
+      // index = weekdag volgens Date.getUTCDay(): 0 = zondag … 6 = zaterdag
+      openDagen: [open('openOnSunday'), open('openOnMonday'), open('openOnTuesday'), open('openOnWednesday'), open('openOnThursday'), open('openOnFriday'), open('openOnSaturday')],
+    };
+  }
+  private volgendeDag(d: string): string {
+    const x = new Date(d + 'T12:00:00Z');
+    x.setUTCDate(x.getUTCDate() + 1);
+    return x.toISOString().slice(0, 10);
+  }
+  // Nul-boeking voor een dag zonder ontvangsten (eerst zonder lijnen; eist het
+  // dagboek minstens één lijn, dan een nullijn op de eerste gekoppelde categorie).
+  private async putNul(journalID: string, date: string, ref: string) {
+    try {
+      await this.put(journalID, { date, lines: [], paymentMethods: [] });
+    } catch {
+      const inst = await this.instellingen();
+      const paar = Object.entries(inst.vatMap).find(([, v]) => v);
+      if (!paar) throw new BadRequestException(`Dag ${date} zonder ontvangsten kon niet als nul-dag geboekt worden (geen BTW-categorie gekoppeld).`);
+      const [pct, categoryID] = paar;
+      await this.put(journalID, {
+        date,
+        lines: [{ lineType: 1, categoryID, vatTypeID: BTW_TYPE_BE[pct], vatPerc: Number(pct), amount: 0, remark: 'Geen ontvangsten (gesloten / geen verkoop)', externalReference: `${ref}:nul:${date}` }],
+        paymentMethods: [],
+      });
+    }
+  }
+  // Vult de openingsdagen tussen de laatste ingave in Scrada en `tot` (exclusief) aan.
+  private async vulGaten(journalID: string, tot: string, ref: string): Promise<number> {
+    const info = await this.dagboekInfo(journalID);
+    let d = info.lastLineDate ? this.volgendeDag(info.lastLineDate) : info.startDate;
+    if (!d) return 0;
+    if (tot < d) {
+      throw new BadRequestException(`Deze dag (${tot}) ligt vóór de eerstvolgende ingavedatum van het dagboek in Scrada (${d}). Scrada eist chronologische ingave; deze dag kan niet meer toegevoegd worden.`);
+    }
+    let n = 0;
+    while (d < tot) {
+      if (info.openDagen[new Date(d + 'T12:00:00Z').getUTCDay()]) {
+        await this.putNul(journalID, d, ref);
+        n++;
+        if (n > 400) throw new BadRequestException('Meer dan 400 ontbrekende dagen; pas de startdatum van het dagboek in Scrada aan.');
+      }
+      d = this.volgendeDag(d);
+    }
+    return n;
+  }
+
   // --- versturen --------------------------------------------------------------
 
   private async put(journalID: string, boeking: Dagboeking): Promise<string | null> {
@@ -235,9 +294,11 @@ export class ScradaDagboekService {
     }
     if (!this.scrada.config()) return { verstuurd: false, modus: 'test', boeking };
     try {
+      // Eerst de ontbrekende openingsdagen tot deze dag aanvullen (Scrada eist geen gaten).
+      const aangevuld = await this.vulGaten(inst.journalID as string, boeking.date, `dagafsluiting:${a.id}`);
       const ref = await this.put(inst.journalID as string, boeking);
       await this.prisma.dagafsluiting.update({ where: { id }, data: { scradaStatus: 'VERSTUURD', scradaRef: ref ?? 'verstuurd', scradaVerstuurdOp: new Date(), scradaFout: null } });
-      return { verstuurd: true, ref, boeking };
+      return { verstuurd: true, ref, boeking, aangevuld };
     } catch (e) {
       const fout = e instanceof Error ? e.message : 'onbekende fout';
       await this.prisma.dagafsluiting.update({ where: { id }, data: { scradaStatus: 'FOUT', scradaFout: fout.slice(0, 500) } });

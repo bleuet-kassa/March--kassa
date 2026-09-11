@@ -106,7 +106,9 @@ export function Boekhouding() {
     setBezig(true); setMelding('');
     try {
       const r = await scradaVerstuurDag(d.id);
-      setMelding(r.verstuurd ? `Verstuurd naar Scrada${r.ref ? ` (ref ${r.ref})` : ''}.` : r.modus === 'test' ? 'Niet gekoppeld (dry-run): niets verstuurd.' : `Niet verstuurd: ${r.fout ?? r.melding ?? 'fout'}`);
+      setMelding(r.verstuurd
+        ? `Verstuurd naar Scrada${r.ref ? ` (ref ${r.ref})` : ''}${r.aangevuld ? ` · ${r.aangevuld} tussenliggende dag(en) zonder ontvangsten als nul-dag aangevuld` : ''}.`
+        : r.modus === 'test' ? 'Niet gekoppeld (dry-run): niets verstuurd.' : `Niet verstuurd: ${r.fout ?? r.melding ?? 'fout'}`);
       setDagen(await getScradaDagen());
     } catch (e) { setMelding(e instanceof Error ? e.message : 'Versturen mislukt'); }
     finally { setBezig(false); }

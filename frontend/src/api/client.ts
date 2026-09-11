@@ -630,7 +630,7 @@ export async function getScradaDagen(): Promise<ScradaDag[]> {
 export async function getScradaDagPreview(id: string): Promise<ScradaDagPreview> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagen/${id}/preview`));
 }
-export async function scradaVerstuurDag(id: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string }> {
+export async function scradaVerstuurDag(id: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string; aangevuld?: number }> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/dagen/${id}/verstuur`, { method: 'POST' }));
 }
 export async function scradaVerstuurDagen(): Promise<{ modus: string; gevonden: number; verstuurd: number; mislukt: number; geweigerd?: boolean; melding?: string; fout?: string }> {
