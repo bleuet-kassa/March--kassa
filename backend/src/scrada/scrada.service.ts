@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Betaalwijze, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -129,11 +129,48 @@ export class ScradaService {
 
   // Scrada is enkel voor de WINKEL (niet de import-onderneming). "Eigen rekening"
   // (eigen gebruik) en geannuleerde tickets zijn geen ontvangsten en gaan niet mee.
-  private readonly teVersturen: Prisma.VerkoopWhereInput = {
+  private readonly basisFilter: Prisma.VerkoopWhereInput = {
     onderneming: { isImporteur: false },
     geannuleerd: false,
     OR: [{ betaalwijze: null }, { betaalwijze: { not: Betaalwijze.EIGEN_REKENING } }],
   };
+
+  // Startdatum: verkopen van vóór deze datum gaan NOOIT naar Scrada (die zitten
+  // al in de boekhouding via de dagontvangsten van vroeger — anders dubbel
+  // geboekt). Bewaard in de tabel Instelling, sleutel "scrada.vanaf" (YYYY-MM-DD).
+  async vanaf(): Promise<Date | null> {
+    const i = await this.prisma.instelling.findUnique({ where: { sleutel: 'scrada.vanaf' } });
+    if (!i?.waarde || !/^\d{4}-\d{2}-\d{2}$/.test(i.waarde)) return null;
+    return new Date(i.waarde + 'T00:00:00');
+  }
+  async zetVanaf(datum: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) throw new BadRequestException('Geef een datum als JJJJ-MM-DD.');
+    await this.prisma.instelling.upsert({
+      where: { sleutel: 'scrada.vanaf' },
+      create: { sleutel: 'scrada.vanaf', waarde: datum },
+      update: { waarde: datum },
+    });
+    return { ok: true, vanaf: datum };
+  }
+  // Het volledige filter: basis + startdatum (zonder startdatum: niets komt in aanmerking
+  // voor "alles versturen"; één ticket expliciet versturen blijft mogelijk om te testen).
+  private async teVersturen(): Promise<Prisma.VerkoopWhereInput> {
+    const v = await this.vanaf();
+    return { ...this.basisFilter, ...(v ? { datum: { gte: v } } : {}) };
+  }
+
+  // Na het testen (testomgeving) en vóór live: zet de verzendstatus van de
+  // verkopen vanaf de startdatum terug op "niet verstuurd", zodat ze naar de
+  // echte Scrada gaan. Oudere verkopen blijven onaangeroerd.
+  async resetStatus() {
+    const v = await this.vanaf();
+    if (!v) throw new BadRequestException('Stel eerst de startdatum in.');
+    const r = await this.prisma.verkoop.updateMany({
+      where: { ...this.basisFilter, datum: { gte: v }, scradaStatus: { in: ['VERSTUURD', 'FOUT'] } },
+      data: { scradaStatus: 'NIET_VERSTUURD', scradaRef: null },
+    });
+    return { ok: true, aantal: r.count };
+  }
 
   private verkoopMet(id: string) {
     return this.prisma.verkoop.findUnique({ where: { id }, include: VERKOOP_INCLUDE });
@@ -267,10 +304,15 @@ export class ScradaService {
     }
   }
 
-  // Alle nog niet-verstuurde verkopen, in batches (dedup op receiptID = veilig).
+  // Alle nog niet-verstuurde verkopen VANAF de startdatum, in batches (dedup op
+  // receiptID = veilig). Zonder startdatum wordt geweigerd: anders zou het hele
+  // verleden meegaan en dubbel in de boekhouding komen.
   async verstuurOpenstaande(max = 500) {
+    if (!(await this.vanaf())) {
+      return { modus: this.live ? ('live' as const) : ('test' as const), geweigerd: true, gevonden: 0, verstuurd: 0, mislukt: 0, melding: 'Stel eerst de startdatum in (enkel verkopen vanaf die datum gaan naar Scrada).' };
+    }
     const open = await this.prisma.verkoop.findMany({
-      where: { scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] }, ...this.teVersturen },
+      where: { scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] }, ...(await this.teVersturen()) },
       orderBy: { datum: 'asc' },
       take: max,
       include: VERKOOP_INCLUDE,
@@ -297,19 +339,27 @@ export class ScradaService {
   }
 
   async status() {
-    const groepen = await this.prisma.verkoop.groupBy({
-      by: ['scradaStatus'],
-      where: this.teVersturen,
-      _count: { _all: true },
-    });
+    const v = await this.vanaf();
+    const filter = await this.teVersturen();
+    const [groepen, overgeslagen] = await Promise.all([
+      this.prisma.verkoop.groupBy({ by: ['scradaStatus'], where: filter, _count: { _all: true } }),
+      // verkopen van vóór de startdatum die nooit verstuurd worden (informatief)
+      v ? this.prisma.verkoop.count({ where: { ...this.basisFilter, datum: { lt: v }, scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] } } }) : Promise.resolve(0),
+    ]);
     const tel: Record<string, number> = { NIET_VERSTUURD: 0, VERSTUURD: 0, FOUT: 0 };
     for (const g of groepen) tel[g.scradaStatus] = g._count._all;
-    return { modus: this.live ? 'live' : 'test', geconfigureerd: this.geconfigureerd(), ...tel };
+    return {
+      modus: this.live ? 'live' : 'test',
+      geconfigureerd: this.geconfigureerd(),
+      vanaf: v ? v.toISOString().slice(0, 10) : null,
+      overgeslagen,
+      ...tel,
+    };
   }
 
-  openstaande() {
+  async openstaande() {
     return this.prisma.verkoop.findMany({
-      where: { scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] }, ...this.teVersturen },
+      where: { scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] }, ...(await this.teVersturen()) },
       orderBy: { datum: 'desc' },
       take: 100,
       include: { klant: true },

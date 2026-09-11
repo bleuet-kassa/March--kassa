@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getScradaStatus, getScradaOpenstaande, getScradaPreview,
-  scradaVerstuurEen, scradaVerstuurAlles, getScradaVerbinding,
+  scradaVerstuurEen, scradaVerstuurAlles, getScradaVerbinding, zetScradaVanaf, scradaResetStatus,
   type ScradaStatus, type OpenstaandeVerkoop, type ScradaFactuur, type ScradaConfig, type ScradaVerbinding,
 } from '../api/client';
 
@@ -16,11 +16,35 @@ export function Boekhouding() {
   const [config, setConfig] = useState<ScradaConfig | null>(null); // welke instellingen op de server staan
   const [verbinding, setVerbinding] = useState<ScradaVerbinding | null>(null);
 
+  // Startdatum: enkel verkopen vanaf die dag gaan naar Scrada — het verleden zit
+  // al in de boekhouding (dagontvangsten) en zou anders dubbel geboekt worden.
+  const [vanaf, setVanaf] = useState('');
+  const [vanafOpgeslagen, setVanafOpgeslagen] = useState<string | null>(null);
+  const [overgeslagen, setOvergeslagen] = useState(0);
+
   async function laad() {
     const s = await getScradaStatus();
     setStatus(s);
     setConfig(s.geconfigureerd ?? null);
+    setVanafOpgeslagen(s.vanaf ?? null);
+    setVanaf(s.vanaf ?? '');
+    setOvergeslagen(s.overgeslagen ?? 0);
     setOpen(await getScradaOpenstaande());
+  }
+  async function bewaarVanaf() {
+    if (!vanaf) { setMelding('Kies eerst een startdatum.'); return; }
+    if (!window.confirm(`Enkel verkopen vanaf ${new Date(vanaf + 'T00:00:00').toLocaleDateString('nl-BE')} naar Scrada sturen? Oudere verkopen worden nooit verstuurd.`)) return;
+    setBezig(true); setMelding('');
+    try { await zetScradaVanaf(vanaf); setMelding('Startdatum opgeslagen.'); await laad(); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function resetStatus() {
+    if (!window.confirm('Verzendstatus van alle verkopen vanaf de startdatum terug op "niet verstuurd" zetten?\n\nDoe dit enkel na het testen in de testomgeving, vóór je naar de echte Scrada overschakelt.')) return;
+    setBezig(true); setMelding('');
+    try { const r = await scradaResetStatus(); setMelding(`${r.aantal} verkopen terug op "niet verstuurd".`); await laad(); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Reset mislukt'); }
+    finally { setBezig(false); }
   }
   // Test of Scrada de API-sleutel/wachtwoord/bedrijf aanvaardt (verstuurt niets).
   async function testVerbinding() {
@@ -43,10 +67,15 @@ export function Boekhouding() {
     await laad(); setBezig(false);
   }
   async function verstuurAlles() {
+    if (!window.confirm(`Alle ${open.length} openstaande verkopen (vanaf de startdatum) naar Scrada sturen?`)) return;
     setBezig(true); setMelding('');
-    const res = await scradaVerstuurAlles();
-    setMelding(`${res.modus === 'test' ? 'Testmodus — ' : ''}${res.gevonden} gevonden, ${res.verstuurd} verstuurd${res.mislukt ? `, ${res.mislukt} mislukt` : ''}.`);
-    await laad(); setBezig(false);
+    try {
+      const res = await scradaVerstuurAlles();
+      if (res.geweigerd) setMelding(res.melding ?? 'Geweigerd.');
+      else setMelding(`${res.modus === 'test' ? 'Testmodus — ' : ''}${res.gevonden} gevonden, ${res.verstuurd} verstuurd${res.mislukt ? `, ${res.mislukt} mislukt (${res.fout ?? 'fout'})` : ''}.`);
+      await laad();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Versturen mislukt'); }
+    finally { setBezig(false); }
   }
 
   const euro = (n: number | string) => '€ ' + Number(n).toFixed(2);
@@ -92,8 +121,29 @@ export function Boekhouding() {
           </div>
         )}
 
-        <button onClick={verstuurAlles} disabled={bezig || !open.length}
-          style={{ padding: '10px 16px', border: 'none', borderRadius: 8, background: open.length ? '#2563eb' : '#9ca3af', color: '#fff', fontWeight: 700, cursor: open.length ? 'pointer' : 'default' }}>
+        {/* Startdatum: beveiliging tegen dubbel boeken van het verleden */}
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, marginBottom: 12, background: vanafOpgeslagen ? '#fff' : '#fef3c7' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Verstuur enkel verkopen vanaf</div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+            Verkopen van vóór deze datum zitten al in de boekhouding (dagontvangsten) en worden <strong>nooit</strong> naar Scrada gestuurd.
+            {vanafOpgeslagen
+              ? <> Ingesteld: <strong>{new Date(vanafOpgeslagen + 'T00:00:00').toLocaleDateString('nl-BE')}</strong>{overgeslagen > 0 && <> · {overgeslagen} oudere verkopen worden overgeslagen</>}.</>
+              : <> <strong>Nog niet ingesteld</strong> — "Alles versturen" is daarom uitgeschakeld.</>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="date" value={vanaf} onChange={(e) => setVanaf(e.target.value)} style={{ padding: 8, fontSize: 14, border: '1px solid #cbd5e1', borderRadius: 6 }} />
+            <button onClick={bewaarVanaf} disabled={bezig || !vanaf || vanaf === vanafOpgeslagen} style={btn}>Startdatum opslaan</button>
+            {vanafOpgeslagen && (
+              <button onClick={resetStatus} disabled={bezig} title="Na testen in de testomgeving: vanaf de startdatum alles terug op 'niet verstuurd' zetten" style={btn}>
+                Verzendstatus resetten (vanaf startdatum)
+              </button>
+            )}
+          </div>
+        </div>
+
+        <button onClick={verstuurAlles} disabled={bezig || !open.length || !vanafOpgeslagen}
+          title={!vanafOpgeslagen ? 'Stel eerst de startdatum in' : undefined}
+          style={{ padding: '10px 16px', border: 'none', borderRadius: 8, background: open.length && vanafOpgeslagen ? '#2563eb' : '#9ca3af', color: '#fff', fontWeight: 700, cursor: open.length && vanafOpgeslagen ? 'pointer' : 'default' }}>
           {bezig ? 'Bezig…' : `Alle openstaande versturen (${open.length})`}
         </button>
         {melding && <p style={{ color: '#374151', background: '#f3f4f6', padding: '8px 12px', borderRadius: 8 }}>{melding}</p>}

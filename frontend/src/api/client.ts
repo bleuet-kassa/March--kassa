@@ -566,7 +566,7 @@ export type OpenstaandeVerkoop = {
   klant: { naam: string } | null;
 };
 
-export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig }> {
+export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig; vanaf?: string | null; overgeslagen?: number }> {
   return (await fetch(`${BASE}/scrada/status`)).json();
 }
 // Welke Scrada-instellingen op de server aanwezig zijn (nooit de waarden zelf).
@@ -575,6 +575,14 @@ export type ScradaVerbinding = { ok: boolean; modus: string; geconfigureerd: Scr
 // Test de verbinding met Scrada (API-sleutel/wachtwoord/bedrijf) — enkel beheerder.
 export async function getScradaVerbinding(): Promise<ScradaVerbinding> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/verbinding`));
+}
+// Startdatum: enkel verkopen vanaf die dag gaan naar Scrada (het verleden nooit).
+export async function zetScradaVanaf(vanaf: string): Promise<{ ok: true; vanaf: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/instellingen`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vanaf }) }));
+}
+// Verzendstatus vanaf de startdatum terug op "niet verstuurd" (na testen, vóór live).
+export async function scradaResetStatus(): Promise<{ ok: true; aantal: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/scrada/reset-status`, { method: 'POST' }));
 }
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();
@@ -585,7 +593,7 @@ export async function getScradaPreview(id: string): Promise<ScradaFactuur> {
 export async function scradaVerstuurEen(id: string): Promise<any> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/verstuur/${id}`, { method: 'POST' }));
 }
-export async function scradaVerstuurAlles(): Promise<{ modus: string; gevonden: number; verstuurd: number; mislukt: number }> {
+export async function scradaVerstuurAlles(): Promise<{ modus: string; gevonden: number; verstuurd: number; mislukt: number; geweigerd?: boolean; melding?: string; fout?: string }> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/verstuur`, { method: 'POST' }));
 }
 

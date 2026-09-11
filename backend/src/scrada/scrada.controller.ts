@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { ScradaService } from './scrada.service';
 import { Rollen } from '../auth/auth.guard';
 
@@ -17,6 +17,22 @@ export class ScradaController {
   @Rollen('BEHEER', 'BEHEERDER')
   verbinding() {
     return this.scrada.verbinding();
+  }
+
+  // PUT /scrada/instellingen { vanaf: "JJJJ-MM-DD" }  -> startdatum: enkel verkopen
+  // vanaf die dag gaan naar Scrada (het verleden zit al in de boekhouding).
+  @Put('instellingen')
+  @Rollen('BEHEER', 'BEHEERDER')
+  instellingen(@Body() body: { vanaf: string }) {
+    return this.scrada.zetVanaf(body?.vanaf);
+  }
+
+  // POST /scrada/reset-status  -> verzendstatus vanaf de startdatum terug op
+  // "niet verstuurd" (na testen in de testomgeving, vóór live).
+  @Post('reset-status')
+  @Rollen('BEHEER', 'BEHEERDER')
+  resetStatus() {
+    return this.scrada.resetStatus();
   }
 
   // GET /scrada/openstaande  -> nog te versturen verkopen
