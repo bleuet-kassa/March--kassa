@@ -80,6 +80,15 @@ export class DagafsluitingController {
     return this.dag.weiger(token);
   }
 
+  // POST /dagafsluiting/bevestig/:token/scrada -> (publiek, met geheime token)
+  // de afgesloten dag naar het Scrada-dagontvangstenboek sturen (beheerder
+  // bevestigt dit zelf op de telefoon; nooit automatisch).
+  @Publiek()
+  @Post('bevestig/:token/scrada')
+  scrada(@Param('token') token: string) {
+    return this.dag.scradaViaToken(token);
+  }
+
   // Herkent optioneel een ingelogde beheerder (telefoon met kassa-sessie), zodat
   // de bevestiging op naam komt. Geen sessie = ook goed: de token volstaat.
   private beheerderUitHeader(req: any): string | undefined {

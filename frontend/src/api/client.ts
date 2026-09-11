@@ -568,8 +568,9 @@ export type OpenstaandeVerkoop = {
 
 // Verslag van de laatste automatische synchronisatie (dagelijks om autoSync, Europe/Brussels).
 export type ScradaSyncVerslag = {
-  datum: string; moment: string; modus?: string;
-  gevonden?: number; verstuurd?: number; mislukt?: number; geweigerd?: boolean; melding?: string; fout?: string;
+  datum: string; moment: string; modus?: string; // 'herinnering' = melding gestuurd, niets verstuurd
+  dagen?: number; gevonden?: number; verstuurd?: number; mislukt?: number; geweigerd?: boolean; melding?: string; fout?: string;
+  push?: { verstuurd: number; toestellen: number };
 };
 export async function getScradaStatus(): Promise<ScradaStatus & { geconfigureerd?: ScradaConfig; vanaf?: string | null; overgeslagen?: number; autoSync?: string; laatsteSync?: ScradaSyncVerslag | null }> {
   return (await fetch(`${BASE}/scrada/status`)).json();
@@ -598,8 +599,8 @@ export type ScradaDagboekInstellingen = {
   betalingen: boolean;              // betaalmethoden meesturen
 };
 export type ScradaDagboek = { id: string; naam: string; actief: boolean; startDatum: string | null; laatsteDatum: string | null };
-export type ScradaCategorie = { id: string; naam: string; vatTypeID: string | null };
-export type ScradaBetaalmethode = { id: string; naam: string; cash: boolean };
+export type ScradaCategorie = { id: string; naam: string; vatTypeID: string | null; pct?: number | null; positie?: number | null };
+export type ScradaBetaalmethode = { id: string; naam: string; cash: boolean; positie?: number | null };
 export type ScradaDag = {
   id: string; volgnummer: number | null; datum: string; tot: string; totaal: number; aantalVerkopen: number;
   scradaStatus: string; scradaRef: string | null; scradaVerstuurdOp: string | null; scradaFout: string | null; inAanmerking: boolean;
@@ -827,8 +828,14 @@ export async function vraagDagafsluitingAan(): Promise<AfsluitAanvraag & { push:
 export async function getOpenAfsluitAanvraag(): Promise<{ aanvraag: AfsluitAanvraag | null }> {
   return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/aanvraag/open`));
 }
-export async function getAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport | null }> {
+// Scrada-status van de afgesloten dag (dagontvangstenboek), zoals de bevestigpagina die toont.
+export type AfsluitScrada = { status: string; ref: string | null; fout: string | null; inAanmerking: boolean; gekoppeld: boolean };
+export async function getAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport | null; scrada?: AfsluitScrada | null }> {
   return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}`));
+}
+// Op de telefoon: de afgesloten dag naar het Scrada-dagontvangstenboek sturen (beheerder bevestigt zelf).
+export async function stuurAfsluitingNaarScrada(token: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}/scrada`, { method: 'POST' }));
 }
 export async function bevestigAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport }> {
   return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}`, { method: 'POST' }));

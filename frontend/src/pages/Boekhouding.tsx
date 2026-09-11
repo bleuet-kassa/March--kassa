@@ -155,16 +155,19 @@ export function Boekhouding() {
 
         {/* Automatische synchronisatie */}
         <div style={{ ...kader, background: '#f8fafc', fontSize: 13 }}>
-          <div style={{ fontWeight: 700 }}>⏰ Automatische synchronisatie: elke dag om {sync.uur}</div>
+          <div style={{ fontWeight: 700 }}>⏰ Herinnering: elke dag om {sync.uur} op je telefoon</div>
           <div style={{ color: '#6b7280', marginTop: 4 }}>
-            Elke afgesloten dag (dagafsluiting) vanaf de startdatum gaat dan als dagboeking naar het dagontvangstenboek.
+            Er vertrekt <strong>nooit</strong> iets automatisch: je bevestigt het versturen zelf (op de telefoon na de dagafsluiting, of hier).
+            Staat er om {sync.uur} nog een afgesloten dag niet in Scrada, dan krijg je een melding met een link om ze te versturen.
             {sync.laatste
-              ? <> Laatste run: <strong>{new Date(sync.laatste.moment).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })}</strong>
+              ? <> Laatste controle: <strong>{new Date(sync.laatste.moment).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })}</strong>
                   {sync.laatste.geweigerd
-                    ? <span style={{ color: '#b45309' }}> — niet uitgevoerd: {sync.laatste.melding}</span>
-                    : <> — {sync.laatste.verstuurd ?? 0} dag(en) verstuurd{(sync.laatste.mislukt ?? 0) > 0 && <span style={{ color: 'crimson' }}>, gestopt bij fout: {sync.laatste.fout ?? 'fout'}</span>}{sync.laatste.modus === 'test' && ' (dry-run)'}</>}
+                    ? <span style={{ color: '#b45309' }}> — {sync.laatste.melding}</span>
+                    : (sync.laatste.dagen ?? 0) > 0
+                      ? <> — melding gestuurd voor {sync.laatste.dagen} dag(en){sync.laatste.push ? ` naar ${sync.laatste.push.verstuurd} toestel(len)` : ''}</>
+                      : <> — {sync.laatste.melding ?? 'alles staat in Scrada'}</>}
                 </>
-              : ' Nog geen automatische run uitgevoerd.'}
+              : ' Nog geen controle uitgevoerd.'}
           </div>
         </div>
 
@@ -209,7 +212,7 @@ export function Boekhouding() {
                     <span style={{ width: 52 }}>{t} %</span>
                     <select value={inst.vatMap[t] ?? ''} onChange={(e) => setInst({ ...inst, vatMap: { ...inst.vatMap, [t]: e.target.value } })} style={{ ...inp, flex: 1 }}>
                       <option value="">— niet gekoppeld —</option>
-                      {cats.map((c) => <option key={c.id} value={c.id}>{c.naam}</option>)}
+                      {cats.map((c) => <option key={c.id} value={c.id}>{c.naam || '(zonder naam)'}{c.pct != null ? ` · ${c.pct} %` : ''}</option>)}
                     </select>
                   </div>
                 ))}

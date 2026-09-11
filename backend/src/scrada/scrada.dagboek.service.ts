@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Dagafsluiting } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScradaService } from './scrada.service';
 
@@ -106,13 +107,33 @@ export class ScradaDagboekService {
       startDatum: (j.startDate as string | null) ?? null, laatsteDatum: (j.lastLineDate as string | null) ?? null,
     }));
   }
+  // Naam zoals in Scrada: eerst Nederlands, anders een andere taal of een
+  // generiek naamveld (Scrada-antwoorden verschillen per versie).
+  private naamVan(o: Record<string, unknown>): string {
+    for (const k of ['nameNL', 'nameNl', 'name', 'nameEN', 'nameFR', 'nameDE', 'description', 'omschrijving']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (v && typeof v === 'object') { // bv. { nl: "...", fr: "..." }
+        const nl = (v as Record<string, unknown>).nl ?? (v as Record<string, unknown>).NL;
+        if (typeof nl === 'string' && nl.trim()) return nl.trim();
+      }
+    }
+    return '';
+  }
   async categorieen(journalID: string) {
     const data = await this.get<unknown>(`/journal/${journalID}/vatCategory`);
-    return this.lijst(data).map((c) => ({ id: String(c.id ?? ''), naam: String(c.nameNL ?? c.nameEN ?? ''), vatTypeID: (c.vatTypeID as string | null) ?? null }));
+    const pctVan = (vatTypeID: string | null) => {
+      const hit = Object.entries(BTW_TYPE_BE).find(([, id]) => id === vatTypeID);
+      return hit ? Number(hit[0]) : null;
+    };
+    return this.lijst(data).map((c) => {
+      const vatTypeID = (c.vatTypeID as string | null) ?? null;
+      return { id: String(c.id ?? ''), naam: this.naamVan(c), vatTypeID, pct: pctVan(vatTypeID), positie: typeof c.position === 'number' ? c.position : null };
+    });
   }
   async betaalmethoden(journalID: string) {
     const data = await this.get<unknown>(`/journal/${journalID}/paymentMethod`);
-    return this.lijst(data).map((p) => ({ id: String(p.id ?? ''), naam: String(p.nameNL ?? p.nameEN ?? ''), cash: p.isCash === true }));
+    return this.lijst(data).map((p) => ({ id: String(p.id ?? ''), naam: this.naamVan(p), cash: p.isCash === true, positie: typeof p.position === 'number' ? p.position : null }));
   }
 
   // --- dagen ------------------------------------------------------------------
@@ -251,6 +272,31 @@ export class ScradaDagboekService {
     }
     if (fout) this.log.warn(`Dagontvangsten naar Scrada: ${verstuurd} verstuurd, gestopt bij fout: ${fout}`);
     return { modus, gevonden: open.length, verstuurd, mislukt, fout };
+  }
+
+  // Geheime token waarmee de beheerder op de telefoon (bevestigpagina) het
+  // versturen van deze dag kan bevestigen: de bestaande afsluit-aanvraag, of
+  // — als de dag rechtstreeks aan de kassa werd afgesloten — een nieuwe,
+  // reeds bevestigde aanvraag die enkel als "sleutel" dient.
+  async tokenVoorDag(dagafsluitingId: string): Promise<string> {
+    const bestaand = await this.prisma.dagafsluitingAanvraag.findUnique({ where: { dagafsluitingId } });
+    if (bestaand) return bestaand.token;
+    const a = await this.prisma.dagafsluiting.findUnique({ where: { id: dagafsluitingId } });
+    if (!a) throw new NotFoundException('Dagafsluiting niet gevonden.');
+    const nieuw = await this.prisma.dagafsluitingAanvraag.create({
+      data: {
+        token: randomBytes(24).toString('base64url'),
+        status: 'BEVESTIGD',
+        aangevraagdDoorId: a.gebruikerId ?? null,
+        bevestigdDoorId: a.gebruikerId ?? null,
+        totaal: a.totaal,
+        aantalVerkopen: a.aantalVerkopen,
+        verlooptOp: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+        bevestigdOp: a.tot,
+        dagafsluitingId,
+      },
+    });
+    return nieuw.token;
   }
 
   // Na testen (testomgeving), vóór live: dagen vanaf de startdatum terug op "niet verstuurd".

@@ -1,8 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  getAfsluitAanvraag, bevestigAfsluitAanvraag, weigerAfsluitAanvraag,
-  type AfsluitAanvraag, type Dagrapport,
+  getAfsluitAanvraag, bevestigAfsluitAanvraag, weigerAfsluitAanvraag, stuurAfsluitingNaarScrada,
+  type AfsluitAanvraag, type Dagrapport, type AfsluitScrada,
 } from '../api/client';
 
 const euro = (n: number) => '€ ' + Number(n).toFixed(2);
@@ -12,7 +12,7 @@ const NAMEN: Record<string, string> = {
 };
 const betaalNaam = (b: string) => NAMEN[b] ?? b;
 
-type Data = AfsluitAanvraag & { rapport: Dagrapport | null };
+type Data = AfsluitAanvraag & { rapport: Dagrapport | null; scrada?: AfsluitScrada | null };
 
 // Bevestigpagina op de telefoon van de beheerder: geopend via de geheime link
 // uit de pushmelding. Toont het dagoverzicht en registreert de dagafsluiting
@@ -35,6 +35,8 @@ export function BevestigAfsluiting() {
       const r = await bevestigAfsluitAanvraag(token);
       setData({ ...r, rapport: r.rapport });
       setKlaar(true);
+      // Opnieuw ophalen: dan verschijnt ook de Scrada-stap ("Naar Scrada sturen").
+      try { setData(await getAfsluitAanvraag(token)); } catch { /* laat de bevestiging staan */ }
     } catch (e) { setFout(e instanceof Error ? e.message : 'Bevestigen mislukt'); }
     finally { setBezig(false); }
   }
@@ -44,6 +46,19 @@ export function BevestigAfsluiting() {
     setBezig(true); setFout('');
     try { const r = await weigerAfsluitAanvraag(token); setData({ ...r, rapport: null }); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Weigeren mislukt'); }
+    finally { setBezig(false); }
+  }
+
+  // Naar Scrada sturen (dagontvangstenboek) — de beheerder bevestigt dit zelf, nooit automatisch.
+  const [scradaMelding, setScradaMelding] = useState('');
+  async function stuurScrada() {
+    if (!window.confirm('Deze afgesloten dag naar het dagontvangstenboek in Scrada sturen?')) return;
+    setBezig(true); setScradaMelding('');
+    try {
+      const r = await stuurAfsluitingNaarScrada(token);
+      setScradaMelding(r.verstuurd ? `✔ Verstuurd naar Scrada${r.ref ? ` (ref ${r.ref})` : ''}.` : r.modus === 'test' ? 'Scrada is nog niet gekoppeld (dry-run): niets verstuurd.' : `✖ ${r.fout ?? r.melding ?? 'Niet verstuurd'}`);
+      setData(await getAfsluitAanvraag(token));
+    } catch (e) { setScradaMelding('✖ ' + (e instanceof Error ? e.message : 'Versturen mislukt')); }
     finally { setBezig(false); }
   }
 
@@ -88,6 +103,29 @@ export function BevestigAfsluiting() {
           {klaar && (
             <div style={{ ...kader, background: '#f0fdf4', borderColor: '#86efac', color: '#166534', textAlign: 'center', fontWeight: 700 }}>
               ✔ De dag is afgesloten en geregistreerd. Je kan deze pagina sluiten.
+            </div>
+          )}
+
+          {/* Stap 2 (na de afsluiting): naar het Scrada-dagontvangstenboek sturen — op vraag, nooit automatisch. */}
+          {status === 'BEVESTIGD' && data.scrada && (
+            <div style={kader}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Scrada — dagontvangstenboek</div>
+              {data.scrada.status === 'VERSTUURD' ? (
+                <div style={{ color: '#166534', fontWeight: 600 }}>✔ Deze dag staat in Scrada{data.scrada.ref && data.scrada.ref !== 'leeg' ? ` (ref ${data.scrada.ref})` : ''}.</div>
+              ) : !data.scrada.inAanmerking ? (
+                <div style={{ color: '#6b7280', fontSize: 14 }}>Deze dag ligt vóór de Scrada-startdatum en wordt niet verstuurd.</div>
+              ) : !data.scrada.gekoppeld ? (
+                <div style={{ color: '#92400e', fontSize: 14 }}>Scrada is nog niet gekoppeld (Beheerder → Boekhouding).</div>
+              ) : (
+                <>
+                  {data.scrada.status === 'FOUT' && data.scrada.fout && <div style={{ color: 'crimson', fontSize: 13, marginBottom: 8 }}>Vorige poging mislukt: {data.scrada.fout}</div>}
+                  <button onClick={stuurScrada} disabled={bezig} style={{ ...knopGroen, background: '#0d4589', padding: 14, fontSize: 16 }}>
+                    {bezig ? 'Bezig…' : '📒 Naar Scrada sturen'}
+                  </button>
+                  <div style={{ color: '#6b7280', fontSize: 12, textAlign: 'center', marginTop: 6 }}>Niets vertrekt automatisch — pas na deze bevestiging.</div>
+                </>
+              )}
+              {scradaMelding && <div style={{ marginTop: 8, fontWeight: 600, color: scradaMelding.startsWith('✔') ? '#166534' : 'crimson' }}>{scradaMelding}</div>}
             </div>
           )}
 

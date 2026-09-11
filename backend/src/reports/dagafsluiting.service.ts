@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
+import { ScradaService } from '../scrada/scrada.service';
+import { ScradaDagboekService } from '../scrada/scrada.dagboek.service';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
@@ -15,7 +17,12 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 @Injectable()
 export class DagafsluitingService {
-  constructor(private prisma: PrismaService, private push: PushService) {}
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+    private scrada: ScradaService,
+    private dagboek: ScradaDagboekService,
+  ) {}
 
   private async winkelLocatie() {
     const locatie = await this.prisma.stockLocatie.findFirst({
@@ -303,7 +310,30 @@ export class DagafsluitingService {
     }
     // Zolang de aanvraag openstaat: het actuele voorbeeldrapport meegeven.
     const rapport = a.status === 'OPEN' ? await this.overzicht() : null;
-    return { ...this.aanvraagInfo(a), rapport };
+    // Na de bevestiging: staat deze dag al in Scrada (dagontvangstenboek)? De
+    // beheerder bevestigt het versturen zelf op deze pagina.
+    let scrada: { status: string; ref: string | null; fout: string | null; inAanmerking: boolean; gekoppeld: boolean } | null = null;
+    if (a.dagafsluitingId) {
+      const d = await this.prisma.dagafsluiting.findUnique({ where: { id: a.dagafsluitingId } });
+      if (d) {
+        const [vanaf, inst] = await Promise.all([this.scrada.vanaf(), this.dagboek.instellingen()]);
+        scrada = {
+          status: d.scradaStatus, ref: d.scradaRef, fout: d.scradaFout,
+          inAanmerking: !!vanaf && d.tot >= vanaf,
+          gekoppeld: !!inst.journalID && this.scrada.config() !== null,
+        };
+      }
+    }
+    return { ...this.aanvraagInfo(a), rapport, scrada };
+  }
+
+  // Op de telefoon (met geheime token): de afgesloten dag naar het Scrada-
+  // dagontvangstenboek sturen. Enkel mogelijk als de dag effectief afgesloten is.
+  async scradaViaToken(token: string) {
+    const a = await this.prisma.dagafsluitingAanvraag.findUnique({ where: { token } });
+    if (!a) throw new NotFoundException('Aanvraag niet gevonden.');
+    if (a.status !== 'BEVESTIGD' || !a.dagafsluitingId) throw new BadRequestException('De dag is nog niet afgesloten.');
+    return this.dagboek.verstuurDag(a.dagafsluitingId);
   }
 
   // Bevestigen = de dag effectief afsluiten (registreren) en de aanvraag afronden.

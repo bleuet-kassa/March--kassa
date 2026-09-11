@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getDagoverzicht, dagAfsluiten, getAfsluitingen, getDagRapport, dagafsluitingCsvUrl,
-  getMeta, updateOnderneming,
+  getMeta, updateOnderneming, scradaVerstuurDag,
   type Dagrapport, type AfsluitingKort,
 } from '../api/client';
 import { getVerkoper } from '../auth';
@@ -68,6 +68,15 @@ export function Dagafsluiting() {
     try {
       const r = await dagAfsluiten(getVerkoper()?.id);
       setRapport(r); setAfgesloten(true);
+      // Rechtstreeks afgesloten door de beheerder: ook hier vragen (nooit automatisch)
+      // of de dag meteen naar het Scrada-dagontvangstenboek mag.
+      const id = (r as { id?: string }).id;
+      if (id && window.confirm('Dag afgesloten en geregistreerd.\n\nOok meteen naar Scrada (dagontvangstenboek) sturen?')) {
+        try {
+          const s = await scradaVerstuurDag(id);
+          window.alert(s.verstuurd ? `Verstuurd naar Scrada${s.ref ? ` (ref ${s.ref})` : ''}.` : s.modus === 'test' ? 'Scrada is nog niet gekoppeld (dry-run): niets verstuurd.' : `Niet verstuurd: ${s.fout ?? s.melding ?? 'fout'}`);
+        } catch (e) { window.alert(e instanceof Error ? e.message : 'Versturen naar Scrada mislukt'); }
+      }
       setRegister(await getAfsluitingen());
     } catch {
       setFout('Afsluiten mislukt.');
