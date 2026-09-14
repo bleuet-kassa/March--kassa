@@ -26,7 +26,7 @@ export class VerkoopfacturenController {
   }
   @Put('instellingen')
   @Rollen('BEHEER', 'BEHEERDER')
-  zetInstellingen(@Body() body: Partial<FactuurInstellingen>) {
+  zetInstellingen(@Body() body: Partial<FactuurInstellingen> & { volgendeVolgnummer?: number }) {
     return this.facturen.zetInstellingen(body ?? {});
   }
 

@@ -641,7 +641,8 @@ export async function scradaVerstuurDagen(): Promise<{ modus: string; gevonden: 
 }
 
 // --- Verkoopfacturen uit de kassa (per ticket / maandfactuur per bedrijf) -> Scrada concept ---
-export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number };
+// prefix leeg = nummering <jaar><volgnummer>, bv. 20260001; volgend/voorbeeld = eerstvolgend nummer (alleen-lezen).
+export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number; jaar?: string; volgend?: number; voorbeeld?: string };
 export type Verkoopfactuur = {
   id: string; nummer: string; datum: string; vervaldatum: string | null; bron: 'TICKET' | 'MAANDFACTUUR' | string; periode: string | null;
   klantNaam: string; klantBtw: string | null; totaalExcl: number; totaalBtw: number; totaalIncl: number;
@@ -660,7 +661,7 @@ export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
 export async function getFactuurInstellingen(): Promise<FactuurInstellingen> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`));
 }
-export async function zetFactuurInstellingen(input: Partial<FactuurInstellingen>): Promise<FactuurInstellingen> {
+export async function zetFactuurInstellingen(input: Partial<FactuurInstellingen> & { volgendeVolgnummer?: number }): Promise<FactuurInstellingen> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
 }
 export async function getVerkoopfactuur(id: string): Promise<Verkoopfactuur & { lijnen: unknown; perBtw: unknown; scrada: unknown; verkopen: { id: string; datum: string; totaal: string }[] }> {

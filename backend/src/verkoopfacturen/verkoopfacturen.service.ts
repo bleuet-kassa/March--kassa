@@ -56,32 +56,46 @@ export class VerkoopfacturenService {
 
   // --- instellingen -----------------------------------------------------------
 
-  async instellingen(): Promise<FactuurInstellingen> {
-    const basis: FactuurInstellingen = { prefix: 'K', verkoopdagboek: 'KASSA', vervaldagen: 30 };
+  // Nummering: <prefix><jaar><volgnummer 4 cijfers>, bv. 20260001 (zonder prefix).
+  private reeksSleutel(jaar: string) { return `factuur.reeks.${jaar}`; }
+  private huidigJaar() { return brusselDatum(new Date()).slice(0, 4); }
+
+  async instellingen(): Promise<FactuurInstellingen & { jaar: string; volgend: number; voorbeeld: string }> {
+    const basis: FactuurInstellingen = { prefix: '', verkoopdagboek: 'KASSA', vervaldagen: 30 };
     const i = await this.prisma.instelling.findUnique({ where: { sleutel: SLEUTEL } });
-    if (!i?.waarde) return basis;
-    try { return { ...basis, ...JSON.parse(i.waarde) }; } catch { return basis; }
+    let inst = basis;
+    if (i?.waarde) { try { inst = { ...basis, ...JSON.parse(i.waarde) }; } catch { inst = basis; } }
+    const jaar = this.huidigJaar();
+    const reeks = await this.prisma.instelling.findUnique({ where: { sleutel: this.reeksSleutel(jaar) } });
+    const volgend = (Number(reeks?.waarde ?? 0) || 0) + 1;
+    return { ...inst, jaar, volgend, voorbeeld: `${inst.prefix}${jaar}${String(volgend).padStart(4, '0')}` };
   }
-  async zetInstellingen(input: Partial<FactuurInstellingen>) {
+  // volgendeVolgnummer: het eerstvolgende volgnummer voor dit jaar (bv. 1 -> 20260001).
+  async zetInstellingen(input: Partial<FactuurInstellingen> & { volgendeVolgnummer?: number }) {
     const huidig = await this.instellingen();
     const nieuw: FactuurInstellingen = {
-      prefix: (input.prefix ?? huidig.prefix).trim() || 'K',
+      prefix: (input.prefix ?? huidig.prefix).trim(),
       verkoopdagboek: (input.verkoopdagboek ?? huidig.verkoopdagboek).trim(),
       vervaldagen: Math.max(0, Math.round(Number(input.vervaldagen ?? huidig.vervaldagen) || 30)),
     };
     await this.prisma.instelling.upsert({ where: { sleutel: SLEUTEL }, create: { sleutel: SLEUTEL, waarde: JSON.stringify(nieuw) }, update: { waarde: JSON.stringify(nieuw) } });
-    return nieuw;
+    if (input.volgendeVolgnummer != null) {
+      const n = Math.max(1, Math.round(Number(input.volgendeVolgnummer) || 1));
+      const sleutel = this.reeksSleutel(huidig.jaar);
+      await this.prisma.instelling.upsert({ where: { sleutel }, create: { sleutel, waarde: String(n - 1) }, update: { waarde: String(n - 1) } });
+    }
+    return this.instellingen();
   }
 
-  // Doorlopende nummering per boekjaar: <prefix><jaar>-0001.
+  // Doorlopende nummering per boekjaar (teller in Instelling "factuur.reeks.<jaar>").
   private async volgendNummer(jaar: string): Promise<string> {
     const inst = await this.instellingen();
-    const sleutel = `factuur.reeks.${jaar}`;
+    const sleutel = this.reeksSleutel(jaar);
     return this.prisma.$transaction(async (tx) => {
       const huidig = await tx.instelling.findUnique({ where: { sleutel } });
       const n = (Number(huidig?.waarde ?? 0) || 0) + 1;
       await tx.instelling.upsert({ where: { sleutel }, create: { sleutel, waarde: String(n) }, update: { waarde: String(n) } });
-      return `${inst.prefix}${jaar}-${String(n).padStart(4, '0')}`;
+      return `${inst.prefix}${jaar}${String(n).padStart(4, '0')}`;
     });
   }
 

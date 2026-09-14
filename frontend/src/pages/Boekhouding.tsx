@@ -43,14 +43,20 @@ export function Boekhouding() {
   const [facOverzicht, setFacOverzicht] = useState<FactuurOverzicht | null>(null);
   const [facInst, setFacInst] = useState<FactuurInstellingen>({ prefix: 'K', verkoopdagboek: 'KASSA', vervaldagen: 30 });
   const [toonAlleFacturen, setToonAlleFacturen] = useState(false);
+  const [facVolgend, setFacVolgend] = useState(''); // eerstvolgend volgnummer (bv. 1 -> 20260001)
 
   async function laadFacturen() {
     const [f, o, i] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen()]);
-    setFacturen(f); setFacOverzicht(o); setFacInst(i);
+    setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : '');
   }
   async function bewaarFacInst() {
     setBezig(true); setMelding('');
-    try { setFacInst(await zetFactuurInstellingen(facInst)); setMelding('Factuurinstellingen opgeslagen.'); }
+    try {
+      const volgende = facVolgend.trim() ? Number(facVolgend) : undefined;
+      const i = await zetFactuurInstellingen({ prefix: facInst.prefix, verkoopdagboek: facInst.verkoopdagboek, vervaldagen: facInst.vervaldagen, volgendeVolgnummer: volgende && volgende > 0 ? volgende : undefined });
+      setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : '');
+      setMelding(`Factuurinstellingen opgeslagen. Volgende factuur: ${i.voorbeeld ?? ''}.`);
+    }
     catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
     finally { setBezig(false); }
   }
@@ -307,14 +313,15 @@ export function Boekhouding() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
             <label style={{ fontSize: 13 }}>Verkoopdagboek in Scrada <input value={facInst.verkoopdagboek} onChange={(e) => setFacInst({ ...facInst, verkoopdagboek: e.target.value })} style={{ ...inp, width: 110 }} /></label>
-            <label style={{ fontSize: 13 }}>Nummerprefix <input value={facInst.prefix} onChange={(e) => setFacInst({ ...facInst, prefix: e.target.value })} style={{ ...inp, width: 60 }} /></label>
+            <label style={{ fontSize: 13 }} title="Leeg = enkel jaar + volgnummer, bv. 20260001">Prefix <input value={facInst.prefix} onChange={(e) => setFacInst({ ...facInst, prefix: e.target.value })} placeholder="(leeg)" style={{ ...inp, width: 60 }} /></label>
+            <label style={{ fontSize: 13 }} title="Het eerstvolgende volgnummer van dit jaar (1 = …0001)">Volgend nr. <input type="number" min={1} value={facVolgend} onChange={(e) => setFacVolgend(e.target.value)} style={{ ...inp, width: 70 }} /></label>
             <label style={{ fontSize: 13 }}>Vervaldagen <input type="number" value={facInst.vervaldagen} onChange={(e) => setFacInst({ ...facInst, vervaldagen: Number(e.target.value) })} style={{ ...inp, width: 70 }} /></label>
             <button onClick={bewaarFacInst} disabled={bezig} style={btn}>Opslaan</button>
             <button onClick={verstuurAlleFacturen} disabled={bezig || !facOverzicht || (facOverzicht.teVersturen + facOverzicht.ticketsZonderFactuur) === 0 || !vanafOpgeslagen} style={btn}>
               Klaarstaande facturen naar Scrada
             </button>
           </div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Zet in Scrada op dat verkoopdagboek <em>ApiInvoiceStatus = concept</em>, zodat de facturen ter nazicht klaarstaan. Nummering: {facInst.prefix}{new Date().getFullYear()}-0001, doorlopend per jaar.</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Zet in Scrada op dat verkoopdagboek <em>ApiInvoiceStatus = concept</em>, zodat de facturen ter nazicht klaarstaan. Nummering: jaar + volgnummer, doorlopend per jaar — volgende factuur: <strong>{facInst.voorbeeld ?? `${facInst.prefix}${new Date().getFullYear()}0001`}</strong>.</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
               <thead>
