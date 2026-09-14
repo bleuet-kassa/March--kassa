@@ -62,6 +62,7 @@ model RekeningBedrijf {
   createdAt DateTime      @default(now())
   leden     RekeningLid[]
   verkopen  Verkoop[]
+  facturen  Verkoopfactuur[]
 }
 
 model RekeningLid {
@@ -266,6 +267,7 @@ model Klant {
   createdAt    DateTime  @default(now())
 
   verkopen     Verkoop[]
+  facturen     Verkoopfactuur[]
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +379,10 @@ model Verkoop {
   rekeningLidId     String?
   gefactureerd      Boolean          @default(false)
   gefactureerdOp    DateTime?
+  // Verkoopfactuur uit de kassa: gewenst bij afrekenen (klant met BTW-nr) en/of aangemaakt
+  factuurGewenst    Boolean          @default(false)
+  factuur           Verkoopfactuur?  @relation(fields: [factuurId], references: [id])
+  factuurId         String?
   gebruiker     Gebruiker?    @relation(fields: [gebruikerId], references: [id])
   gebruikerId   String?
   kanaal        VerkoopKanaal @default(KASSA)
@@ -552,4 +558,45 @@ model DagafsluitingAanvraag {
   dagafsluiting     Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
   dagafsluitingId   String?        @unique
   createdAt         DateTime       @default(now())
+}
+
+// Verkoopfactuur uit de kassa: per ticket (klant met BTW-nr aan de kassa) of
+// één maandfactuur per bedrijf "op rekening". Gaat als CONCEPT naar de
+// verkoopfacturen-module in Scrada (verzending via Peppol gebeurt daar). Voor
+// omzet die al in het dagontvangstenboek zit, boekt de kassa een correctie.
+// De betaalstatus wordt in de kassa bijgehouden.
+model Verkoopfactuur {
+  id                String   @id @default(cuid())
+  nummer            String   @unique   // bv. K2026-0001
+  boekjaar          String              // bv. "2026"
+  datum             DateTime @default(now())
+  vervaldatum       DateTime?
+  bron              String              // TICKET | MAANDFACTUUR
+  periode           String?             // bv. "2026-09" (maandfactuur)
+  klantNaam         String
+  klantBtw          String?
+  klantEmail        String?
+  klantAdres        String?
+  klant             Klant?           @relation(fields: [klantId], references: [id])
+  klantId           String?
+  rekeningBedrijf   RekeningBedrijf? @relation(fields: [rekeningBedrijfId], references: [id])
+  rekeningBedrijfId String?
+  totaalExcl        Decimal  @db.Decimal(10, 2)
+  totaalBtw         Decimal  @db.Decimal(10, 2)
+  totaalIncl        Decimal  @db.Decimal(10, 2)
+  perBtw            Json                // [{ percentage, excl, btw, incl }]
+  lijnen            Json                // [{ datum, verkoopId, omschrijving, aantal, kg, eenheidsprijsIncl, btwPct, totaalIncl }]
+  betaalstatus      String   @default("OPENSTAAND") // OPENSTAAND | BETAALD
+  betaaldOp         DateTime?
+  betaalwijze       String?
+  scradaStatus      String   @default("NIET_VERSTUURD") // NIET_VERSTUURD | VERSTUURD | FOUT
+  scradaRef         String?
+  scradaVerstuurdOp DateTime?
+  scradaFout        String?
+  correctieStatus   String   @default("NIET_VERSTUURD") // dagboek-correctie: NIET_VERSTUURD | WACHT_OP_DAG | VERSTUURD | FOUT | NIET_NODIG
+  correctieRef      String?
+  correctieFout     String?
+  createdAt         DateTime @default(now())
+
+  verkopen          Verkoop[]
 }

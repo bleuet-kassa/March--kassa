@@ -56,7 +56,11 @@ export function BevestigAfsluiting() {
     setBezig(true); setScradaMelding('');
     try {
       const r = await stuurAfsluitingNaarScrada(token);
-      setScradaMelding(r.verstuurd ? `✔ Verstuurd naar Scrada${r.ref ? ` (ref ${r.ref})` : ''}.` : r.modus === 'test' ? 'Scrada is nog niet gekoppeld (dry-run): niets verstuurd.' : `✖ ${r.fout ?? r.melding ?? 'Niet verstuurd'}`);
+      const fac = r.facturen;
+      const facTekst = fac ? (fac.geweigerd ? ` Facturen: ${fac.melding ?? 'niet verstuurd'}.` : ` Facturen: ${fac.verstuurd} als concept naar Scrada${fac.aangemaakt ? ` (${fac.aangemaakt} nieuw aangemaakt)` : ''}${fac.correcties ? `, ${fac.correcties} dagboekcorrectie(s)` : ''}${fac.mislukt ? `, ${fac.mislukt} mislukt: ${fac.fout ?? 'fout'}` : ''}.`) : '';
+      setScradaMelding(r.verstuurd
+        ? `✔ Dag verstuurd naar Scrada${r.ref ? ` (ref ${r.ref})` : ''}${r.aangevuld ? `, ${r.aangevuld} nul-dag(en) aangevuld` : ''}.${facTekst}`
+        : r.modus === 'test' ? 'Scrada is nog niet gekoppeld (dry-run): niets verstuurd.' : `✖ ${r.fout ?? r.melding ?? 'Niet verstuurd'}${facTekst}`);
       setData(await getAfsluitAanvraag(token));
     } catch (e) { setScradaMelding('✖ ' + (e instanceof Error ? e.message : 'Versturen mislukt')); }
     finally { setBezig(false); }

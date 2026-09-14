@@ -59,10 +59,13 @@ export async function getProducten(): Promise<Product[]> {
   return res.json();
 }
 
+// Factuur gewenst bij een kassaverkoop: bestaand bedrijf (op-rekening-lijst) of nieuwe klant met BTW-nr.
+export type FactuurKeuze = { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string } };
 export async function afrekenen(input: {
   lijnen: AfrekenLijn[];
   betaalwijze?: Betaalwijze; // weglaten bij "op rekening"
   betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling (max. 2)
+  factuur?: FactuurKeuze; // factuur volgt (per ticket), betaald of openstaand
   ontvangen?: number;
   gebruikerId?: string;
   kortingReden?: string;
@@ -636,6 +639,42 @@ export async function scradaVerstuurDag(id: string): Promise<{ verstuurd: boolea
 export async function scradaVerstuurDagen(): Promise<{ modus: string; gevonden: number; verstuurd: number; mislukt: number; geweigerd?: boolean; melding?: string; fout?: string }> {
   return jsonOrThrow(await fetch(`${BASE}/scrada/dagboek/verstuur`, { method: 'POST' }));
 }
+
+// --- Verkoopfacturen uit de kassa (per ticket / maandfactuur per bedrijf) -> Scrada concept ---
+export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number };
+export type Verkoopfactuur = {
+  id: string; nummer: string; datum: string; vervaldatum: string | null; bron: 'TICKET' | 'MAANDFACTUUR' | string; periode: string | null;
+  klantNaam: string; klantBtw: string | null; totaalExcl: number; totaalBtw: number; totaalIncl: number;
+  betaalstatus: 'OPENSTAAND' | 'BETAALD' | string; betaaldOp: string | null; betaalwijze: string | null;
+  scradaStatus: string; scradaRef: string | null; scradaVerstuurdOp: string | null; scradaFout: string | null;
+  correctieStatus: string; correctieFout: string | null; aantalTickets: number;
+};
+export type FactuurOverzicht = { openstaand: number; openstaandBedrag: number; teVersturen: number; ticketsZonderFactuur: number };
+export type FactuurVerzendResultaat = { modus: string; aangemaakt: number; gevonden?: number; verstuurd: number; mislukt: number; correcties: number; geweigerd?: boolean; melding?: string; fout?: string };
+export async function getVerkoopfacturen(): Promise<Verkoopfactuur[]> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen`));
+}
+export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/overzicht`));
+}
+export async function getFactuurInstellingen(): Promise<FactuurInstellingen> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`));
+}
+export async function zetFactuurInstellingen(input: Partial<FactuurInstellingen>): Promise<FactuurInstellingen> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function getVerkoopfactuur(id: string): Promise<Verkoopfactuur & { lijnen: unknown; perBtw: unknown; scrada: unknown; verkopen: { id: string; datum: string; totaal: string }[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}`));
+}
+export async function maakTicketFactuur(verkoopId: string): Promise<Verkoopfactuur> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/ticket/${verkoopId}`, { method: 'POST' }));
+}
+export async function verstuurFactuurNaarScrada(id: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string; correctie?: { status: string; melding?: string; fout?: string } }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}/verstuur`, { method: 'POST' }));
+}
+export async function verstuurFacturenNaarScrada(): Promise<FactuurVerzendResultaat> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/verstuur`, { method: 'POST' }));
+}
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();
 }
@@ -784,7 +823,7 @@ export async function getBedrijfVerkopen(id: string, opties: { alle?: boolean; v
   const qs = q.toString();
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/verkopen${qs ? '?' + qs : ''}`));
 }
-export async function factureerBedrijf(id: string): Promise<{ aantal: number; totaal: number }> {
+export async function factureerBedrijf(id: string): Promise<{ aantal: number; totaal: number; factuur?: { id: string; nummer: string } }> {
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/factureer`, { method: 'POST' }));
 }
 // Een (nog niet gefactureerde) verkoop verschuiven naar een andere rekening (bedrijf + lid).
@@ -834,7 +873,7 @@ export async function getAfsluitAanvraag(token: string): Promise<AfsluitAanvraag
   return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}`));
 }
 // Op de telefoon: de afgesloten dag naar het Scrada-dagontvangstenboek sturen (beheerder bevestigt zelf).
-export async function stuurAfsluitingNaarScrada(token: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string }> {
+export async function stuurAfsluitingNaarScrada(token: string): Promise<{ verstuurd: boolean; ref?: string | null; melding?: string; fout?: string; modus?: string; aangevuld?: number; facturen?: { aangemaakt: number; verstuurd: number; mislukt: number; correcties: number; geweigerd?: boolean; melding?: string; fout?: string } }> {
   return jsonOrThrow(await fetch(`${BASE}/dagafsluiting/bevestig/${encodeURIComponent(token)}/scrada`, { method: 'POST' }));
 }
 export async function bevestigAfsluitAanvraag(token: string): Promise<AfsluitAanvraag & { rapport: Dagrapport }> {

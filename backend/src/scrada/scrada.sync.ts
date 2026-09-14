@@ -75,19 +75,28 @@ export class ScradaSync implements OnModuleInit, OnModuleDestroy {
       where: { tot: { gte: vanaf }, scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] } },
       orderBy: { tot: 'asc' },
     });
-    if (!open.length) return { dagen: 0, melding: 'Alle afgesloten dagen staan in Scrada.' };
-    const eerste = open[0];
-    const token = await this.dagboek.tokenVoorDag(eerste.id);
+    // Ook facturen die klaarstaan (nog niet in Scrada) of tickets die nog een factuur moeten krijgen.
+    const [facturenOpen, ticketsZonderFactuur] = await Promise.all([
+      this.prisma.verkoopfactuur.count({ where: { datum: { gte: vanaf }, scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] } } }),
+      this.prisma.verkoop.count({ where: { factuurGewenst: true, factuurId: null, geannuleerd: false } }),
+    ]);
+    const facturen = facturenOpen + ticketsZonderFactuur;
+    if (!open.length && !facturen) return { dagen: 0, facturen: 0, melding: 'Alle afgesloten dagen en facturen staan in Scrada.' };
     const basis = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
-    const datumNl = eerste.tot.toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' });
+    // Link naar de oudste openstaande dag; zijn er enkel facturen, dan naar de laatste afgesloten dag.
+    const doel = open[0] ?? (await this.prisma.dagafsluiting.findFirst({ orderBy: { tot: 'desc' } }));
+    const url = doel ? `${basis}/bevestig-afsluiting/${await this.dagboek.tokenVoorDag(doel.id)}` : `${basis}/kassa/boekhouding`;
+    const datumNl = open[0]?.tot.toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' });
+    const delen: string[] = [];
+    if (open.length === 1) delen.push(`Dagafsluiting${open[0].volgnummer ? ` #${open[0].volgnummer}` : ''} van ${datumNl} (€ ${Number(open[0].totaal).toFixed(2)}) staat nog niet in Scrada.`);
+    else if (open.length > 1) delen.push(`${open.length} afgesloten dagen staan nog niet in Scrada (oudste: ${datumNl}).`);
+    if (facturen) delen.push(`${facturen} factu${facturen === 1 ? 'ur' : 'ren'} klaar om als concept naar Scrada te gaan.`);
     const push = await this.push.naarBeheerders({
-      titel: 'Dagontvangsten naar Scrada',
-      tekst: open.length === 1
-        ? `Dagafsluiting${eerste.volgnummer ? ` #${eerste.volgnummer}` : ''} van ${datumNl} (€ ${Number(eerste.totaal).toFixed(2)}) staat nog niet in Scrada. Tik om te bevestigen.`
-        : `${open.length} afgesloten dagen staan nog niet in Scrada (oudste: ${datumNl}). Tik om ze te versturen.`,
-      url: `${basis}/bevestig-afsluiting/${token}`,
+      titel: 'Scrada — bevestiging gevraagd',
+      tekst: `${delen.join(' ')} Tik om te bevestigen.`,
+      url,
       tag: 'scrada',
     });
-    return { dagen: open.length, push };
+    return { dagen: open.length, facturen, push };
   }
 }

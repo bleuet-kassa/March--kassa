@@ -136,7 +136,7 @@ export function Rekeningen() {
   async function factureer(b: RekeningBedrijf) {
     if (!window.confirm(`Alle openstaande verkopen van ${b.naam} (${euro(b.openstaand)}) als gefactureerd markeren?`)) return;
     const r = await factureerBedrijf(b.id);
-    window.alert(`${r.aantal} verkopen afgesloten voor een totaal van ${euro(r.totaal)}.`);
+    window.alert(`${r.aantal} verkopen gebundeld in maandfactuur ${r.factuur?.nummer ?? ''} (${euro(r.totaal)}).\n\nDe factuur staat als "openstaand" bij Beheerder → Boekhouding → Verkoopfacturen en gaat bij de volgende bevestiging als concept naar Scrada.`);
     await laad();
     setVerkopen((v) => { const k = { ...v }; delete k[b.id]; return k; });
   }

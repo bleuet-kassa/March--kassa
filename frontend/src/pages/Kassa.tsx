@@ -125,9 +125,16 @@ type Bon = {
   split1Bedrag?: string;
   split2Bw?: Betaalwijze;
   split2Bedrag?: string;
+  // Factuur gewenst (klant met BTW-nr): bestaand bedrijf (op-rekening-lijst) of nieuwe klant.
+  factuur?: boolean;
+  factuurBedrijfId?: string;
+  factuurNaam?: string;
+  factuurBtw?: string;
+  factuurEmail?: string;
+  factuurAdres?: string;
 };
 function maakBon(): Bon {
-  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '' };
+  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '', factuur: false, factuurBedrijfId: '', factuurNaam: '', factuurBtw: '', factuurEmail: '', factuurAdres: '' };
 }
 
 // Kassascherm (Fase 2): scannen, aantallen, betaalwijze, BTW-uitsplitsing,
@@ -634,6 +641,13 @@ export function Kassa() {
     if (!bon.verkoperId) { setFout('Kies eerst de verkoper voor dit ticket.'); return; }
     if (bon.opRekening && (!bon.rekeningBedrijfId || !bon.rekeningLidId)) { setFout('Kies het bedrijf en het personeelslid voor de rekening.'); return; }
     if (bon.gesplitst && !splitOk) { setFout(`De gesplitste betalingen komen niet overeen met het te betalen bedrag (verschil € ${splitVerschil.toFixed(2)}).`); return; }
+    if (bon.factuur && !bon.opRekening && !bon.factuurBedrijfId && !bon.factuurNaam?.trim()) { setFout('Kies voor de factuur een bedrijf, of vul de naam (en het BTW-nummer) van de klant in.'); return; }
+    // Factuur gewenst: bestaand bedrijf of nieuwe klant (op rekening = maandfactuur, geen ticketfactuur).
+    const factuurKeuze = bon.factuur && !bon.opRekening
+      ? (bon.factuurBedrijfId
+        ? { bedrijfId: bon.factuurBedrijfId }
+        : { klant: { naam: bon.factuurNaam!.trim(), btwNummer: bon.factuurBtw?.trim() || undefined, email: bon.factuurEmail?.trim() || undefined, adres: bon.factuurAdres?.trim() || undefined } })
+      : undefined;
     // Gesplitste betaling: de deelbetalingen (max. 2, lege bedragen weglaten).
     const betalingen = bon.gesplitst
       ? [{ betaalwijze: bon.split1Bw!, bedrag: splitBedrag1 }, { betaalwijze: bon.split2Bw!, bedrag: splitBedrag2 }].filter((b) => Math.abs(b.bedrag) > 0.001)
@@ -654,6 +668,7 @@ export function Kassa() {
       })),
       betaalwijze: bon.opRekening || bon.gesplitst ? undefined : betaalwijze,
       betalingen, // gesplitste betaling (of undefined)
+      factuur: factuurKeuze, // factuur gewenst (per ticket), of undefined
       ontvangen: cash && !isTerugbetaling && ontvangen !== '' && !Number.isNaN(ontvangenNum) ? ontvangenNum : undefined,
       gebruikerId: bon.verkoperId,
       kortingReden,
@@ -1015,6 +1030,34 @@ export function Kassa() {
                 Gesplitst / cadeaubon
               </button>
             </div>
+            {/* Factuur gewenst (klant met BTW-nr): per ticket; betaald of niet, de factuur gaat als concept naar Scrada. */}
+            {!bon.opRekening && (
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 15 }}>
+                  <input type="checkbox" checked={!!bon.factuur} onChange={(e) => patchBon(bon.id, { factuur: e.target.checked })} />
+                  🧾 Factuur voor deze verkoop
+                </label>
+                {bon.factuur && (
+                  <div style={{ marginTop: 8, padding: 10, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <select value={bon.factuurBedrijfId ?? ''} onChange={(e) => patchBon(bon.id, { factuurBedrijfId: e.target.value })} style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }}>
+                      <option value="">— bestaand bedrijf, of vul hieronder een nieuwe klant in —</option>
+                      {rekeningBedrijven.map((rb) => <option key={rb.id} value={rb.id}>{rb.naam}{rb.btwNummer ? ` (${rb.btwNummer})` : ''}</option>)}
+                    </select>
+                    {!bon.factuurBedrijfId && (
+                      <>
+                        <input value={bon.factuurNaam ?? ''} onChange={(e) => patchBon(bon.id, { factuurNaam: e.target.value })} placeholder="Naam bedrijf / klant *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurNaam ? '1px solid #ccc' : '2px solid #f59e0b' }} />
+                        <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (BE0…)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                        <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} placeholder="E-mail (voor de factuur)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                        <input value={bon.factuurAdres ?? ''} onChange={(e) => patchBon(bon.id, { factuurAdres: e.target.value })} placeholder="Adres" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                      </>
+                    )}
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+                      Betaalt de klant nu (Bancontact, cash, …), dan staat dat op de factuur vermeld; kies "Overschrijving" als hij later betaalt. De factuur gaat als concept naar Scrada.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {bon.opRekening && (
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <select value={bon.rekeningBedrijfId} onChange={(e) => patchBon(bon.id, { rekeningBedrijfId: e.target.value, rekeningLidId: '' })} style={{ flex: 1, minWidth: 140, padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningBedrijfId ? '1px solid #ccc' : '2px solid #f59e0b' }}>

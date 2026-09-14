@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
 import { ScradaService } from '../scrada/scrada.service';
 import { ScradaDagboekService } from '../scrada/scrada.dagboek.service';
+import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
@@ -22,6 +23,7 @@ export class DagafsluitingService {
     private push: PushService,
     private scrada: ScradaService,
     private dagboek: ScradaDagboekService,
+    private facturen: VerkoopfacturenService,
   ) {}
 
   private async winkelLocatie() {
@@ -333,7 +335,10 @@ export class DagafsluitingService {
     const a = await this.prisma.dagafsluitingAanvraag.findUnique({ where: { token } });
     if (!a) throw new NotFoundException('Aanvraag niet gevonden.');
     if (a.status !== 'BEVESTIGD' || !a.dagafsluitingId) throw new BadRequestException('De dag is nog niet afgesloten.');
-    return this.dagboek.verstuurDag(a.dagafsluitingId);
+    // Eerst de dag zelf, daarna de klaarstaande facturen (concept) + hun correcties.
+    const dag = await this.dagboek.verstuurDag(a.dagafsluitingId);
+    const facturen = dag.verstuurd || dag.melding ? await this.facturen.verstuurOpenstaande() : undefined;
+    return { ...dag, facturen };
   }
 
   // Bevestigen = de dag effectief afsluiten (registreren) en de aanvraag afronden.

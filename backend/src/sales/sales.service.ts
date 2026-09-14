@@ -35,6 +35,9 @@ export type AfrekenInput = {
   rekeningLidId?: string;
   // offline-buffer: unieke sleutel; bestaat de verkoop al, dan geven we die terug
   idempotencyKey?: string;
+  // Factuur gewenst (klant met BTW-nummer): bestaand "op rekening"-bedrijf, bestaande
+  // klant, of een nieuwe klant. De factuur zelf wordt later aangemaakt (per ticket).
+  factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string } };
 };
 
 // Werk met centen om afrondingsfouten met kommagetallen te vermijden.
@@ -57,7 +60,7 @@ export class SalesService {
   // winkelstock en berekent de BTW per lijn. Alles in één transactie zodat
   // een verkoop nooit half wordt bewaard.
   async afrekenen(input: AfrekenInput) {
-    const { lijnen, betaalwijze, betalingen, ontvangen, gebruikerId, kortingReden, kanaal, klantId, leverwijze, status, rekeningBedrijfId, rekeningLidId, idempotencyKey } = input;
+    const { lijnen, betaalwijze, betalingen, ontvangen, gebruikerId, kortingReden, kanaal, klantId, leverwijze, status, rekeningBedrijfId, rekeningLidId, idempotencyKey, factuur } = input;
     // Verkoopbrede korting (geldt op elke lijn, bovenop een eventuele lijnkorting).
     const verkoopKorting = Math.min(Math.max(Number(input.verkoopKortingPct) || 0, 0), 100);
     if (betalingen && betalingen.length > 2) {
@@ -173,6 +176,31 @@ export class SalesService {
     // Hoofdbetaalwijze (voor weergave/terugvalwaarde): de eerste betaling.
     const hoofdBetaalwijze = betaalLijnen[0]?.betaalwijze ?? betaalwijze ?? null;
 
+    // Factuur gewenst: de klant (met BTW-nummer) bepalen. Een "op rekening"-bedrijf
+    // wordt daarvoor als Klant (B2B) hergebruikt/aangemaakt — de verkoop zelf blijft
+    // gewoon betaald aan de kassa (dus niet "open op rekening").
+    let factuurKlantId: string | null = null;
+    if (factuur) {
+      const normBtw = (s?: string | null) => (s ? s.replace(/[\s.]/g, '').toUpperCase() : null);
+      const vindOfMaak = async (naam: string, btw: string | null, email?: string | null, adres?: string | null) => {
+        const bestaand = btw ? await this.prisma.klant.findFirst({ where: { btwNummer: btw } }) : null;
+        if (bestaand) return bestaand.id;
+        const k = await this.prisma.klant.create({ data: { naam: naam.trim(), type: 'B2B', btwNummer: btw, email: email?.trim() || null, adres: adres?.trim() || null } });
+        return k.id;
+      };
+      if (factuur.bedrijfId) {
+        const b = await this.prisma.rekeningBedrijf.findUnique({ where: { id: factuur.bedrijfId } });
+        if (!b) throw new BadRequestException('Bedrijf voor de factuur niet gevonden.');
+        factuurKlantId = await vindOfMaak(b.naam, normBtw(b.btwNummer), b.email, b.adres);
+      } else if (factuur.klantId) {
+        factuurKlantId = factuur.klantId;
+      } else if (factuur.klant?.naam?.trim()) {
+        factuurKlantId = await vindOfMaak(factuur.klant.naam, normBtw(factuur.klant.btwNummer), factuur.klant.email, factuur.klant.adres);
+      } else {
+        throw new BadRequestException('Geef een klant (bedrijf of naam + BTW-nummer) voor de factuur.');
+      }
+    }
+
     // Maandbudget op rekening: wat dit personeelslid deze kalendermaand al kocht
     // (niet-geannuleerd, gefactureerd of niet) + deze verkoop mag het ingestelde
     // maandbudget niet overschrijden. Geen budget ingesteld = geen limiet.
@@ -208,7 +236,8 @@ export class SalesService {
           ondernemingId: onderneming.id,
           locatieId: locatie.id,
           gebruikerId: gebruikerId ?? null,
-          klantId: klantId ?? null,
+          klantId: factuurKlantId ?? klantId ?? null,
+          factuurGewenst: !!factuur, // factuur volgt (per ticket) bij de volgende verzending
           kanaal: kanaal ?? 'KASSA',
           betaalwijze: hoofdBetaalwijze,
           leverwijze: leverwijze ?? null,

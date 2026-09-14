@@ -5,6 +5,8 @@ import {
   getScradaDagen, getScradaDagPreview, scradaVerstuurDag, scradaVerstuurDagen,
   type ScradaConfig, type ScradaVerbinding, type ScradaSyncVerslag,
   type ScradaDagboekInstellingen, type ScradaDagboek, type ScradaCategorie, type ScradaBetaalmethode, type ScradaDag, type ScradaDagPreview,
+  getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada,
+  type Verkoopfactuur, type FactuurOverzicht, type FactuurInstellingen,
 } from '../api/client';
 
 const euro = (n: number | string) => '€ ' + Number(n).toFixed(2);
@@ -36,6 +38,44 @@ export function Boekhouding() {
   const [preview, setPreview] = useState<ScradaDagPreview | null>(null);
   const [melding, setMelding] = useState('');
   const [bezig, setBezig] = useState(false);
+  // Verkoopfacturen uit de kassa (per ticket / maandfactuur) -> Scrada concept.
+  const [facturen, setFacturen] = useState<Verkoopfactuur[]>([]);
+  const [facOverzicht, setFacOverzicht] = useState<FactuurOverzicht | null>(null);
+  const [facInst, setFacInst] = useState<FactuurInstellingen>({ prefix: 'K', verkoopdagboek: 'KASSA', vervaldagen: 30 });
+  const [toonAlleFacturen, setToonAlleFacturen] = useState(false);
+
+  async function laadFacturen() {
+    const [f, o, i] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen()]);
+    setFacturen(f); setFacOverzicht(o); setFacInst(i);
+  }
+  async function bewaarFacInst() {
+    setBezig(true); setMelding('');
+    try { setFacInst(await zetFactuurInstellingen(facInst)); setMelding('Factuurinstellingen opgeslagen.'); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function verstuurFactuur(f: Verkoopfactuur) {
+    if (!window.confirm(`Factuur ${f.nummer} (${f.klantNaam}, ${euro(f.totaalIncl)}) als concept naar Scrada sturen?`)) return;
+    setBezig(true); setMelding('');
+    try {
+      const r = await verstuurFactuurNaarScrada(f.id);
+      setMelding(r.verstuurd
+        ? `Factuur ${f.nummer} staat als concept in Scrada${r.ref ? ` (ref ${r.ref})` : ''}${r.correctie ? ` · dagboekcorrectie: ${r.correctie.status}${r.correctie.melding ? ` (${r.correctie.melding})` : ''}${r.correctie.fout ? ` (${r.correctie.fout})` : ''}` : ''}.`
+        : r.modus === 'test' ? 'Niet gekoppeld (dry-run): niets verstuurd.' : `Niet verstuurd: ${r.fout ?? r.melding ?? 'fout'}`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Versturen mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function verstuurAlleFacturen() {
+    if (!window.confirm('Alle klaarstaande facturen (vanaf de startdatum) als concept naar Scrada sturen, plus de dagboekcorrecties?')) return;
+    setBezig(true); setMelding('');
+    try {
+      const r = await verstuurFacturenNaarScrada();
+      setMelding(r.geweigerd ? (r.melding ?? 'Geweigerd.') : `${r.aangemaakt} nieuwe ticketfactu(u)r(en) aangemaakt, ${r.verstuurd} verstuurd, ${r.correcties} correctie(s)${r.mislukt ? `, ${r.mislukt} mislukt: ${r.fout ?? 'fout'}` : ''}${r.modus === 'test' ? ' (dry-run)' : ''}.`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Versturen mislukt'); }
+    finally { setBezig(false); }
+  }
 
   async function laad() {
     const s = await getScradaStatus();
@@ -47,6 +87,7 @@ export function Boekhouding() {
     const i = await getScradaDagboekInstellingen();
     setInst(i);
     setDagen(await getScradaDagen());
+    laadFacturen().catch(() => undefined);
     // Keuzelijsten van het gekozen dagboek meteen laden (enkel als Scrada gekoppeld is).
     if (i.journalID && s.modus === 'live') laadKoppelingslijsten(i.journalID).catch(() => undefined);
   }
@@ -249,6 +290,67 @@ export function Boekhouding() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Verkoopfacturen: per ticket of maandfactuur per bedrijf -> concept in Scrada (verzending via Peppol daar) */}
+        <div style={kader}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <div style={{ fontWeight: 700 }}>🧾 Verkoopfacturen</div>
+            {facOverzicht && (
+              <span style={{ fontSize: 13, color: '#6b7280' }}>
+                {facOverzicht.teVersturen} nog naar Scrada · {facOverzicht.ticketsZonderFactuur} ticket(s) wachten op een factuur
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 13, color: '#6b7280', margin: '4px 0 8px' }}>
+            Facturen worden in de kassa gemaakt (knop "Factuur" bij het afrekenen, of "Factureren" per bedrijf op Klant factuur) en gaan bij je bevestiging als <strong>concept</strong> naar het verkoopdagboek in Scrada, samen met de correctie in het dagontvangstenboek. Nazicht en verzending via Peppol doe je in Scrada.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 13 }}>Verkoopdagboek in Scrada <input value={facInst.verkoopdagboek} onChange={(e) => setFacInst({ ...facInst, verkoopdagboek: e.target.value })} style={{ ...inp, width: 110 }} /></label>
+            <label style={{ fontSize: 13 }}>Nummerprefix <input value={facInst.prefix} onChange={(e) => setFacInst({ ...facInst, prefix: e.target.value })} style={{ ...inp, width: 60 }} /></label>
+            <label style={{ fontSize: 13 }}>Vervaldagen <input type="number" value={facInst.vervaldagen} onChange={(e) => setFacInst({ ...facInst, vervaldagen: Number(e.target.value) })} style={{ ...inp, width: 70 }} /></label>
+            <button onClick={bewaarFacInst} disabled={bezig} style={btn}>Opslaan</button>
+            <button onClick={verstuurAlleFacturen} disabled={bezig || !facOverzicht || (facOverzicht.teVersturen + facOverzicht.ticketsZonderFactuur) === 0 || !vanafOpgeslagen} style={btn}>
+              Klaarstaande facturen naar Scrada
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Zet in Scrada op dat verkoopdagboek <em>ApiInvoiceStatus = concept</em>, zodat de facturen ter nazicht klaarstaan. Nummering: {facInst.prefix}{new Date().getFullYear()}-0001, doorlopend per jaar.</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: 12, color: '#666' }}>
+                  <th style={{ padding: 4 }}>Nummer</th><th style={{ padding: 4 }}>Datum</th><th style={{ padding: 4 }}>Klant</th><th style={{ padding: 4 }}>Soort</th><th style={{ padding: 4, textAlign: 'right' }}>Incl. BTW</th><th style={{ padding: 4 }}>Betaling</th><th style={{ padding: 4 }}>Scrada</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {(toonAlleFacturen ? facturen : facturen.slice(0, 12)).map((f) => (
+                  <tr key={f.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap', fontWeight: 600 }}>{f.nummer}</td>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap' }}>{datumNl(f.datum)}</td>
+                    <td style={{ padding: 4 }}>{f.klantNaam}{f.klantBtw ? <span style={{ color: '#6b7280' }}> · {f.klantBtw}</span> : ''}</td>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap' }}>{f.bron === 'MAANDFACTUUR' ? `Maand ${f.periode ?? ''} (${f.aantalTickets} tickets)` : 'Ticket'}</td>
+                    <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap' }}>{euro(f.totaalIncl)}</td>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap', color: '#6b7280' }}>{f.betaalstatus === 'BETAALD' ? `aan de kassa (${f.betaalwijze ?? ''})` : 'nog te betalen'}</td>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap' }}>
+                      {f.scradaStatus === 'VERSTUURD'
+                        ? <span style={{ color: '#166534' }}>✔ concept in Scrada{f.correctieStatus === 'VERSTUURD' ? '' : f.correctieStatus === 'WACHT_OP_DAG' ? ' · correctie wacht op dag' : f.correctieStatus === 'FOUT' ? ' · correctie: fout' : ' · correctie volgt'}</span>
+                        : f.scradaStatus === 'FOUT' ? <span style={{ color: 'crimson' }} title={f.scradaFout ?? ''}>✖ fout</span>
+                        : <span style={{ color: '#b45309' }}>klaar om te versturen</span>}
+                    </td>
+                    <td style={{ padding: 4, whiteSpace: 'nowrap', textAlign: 'right' }}>
+                      {f.scradaStatus !== 'VERSTUURD' && <button onClick={() => verstuurFactuur(f)} disabled={bezig || !vanafOpgeslagen} style={btn}>Verstuur</button>}
+                      {f.scradaFout && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.scradaFout}</div>}
+                      {f.correctieFout && f.correctieStatus === 'FOUT' && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.correctieFout}</div>}
+                    </td>
+                  </tr>
+                ))}
+                {facturen.length === 0 && <tr><td colSpan={8} style={{ padding: 12, color: '#999' }}>Nog geen verkoopfacturen.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {facturen.length > 12 && (
+            <button onClick={() => setToonAlleFacturen(!toonAlleFacturen)} style={{ ...btn, marginTop: 6 }}>{toonAlleFacturen ? 'Minder tonen' : `Alle ${facturen.length} tonen`}</button>
+          )}
         </div>
 
         {/* Dagen */}

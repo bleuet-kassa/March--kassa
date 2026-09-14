@@ -1,12 +1,13 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { RekeningenService } from './rekeningen.service';
+import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
 
 // Lopende rekeningen ("op rekening"). Zowel het overzicht als het beheer
 // (bedrijven/personeel toevoegen en aanpassen, factureren) is toegankelijk voor
 // elke ingelogde medewerker — de kassa draait op een KASSA-account.
 @Controller('rekeningen')
 export class RekeningenController {
-  constructor(private readonly rekeningen: RekeningenService) {}
+  constructor(private readonly rekeningen: RekeningenService, private readonly facturen: VerkoopfacturenService) {}
 
   // Voor de kassa: actieve bedrijven + leden.
   @Get('kassa')
@@ -67,9 +68,13 @@ export class RekeningenController {
     });
   }
 
+  // Maandfactuur: alle openstaande "op rekening"-tickets van het bedrijf worden
+  // één verkoopfactuur (klaar voor Scrada als concept); de tickets worden
+  // gemarkeerd als gefactureerd.
   @Post('bedrijven/:id/factureer')
-  factureer(@Param('id') id: string) {
-    return this.rekeningen.factureer(id);
+  async factureer(@Param('id') id: string) {
+    const r = await this.facturen.maakMaandfactuur(id);
+    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer } };
   }
 
   // Een verkoop verschuiven naar een andere rekening (bedrijf + lid).
