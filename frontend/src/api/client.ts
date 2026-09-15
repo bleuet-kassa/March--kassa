@@ -60,7 +60,7 @@ export async function getProducten(): Promise<Product[]> {
 }
 
 // Factuur gewenst bij een kassaverkoop: bestaand bedrijf (op-rekening-lijst) of nieuwe klant met BTW-nr.
-export type FactuurKeuze = { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string } };
+export type FactuurKeuze = { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string; telefoon?: string } };
 export async function afrekenen(input: {
   lijnen: AfrekenLijn[];
   betaalwijze?: Betaalwijze; // weglaten bij "op rekening"
@@ -660,14 +660,14 @@ export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/overzicht`));
 }
 // Bewaarde factuurklanten (B2B), om aan de kassa te kiezen bij "Factuur".
-export type FactuurKlant = { id: string; naam: string; btwNummer: string | null; email: string | null; adres: string | null };
+export type FactuurKlant = { id: string; naam: string; btwNummer: string | null; email: string | null; adres: string | null; telefoon?: string | null };
 export async function getFactuurKlanten(): Promise<FactuurKlant[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/klanten`));
 }
 
 // --- Open rekeningen (alle medewerkers): openstaand per klant + betaling ontvangen aan de kassa ---
 export type OpenRekeningItem = { id: string; nummer: string; datum: string; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean };
-export type OpenRekening = { sleutel: string; naam: string; btwNummer: string | null; open: number; items: OpenRekeningItem[] };
+export type OpenRekening = { sleutel: string; naam: string; btwNummer: string | null; telefoon?: string | null; adres?: string | null; open: number; items: OpenRekeningItem[] };
 export async function getOpenRekeningen(): Promise<OpenRekening[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/open-rekeningen`));
 }

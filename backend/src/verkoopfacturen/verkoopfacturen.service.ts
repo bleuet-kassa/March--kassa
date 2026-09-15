@@ -133,8 +133,8 @@ export class VerkoopfacturenService {
   }
   private klantVan(v: VerkoopVol) {
     const b = v.rekeningBedrijf;
-    if (b) return { naam: b.naam, btw: b.btwNummer ?? null, email: b.email ?? null, adres: b.adres ?? null, klantId: v.klantId ?? null, bedrijfId: b.id };
-    if (v.klant) return { naam: v.klant.naam, btw: v.klant.btwNummer ?? null, email: v.klant.email ?? null, adres: v.klant.adres ?? null, klantId: v.klant.id, bedrijfId: null };
+    if (b) return { naam: b.naam, btw: b.btwNummer ?? null, email: b.email ?? null, adres: b.adres ?? null, telefoon: null as string | null, klantId: v.klantId ?? null, bedrijfId: b.id };
+    if (v.klant) return { naam: v.klant.naam, btw: v.klant.btwNummer ?? null, email: v.klant.email ?? null, adres: v.klant.adres ?? null, telefoon: v.klant.telefoon ?? null, klantId: v.klant.id, bedrijfId: null };
     return null;
   }
 
@@ -165,7 +165,7 @@ export class VerkoopfacturenService {
         scradaStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         correctieStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         vervaldatum: new Date(Date.now() + inst.vervaldagen * 86400000),
-        klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres,
+        klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres, klantTelefoon: klant.telefoon,
         klantId: klant.klantId, rekeningBedrijfId: klant.bedrijfId,
         totaalExcl: new Prisma.Decimal(r2(perBtw.reduce((s, p) => s + p.excl, 0))),
         totaalBtw: new Prisma.Decimal(r2(perBtw.reduce((s, p) => s + p.btw, 0))),
@@ -206,7 +206,7 @@ export class VerkoopfacturenService {
         scradaStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         correctieStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         vervaldatum: new Date(Date.now() + inst.vervaldagen * 86400000),
-        klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres,
+        klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres, klantTelefoon: klant.telefoon,
         rekeningBedrijfId: bedrijfId,
         totaalExcl: new Prisma.Decimal(r2(perBtw.reduce((s, p) => s + p.excl, 0))),
         totaalBtw: new Prisma.Decimal(r2(perBtw.reduce((s, p) => s + p.btw, 0))),
@@ -233,7 +233,7 @@ export class VerkoopfacturenService {
   async klanten() {
     // Bedrijven (B2B) én particulieren die al eens op naam/rekening kochten.
     const rows = await this.prisma.klant.findMany({ where: { OR: [{ type: 'B2B' }, { facturen: { some: {} } }] }, orderBy: { naam: 'asc' }, take: 500 });
-    return rows.map((k) => ({ id: k.id, naam: k.naam, btwNummer: k.btwNummer, email: k.email, adres: k.adres }));
+    return rows.map((k) => ({ id: k.id, naam: k.naam, btwNummer: k.btwNummer, email: k.email, adres: k.adres, telefoon: k.telefoon }));
   }
 
   // --- open rekeningen: betalingen ontvangen aan de kassa (alle medewerkers) ----------
@@ -248,13 +248,13 @@ export class VerkoopfacturenService {
 
   async openRekeningen() {
     const rows = await this.prisma.verkoopfactuur.findMany({ where: { betaalstatus: 'OPENSTAAND' }, orderBy: { datum: 'asc' } });
-    type Groep = { sleutel: string; naam: string; btwNummer: string | null; open: number; items: { id: string; nummer: string; datum: Date; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean }[] };
+    type Groep = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; adres: string | null; open: number; items: { id: string; nummer: string; datum: Date; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean }[] };
     const groepen = new Map<string, Groep>();
     for (const f of rows) {
       const rest = r2(Number(f.totaalIncl) - Number(f.betaaldBedrag));
       if (rest <= 0.005) continue;
       const sleutel = this.groepSleutel(f);
-      const g = groepen.get(sleutel) ?? { sleutel, naam: f.klantNaam, btwNummer: f.klantBtw, open: 0, items: [] };
+      const g = groepen.get(sleutel) ?? { sleutel, naam: f.klantNaam, btwNummer: f.klantBtw, telefoon: f.klantTelefoon, adres: f.klantAdres, open: 0, items: [] };
       g.open = r2(g.open + rest);
       g.items.push({ id: f.id, nummer: f.nummer, datum: f.datum, bron: f.bron, periode: f.periode, totaal: Number(f.totaalIncl), betaald: Number(f.betaaldBedrag), rest, naarScrada: f.scradaStatus !== 'NIET_NODIG' });
       groepen.set(sleutel, g);
@@ -379,7 +379,7 @@ export class VerkoopfacturenService {
 
   // --- Scrada: factuur (concept) --------------------------------------------------------
 
-  private bouwScrada(f: { nummer: string; boekjaar: string; datum: Date; vervaldatum: Date | null; klantNaam: string; klantBtw: string | null; klantEmail: string | null; klantAdres: string | null; totaalExcl: Prisma.Decimal | number; totaalBtw: Prisma.Decimal | number; totaalIncl: Prisma.Decimal | number; perBtw: unknown; lijnen: unknown; bron: string; periode: string | null; id: string; betaalstatus: string; betaalwijze: string | null; samenvatten: boolean; omschrijving: string | null }, inst: FactuurInstellingen) {
+  private bouwScrada(f: { nummer: string; boekjaar: string; datum: Date; vervaldatum: Date | null; klantNaam: string; klantBtw: string | null; klantEmail: string | null; klantAdres: string | null; klantTelefoon: string | null; totaalExcl: Prisma.Decimal | number; totaalBtw: Prisma.Decimal | number; totaalIncl: Prisma.Decimal | number; perBtw: unknown; lijnen: unknown; bron: string; periode: string | null; id: string; betaalstatus: string; betaalwijze: string | null; samenvatten: boolean; omschrijving: string | null }, inst: FactuurInstellingen) {
     const lijnen = (f.lijnen as FactuurLijn[]) ?? [];
     const perBtw = (f.perBtw as PerBtw[]) ?? [];
     return {
@@ -396,6 +396,7 @@ export class VerkoopfacturenService {
         vatNumber: f.klantBtw ?? undefined,
         email: f.klantEmail ?? undefined,
         invoiceEmail: f.klantEmail ?? undefined,
+        phone: f.klantTelefoon ?? undefined,
         // Scrada: 'address' is verplicht (met landcode); straat enkel als we ze kennen.
         address: { countryCode: 'BE', ...(f.klantAdres ? { street: f.klantAdres } : {}) },
       },

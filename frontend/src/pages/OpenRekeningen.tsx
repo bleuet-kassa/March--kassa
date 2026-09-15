@@ -76,7 +76,9 @@ export function OpenRekeningen() {
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>{g.naam}</div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>{g.btwNummer ? g.btwNummer : 'particulier'} · {g.items.length} open post(en)</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                {g.btwNummer ? g.btwNummer : 'particulier'}{g.telefoon ? ` · ☎ ${g.telefoon}` : ''}{g.adres ? ` · ${g.adres}` : ''} · {g.items.length} open post(en)
+              </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>

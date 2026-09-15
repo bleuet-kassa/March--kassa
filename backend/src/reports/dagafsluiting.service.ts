@@ -124,7 +124,8 @@ export class DagafsluitingService {
           perBetaalwijze[b.betaalwijze] = r2((perBetaalwijze[b.betaalwijze] ?? 0) + Number(b.bedrag));
         }
       } else {
-        const bw = v.betaalwijze ?? (v.rekeningBedrijfId ? 'OP_REKENING' : 'ONBEKEND');
+        // Zonder betaling: op rekening (bedrijf, of klant/particulier via het rekeningvenster).
+        const bw = v.betaalwijze ?? ((v.rekeningBedrijfId || v.klantId || v.factuurGewenst) ? 'OP_REKENING' : 'ONBEKEND');
         perBetaalwijze[bw] = r2((perBetaalwijze[bw] ?? 0) + incl);
       }
       for (const t of perTarief.values()) {

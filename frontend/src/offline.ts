@@ -13,7 +13,7 @@ export type WachtPayload = {
   lijnen: { productId: string; aantal: number; kortingPct?: number; bedrag?: number }[];
   betaalwijze?: Betaalwijze; // weglaten bij "op rekening" of gesplitste betaling
   betalingen?: { betaalwijze: Betaalwijze; bedrag: number }[]; // gesplitste betaling (max. 2)
-  factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string } }; // factuur gewenst
+  factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string; telefoon?: string } }; // factuur/rekening op naam
   ontvangen?: number;
   gebruikerId?: string;
   kortingReden?: string;

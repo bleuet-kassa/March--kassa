@@ -38,7 +38,7 @@ export type AfrekenInput = {
   idempotencyKey?: string;
   // Factuur gewenst (klant met BTW-nummer): bestaand "op rekening"-bedrijf, bestaande
   // klant, of een nieuwe klant. De factuur zelf wordt later aangemaakt (per ticket).
-  factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string } };
+  factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string; telefoon?: string } };
 };
 
 // Werk met centen om afrondingsfouten met kommagetallen te vermijden.
@@ -183,23 +183,27 @@ export class SalesService {
     let factuurKlantId: string | null = null;
     if (factuur) {
       const normBtw = (s?: string | null) => (s ? s.replace(/[\s.]/g, '').toUpperCase() : null);
-      const vindOfMaak = async (naam: string, btw: string | null, email?: string | null, adres?: string | null) => {
+      const vindOfMaak = async (naam: string, btw: string | null, email?: string | null, adres?: string | null, telefoon?: string | null) => {
         // Bestaande klant hergebruiken: op BTW-nummer, anders op naam (zonder dubbels aan te maken).
         const bestaand = btw
           ? await this.prisma.klant.findFirst({ where: { btwNummer: btw } })
-          : await this.prisma.klant.findFirst({ where: { type: 'B2B', naam: { equals: naam.trim(), mode: 'insensitive' } } });
+          : await this.prisma.klant.findFirst({ where: { naam: { equals: naam.trim(), mode: 'insensitive' }, OR: [{ type: 'B2B' }, { telefoon: { not: null } }, { facturen: { some: {} } }] } });
         if (bestaand) {
-          // Ontbrekende gegevens aanvullen (e-mail/adres) zonder bestaande te overschrijven.
-          const aanvulling: { email?: string; adres?: string } = {};
+          // Ontbrekende gegevens aanvullen (e-mail/adres/telefoon) zonder bestaande te overschrijven.
+          const aanvulling: { email?: string; adres?: string; telefoon?: string } = {};
           if (!bestaand.email && email?.trim()) aanvulling.email = email.trim();
           if (!bestaand.adres && adres?.trim()) aanvulling.adres = adres.trim();
+          if (!bestaand.telefoon && telefoon?.trim()) aanvulling.telefoon = telefoon.trim();
           if (Object.keys(aanvulling).length) await this.prisma.klant.update({ where: { id: bestaand.id }, data: aanvulling });
           return bestaand.id;
         }
         // Met BTW-nummer = bedrijf (factuur naar Scrada); zonder = particulier op rekening (enkel in de kassa).
-        const k = await this.prisma.klant.create({ data: { naam: naam.trim(), type: btw ? 'B2B' : 'PARTICULIER', btwNummer: btw, email: email?.trim() || null, adres: adres?.trim() || null } });
+        const k = await this.prisma.klant.create({ data: { naam: naam.trim(), type: btw ? 'B2B' : 'PARTICULIER', btwNummer: btw, email: email?.trim() || null, adres: adres?.trim() || null, telefoon: telefoon?.trim() || null } });
         return k.id;
       };
+      // Op rekening (geen betaling nu) met een nieuwe klant: voor- én achternaam, telefoon en adres
+      // zijn verplicht — anders kan de rekening later niet opgevolgd/afgesloten worden.
+      const opRekening = !betaalwijze && !(betalingen && betalingen.length) && !rekeningBedrijfId;
       if (factuur.bedrijfId) {
         const b = await this.prisma.rekeningBedrijf.findUnique({ where: { id: factuur.bedrijfId } });
         if (!b) throw new BadRequestException('Bedrijf voor de factuur niet gevonden.');
@@ -207,9 +211,17 @@ export class SalesService {
       } else if (factuur.klantId) {
         factuurKlantId = factuur.klantId;
       } else if (factuur.klant?.naam?.trim()) {
-        factuurKlantId = await vindOfMaak(factuur.klant.naam, normBtw(factuur.klant.btwNummer), factuur.klant.email, factuur.klant.adres);
+        const kl = factuur.klant;
+        if (opRekening) {
+          const ontbreekt: string[] = [];
+          if (kl.naam.trim().split(/\s+/).length < 2) ontbreekt.push('voor- en achternaam');
+          if (!kl.telefoon?.trim()) ontbreekt.push('telefoonnummer');
+          if (!kl.adres?.trim()) ontbreekt.push('adres');
+          if (ontbreekt.length) throw new BadRequestException(`Op rekening kan enkel met volledige klantgegevens: ${ontbreekt.join(', ')} ontbreekt.`);
+        }
+        factuurKlantId = await vindOfMaak(kl.naam, normBtw(kl.btwNummer), kl.email, kl.adres, kl.telefoon);
       } else {
-        throw new BadRequestException('Geef een klant (bedrijf of naam + BTW-nummer) voor de factuur.');
+        throw new BadRequestException('Geef een klant (bedrijf, bewaarde klant of nieuwe klant) voor de factuur/rekening.');
       }
     }
 

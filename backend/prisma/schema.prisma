@@ -261,6 +261,7 @@ model Klant {
   type         KlantType @default(PARTICULIER)
   btwNummer    String?   // voor Peppol-facturen via Scrada
   email        String?
+  telefoon     String?   // verplicht bij kopen op rekening (particulier)
   adres        String?
   prijslijst   Prijslijst? @relation(fields: [prijslijstId], references: [id])
   prijslijstId String?
@@ -577,6 +578,7 @@ model Verkoopfactuur {
   klantBtw          String?
   klantEmail        String?
   klantAdres        String?
+  klantTelefoon     String?
   klant             Klant?           @relation(fields: [klantId], references: [id])
   klantId           String?
   rekeningBedrijf   RekeningBedrijf? @relation(fields: [rekeningBedrijfId], references: [id])

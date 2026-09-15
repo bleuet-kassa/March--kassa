@@ -135,9 +135,13 @@ type Bon = {
   factuurEmail?: string;
   factuurAdres?: string;
   factuurKlantId?: string; // bewaarde factuurklant (B2B of particulier)
+  rekeningNieuw?: boolean; // "op rekening" voor een nieuwe klant (velden hieronder invullen)
+  factuurVoornaam?: string;   // nieuwe klant op rekening: voornaam (verplicht)
+  factuurAchternaam?: string; // achternaam (verplicht)
+  factuurTelefoon?: string;   // telefoon (verplicht bij op rekening)
 };
 function maakBon(): Bon {
-  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '', factuur: false, factuurBedrijfId: '', factuurNaam: '', factuurBtw: '', factuurEmail: '', factuurAdres: '', factuurKlantId: '' };
+  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '', factuur: false, factuurBedrijfId: '', factuurNaam: '', factuurBtw: '', factuurEmail: '', factuurAdres: '', factuurKlantId: '', rekeningNieuw: false, factuurVoornaam: '', factuurAchternaam: '', factuurTelefoon: '' };
 }
 
 // Kassascherm (Fase 2): scannen, aantallen, betaalwijze, BTW-uitsplitsing,
@@ -644,17 +648,36 @@ export function Kassa() {
   async function afrekenenNu() {
     if (!lijnen.length || bezig || cashTeVeel || cashTeWeinig) return;
     if (!bon.verkoperId) { setFout('Kies eerst de verkoper voor dit ticket.'); return; }
-    if (bon.opRekening && (!bon.rekeningBedrijfId || !bon.rekeningLidId)) { setFout('Kies het bedrijf en het personeelslid voor de rekening.'); return; }
+    if (bon.opRekening) {
+      if (bon.rekeningBedrijfId && !bon.rekeningLidId) { setFout('Kies het personeelslid van het bedrijf.'); return; }
+      if (!bon.rekeningBedrijfId && !bon.factuurKlantId && !bon.rekeningNieuw) { setFout('Kies wie op rekening koopt: een bedrijf, een bewaarde klant of een nieuwe klant.'); return; }
+      if (bon.rekeningNieuw) {
+        const ontbreekt = [
+          !bon.factuurVoornaam?.trim() && 'voornaam', !bon.factuurAchternaam?.trim() && 'achternaam',
+          !bon.factuurTelefoon?.trim() && 'telefoonnummer', !bon.factuurAdres?.trim() && 'adres',
+        ].filter(Boolean);
+        if (ontbreekt.length) { setFout(`Op rekening kan enkel met volledige klantgegevens — ontbreekt: ${ontbreekt.join(', ')}.`); return; }
+      }
+    }
     if (bon.gesplitst && !splitOk) { setFout(`De gesplitste betalingen komen niet overeen met het te betalen bedrag (verschil € ${splitVerschil.toFixed(2)}).`); return; }
     if (bon.factuur && !bon.opRekening && !bon.factuurBedrijfId && !bon.factuurKlantId && !bon.factuurNaam?.trim()) { setFout('Kies voor de factuur/rekening een bestaande klant, of vul minstens de naam in.'); return; }
     // Factuur/rekening op naam: bestaand bedrijf, bewaarde klant, of nieuwe klant (BTW-nummer optioneel).
-    const factuurKeuze = bon.factuur && !bon.opRekening
-      ? (bon.factuurBedrijfId
-        ? { bedrijfId: bon.factuurBedrijfId }
-        : bon.factuurKlantId
-          ? { klantId: bon.factuurKlantId }
-          : { klant: { naam: bon.factuurNaam!.trim(), btwNummer: bon.factuurBtw?.trim() || undefined, email: bon.factuurEmail?.trim() || undefined, adres: bon.factuurAdres?.trim() || undefined } })
-      : undefined;
+    //  - "Factuur"-vinkje (ticket meteen betaald): klant via het factuurvenster.
+    //  - "Op rekening" met klant/nieuwe klant (geen bedrijf): rekening in de kassa, later betalen.
+    const nieuweKlant = () => ({
+      klant: {
+        naam: (bon.rekeningNieuw ? `${bon.factuurVoornaam ?? ''} ${bon.factuurAchternaam ?? ''}` : (bon.factuurNaam ?? '')).trim(),
+        btwNummer: bon.factuurBtw?.trim() || undefined,
+        email: bon.factuurEmail?.trim() || undefined,
+        adres: bon.factuurAdres?.trim() || undefined,
+        telefoon: bon.factuurTelefoon?.trim() || undefined,
+      },
+    });
+    const factuurKeuze = bon.opRekening
+      ? (bon.rekeningBedrijfId ? undefined : bon.factuurKlantId ? { klantId: bon.factuurKlantId } : bon.rekeningNieuw ? nieuweKlant() : undefined)
+      : bon.factuur
+        ? (bon.factuurBedrijfId ? { bedrijfId: bon.factuurBedrijfId } : bon.factuurKlantId ? { klantId: bon.factuurKlantId } : nieuweKlant())
+        : undefined;
     // Gesplitste betaling: de deelbetalingen (max. 2, lege bedragen weglaten).
     const betalingen = bon.gesplitst
       ? [{ betaalwijze: bon.split1Bw!, bedrag: splitBedrag1 }, { betaalwijze: bon.split2Bw!, bedrag: splitBedrag2 }].filter((b) => Math.abs(b.bedrag) > 0.001)
@@ -680,8 +703,8 @@ export function Kassa() {
       gebruikerId: bon.verkoperId,
       kortingReden,
       verkoopKortingPct: saleKortingPct || undefined, // verkoopbrede korting
-      rekeningBedrijfId: bon.opRekening ? bon.rekeningBedrijfId : undefined,
-      rekeningLidId: bon.opRekening ? bon.rekeningLidId : undefined,
+      rekeningBedrijfId: bon.opRekening && bon.rekeningBedrijfId ? bon.rekeningBedrijfId : undefined,
+      rekeningLidId: bon.opRekening && bon.rekeningBedrijfId ? bon.rekeningLidId : undefined,
       idempotencyKey: key,
     };
     try {
@@ -1085,14 +1108,49 @@ export function Kassa() {
             )}
             {bon.opRekening && (
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <select value={bon.rekeningBedrijfId} onChange={(e) => patchBon(bon.id, { rekeningBedrijfId: e.target.value, rekeningLidId: '' })} style={{ flex: 1, minWidth: 140, padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningBedrijfId ? '1px solid #ccc' : '2px solid #f59e0b' }}>
-                  <option value="">— bedrijf —</option>
-                  {rekeningBedrijven.map((rb) => <option key={rb.id} value={rb.id}>{rb.naam}</option>)}
+                {/* Op rekening: bedrijf (met personeelslid), bewaarde klant, of nieuwe klant (volledige gegevens verplicht). */}
+                <select
+                  value={bon.rekeningBedrijfId ? `b:${bon.rekeningBedrijfId}` : bon.factuurKlantId ? `k:${bon.factuurKlantId}` : bon.rekeningNieuw ? 'nieuw' : ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    patchBon(bon.id, {
+                      rekeningBedrijfId: v.startsWith('b:') ? v.slice(2) : '', rekeningLidId: '',
+                      factuurKlantId: v.startsWith('k:') ? v.slice(2) : '',
+                      rekeningNieuw: v === 'nieuw',
+                    });
+                  }}
+                  style={{ flexBasis: '100%', padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningBedrijfId || bon.factuurKlantId || bon.rekeningNieuw ? '1px solid #ccc' : '2px solid #f59e0b' }}
+                >
+                  <option value="">— wie koopt op rekening? —</option>
+                  {rekeningBedrijven.length > 0 && (
+                    <optgroup label="Bedrijven">
+                      {rekeningBedrijven.map((rb) => <option key={rb.id} value={`b:${rb.id}`}>{rb.naam}</option>)}
+                    </optgroup>
+                  )}
+                  {factuurKlanten.length > 0 && (
+                    <optgroup label="Bewaarde klanten">
+                      {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}{k.btwNummer ? ` (${k.btwNummer})` : ''}</option>)}
+                    </optgroup>
+                  )}
+                  <option value="nieuw">+ Nieuwe klant…</option>
                 </select>
-                <select value={bon.rekeningLidId} onChange={(e) => patchBon(bon.id, { rekeningLidId: e.target.value })} disabled={!bon.rekeningBedrijfId} style={{ flex: 1, minWidth: 140, padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningLidId ? '1px solid #ccc' : '2px solid #f59e0b' }}>
-                  <option value="">— personeelslid —</option>
-                  {(rekeningBedrijven.find((rb) => rb.id === bon.rekeningBedrijfId)?.leden ?? []).map((l) => <option key={l.id} value={l.id}>{l.naam}</option>)}
-                </select>
+                {bon.rekeningBedrijfId && (
+                  <select value={bon.rekeningLidId} onChange={(e) => patchBon(bon.id, { rekeningLidId: e.target.value })} style={{ flex: 1, minWidth: 140, padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningLidId ? '1px solid #ccc' : '2px solid #f59e0b' }}>
+                    <option value="">— personeelslid —</option>
+                    {(rekeningBedrijven.find((rb) => rb.id === bon.rekeningBedrijfId)?.leden ?? []).map((l) => <option key={l.id} value={l.id}>{l.naam}</option>)}
+                  </select>
+                )}
+                {bon.rekeningNieuw && (
+                  <div style={{ flexBasis: '100%', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 6 }}>
+                    <input value={bon.factuurVoornaam ?? ''} onChange={(e) => patchBon(bon.id, { factuurVoornaam: e.target.value })} placeholder="Voornaam *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurVoornaam?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
+                    <input value={bon.factuurAchternaam ?? ''} onChange={(e) => patchBon(bon.id, { factuurAchternaam: e.target.value })} placeholder="Achternaam *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurAchternaam?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
+                    <input value={bon.factuurTelefoon ?? ''} onChange={(e) => patchBon(bon.id, { factuurTelefoon: e.target.value })} placeholder="Telefoonnummer *" inputMode="tel" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurTelefoon?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
+                    <input value={bon.factuurAdres ?? ''} onChange={(e) => patchBon(bon.id, { factuurAdres: e.target.value })} placeholder="Adres *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurAdres?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
+                    <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                    <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} placeholder="E-mail (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#6b7280' }}>Voor- en achternaam, telefoon en adres zijn verplicht om op rekening te kopen. De klant wordt bewaard in de klantenlijst; de rekening verschijnt bij "Open rekeningen".</div>
+                  </div>
+                )}
                 {/* Maandbudget van het gekozen personeelslid: wat er nog beschikbaar is (de server weigert bij overschrijding). */}
                 {(() => {
                   const lid = rekeningBedrijven.find((rb) => rb.id === bon.rekeningBedrijfId)?.leden.find((l) => l.id === bon.rekeningLidId);
