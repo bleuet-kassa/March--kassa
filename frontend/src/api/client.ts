@@ -681,6 +681,10 @@ export async function verstuurFacturenNaarScrada(): Promise<FactuurVerzendResult
 export async function zetFactuurWeergave(id: string, input: { samenvatten?: boolean; omschrijving?: string | null }): Promise<Verkoopfactuur> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}/weergave`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
 }
+// Factuur verwijderen (bv. testfacturen); tickets worden losgemaakt, laatste nummer komt vrij.
+export async function verwijderVerkoopfactuur(id: string): Promise<{ ok: true; nummer: string; inScrada: boolean }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}`, { method: 'DELETE' }));
+}
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();
 }

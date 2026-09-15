@@ -272,6 +272,28 @@ export class VerkoopfacturenService {
     });
   }
 
+  // Factuur verwijderen (bv. testfacturen). De gekoppelde tickets worden losgemaakt
+  // (niet meer gefactureerd, geen factuur meer gewenst) en als het de laatst
+  // toegekende factuur van het jaar was, komt het nummer weer vrij. Staat de
+  // factuur al als concept in Scrada, dan moet ze daar apart verwijderd worden.
+  async verwijder(id: string) {
+    const f = await this.prisma.verkoopfactuur.findUnique({ where: { id } });
+    if (!f) throw new NotFoundException('Factuur niet gevonden.');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.verkoop.updateMany({ where: { factuurId: id }, data: { factuurId: null, factuurGewenst: false, gefactureerd: false, gefactureerdOp: null } });
+      await tx.verkoopfactuur.delete({ where: { id } });
+      // Nummer vrijgeven als het het laatste van de reeks was (teller = laatst uitgegeven volgnummer).
+      const sleutel = this.reeksSleutel(f.boekjaar);
+      const reeks = await tx.instelling.findUnique({ where: { sleutel } });
+      const laatste = Number(reeks?.waarde ?? 0) || 0;
+      const eigen = Number(f.nummer.slice(-4)) || 0;
+      if (laatste > 0 && eigen === laatste) {
+        await tx.instelling.update({ where: { sleutel }, data: { waarde: String(laatste - 1) } });
+      }
+    });
+    return { ok: true, nummer: f.nummer, inScrada: f.scradaStatus === 'VERSTUURD' };
+  }
+
   // --- Scrada: factuur (concept) --------------------------------------------------------
 
   private bouwScrada(f: { nummer: string; boekjaar: string; datum: Date; vervaldatum: Date | null; klantNaam: string; klantBtw: string | null; klantEmail: string | null; klantAdres: string | null; totaalExcl: Prisma.Decimal | number; totaalBtw: Prisma.Decimal | number; totaalIncl: Prisma.Decimal | number; perBtw: unknown; lijnen: unknown; bron: string; periode: string | null; id: string; betaalstatus: string; betaalwijze: string | null; samenvatten: boolean; omschrijving: string | null }, inst: FactuurInstellingen) {

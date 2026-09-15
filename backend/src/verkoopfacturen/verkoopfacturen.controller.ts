@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { VerkoopfacturenService, type FactuurInstellingen } from './verkoopfacturen.service';
 import { Rollen } from '../auth/auth.guard';
 
@@ -48,6 +48,13 @@ export class VerkoopfacturenController {
   @Rollen('BEHEER', 'BEHEERDER')
   weergave(@Param('id') id: string, @Body() body: { samenvatten?: boolean; omschrijving?: string | null }) {
     return this.facturen.zetWeergave(id, body ?? {});
+  }
+
+  // DELETE /verkoopfacturen/:id -> factuur verwijderen (bv. testfacturen); tickets worden losgemaakt
+  @Delete(':id')
+  @Rollen('BEHEER', 'BEHEERDER')
+  verwijder(@Param('id') id: string) {
+    return this.facturen.verwijder(id);
   }
 
   // POST /verkoopfacturen/:id/verstuur -> deze factuur (als concept) naar Scrada + dagboekcorrectie

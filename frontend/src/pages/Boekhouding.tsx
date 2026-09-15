@@ -5,7 +5,7 @@ import {
   getScradaDagen, getScradaDagPreview, scradaVerstuurDag, scradaVerstuurDagen,
   type ScradaConfig, type ScradaVerbinding, type ScradaSyncVerslag,
   type ScradaDagboekInstellingen, type ScradaDagboek, type ScradaCategorie, type ScradaBetaalmethode, type ScradaDag, type ScradaDagPreview,
-  getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada, zetFactuurWeergave,
+  getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada, zetFactuurWeergave, verwijderVerkoopfactuur,
   type Verkoopfactuur, type FactuurOverzicht, type FactuurInstellingen,
 } from '../api/client';
 
@@ -93,6 +93,19 @@ export function Boekhouding() {
       setMelding(samenvatten ? `Factuur ${f.nummer}: enkel totalen per BTW-tarief${omschrijving ? ` — "${omschrijving}"` : ''}.` : `Factuur ${f.nummer}: alle productlijnen.`);
       await laadFacturen();
     } catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
+    finally { setBezig(false); }
+  }
+
+  // Factuur verwijderen (bv. testfacturen): tickets worden losgemaakt; laatste nummer komt weer vrij.
+  async function verwijderFactuur(f: Verkoopfactuur) {
+    const extra = f.scradaStatus === 'VERSTUURD' ? '\n\nLET OP: deze factuur staat al als concept in Scrada — verwijder ze daar ook, anders blijft ze daar bestaan.' : '';
+    if (!window.confirm(`Factuur ${f.nummer} (${f.klantNaam}, ${euro(f.totaalIncl)}) verwijderen?\n\nDe gekoppelde tickets worden weer losgemaakt (niet meer gefactureerd).${extra}`)) return;
+    setBezig(true); setMelding('');
+    try {
+      const r = await verwijderVerkoopfactuur(f.id);
+      setMelding(`Factuur ${r.nummer} verwijderd.${r.inScrada ? ' Verwijder het concept ook in Scrada.' : ''}`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
     finally { setBezig(false); }
   }
 
@@ -375,6 +388,9 @@ export function Boekhouding() {
                           <button onClick={() => verstuurFactuur(f)} disabled={bezig || !vanafOpgeslagen} style={btn}>Verstuur</button>
                         </div>
                       )}
+                      <div style={{ marginTop: 4 }}>
+                        <button onClick={() => verwijderFactuur(f)} disabled={bezig} title="Factuur verwijderen (bv. testfactuur); tickets worden losgemaakt" style={{ ...btn, color: '#b91c1c', borderColor: '#fca5a5' }}>Verwijder</button>
+                      </div>
                       {f.scradaFout && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.scradaFout}</div>}
                       {f.correctieFout && f.correctieStatus === 'FOUT' && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.correctieFout}</div>}
                     </td>
