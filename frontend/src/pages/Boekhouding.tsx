@@ -368,10 +368,11 @@ export function Boekhouding() {
                       {f.scradaStatus === 'VERSTUURD'
                         ? <span style={{ color: '#166534' }}>✔ concept in Scrada{f.correctieStatus === 'VERSTUURD' ? '' : f.correctieStatus === 'WACHT_OP_DAG' ? ' · correctie wacht op dag' : f.correctieStatus === 'FOUT' ? ' · correctie: fout' : ' · correctie volgt'}</span>
                         : f.scradaStatus === 'FOUT' ? <span style={{ color: 'crimson' }} title={f.scradaFout ?? ''}>✖ fout</span>
+                        : f.scradaStatus === 'NIET_NODIG' ? <span style={{ color: '#6b7280' }} title="Geen BTW-nummer: rekening in de kassa, gaat niet naar Scrada">rekening in kassa (niet naar Scrada)</span>
                         : <span style={{ color: '#b45309' }}>klaar om te versturen</span>}
                     </td>
                     <td style={{ padding: 4, whiteSpace: 'nowrap', textAlign: 'right' }}>
-                      {f.scradaStatus !== 'VERSTUURD' && (
+                      {f.scradaStatus !== 'VERSTUURD' && f.scradaStatus !== 'NIET_NODIG' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                           {/* Weergave naar Scrada: enkel totalen per BTW-tarief met eigen omschrijving, of alle productlijnen */}
                           <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }} title="Naar Scrada gaat dan één lijn per BTW-tarief met deze omschrijving i.p.v. alle producten">

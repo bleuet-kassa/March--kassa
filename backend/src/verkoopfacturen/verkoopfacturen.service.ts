@@ -87,15 +87,18 @@ export class VerkoopfacturenService {
     return this.instellingen();
   }
 
-  // Doorlopende nummering per boekjaar (teller in Instelling "factuur.reeks.<jaar>").
-  private async volgendNummer(jaar: string): Promise<string> {
+  // Doorlopende nummering per boekjaar. Twee reeksen:
+  //  - Scrada-facturen (klant met BTW-nr): <prefix><jaar>0001 (teller "factuur.reeks.<jaar>")
+  //  - rekeningen zonder BTW-nr (particulier, niet naar Scrada): R<jaar>0001
+  //    (teller "factuur.reeksR.<jaar>") — zo krijgt de Scrada-reeks geen gaten.
+  private async volgendNummer(jaar: string, reeks: 'SCRADA' | 'REKENING' = 'SCRADA'): Promise<string> {
     const inst = await this.instellingen();
-    const sleutel = this.reeksSleutel(jaar);
+    const sleutel = reeks === 'SCRADA' ? this.reeksSleutel(jaar) : `factuur.reeksR.${jaar}`;
     return this.prisma.$transaction(async (tx) => {
       const huidig = await tx.instelling.findUnique({ where: { sleutel } });
       const n = (Number(huidig?.waarde ?? 0) || 0) + 1;
       await tx.instelling.upsert({ where: { sleutel }, create: { sleutel, waarde: String(n) }, update: { waarde: String(n) } });
-      return `${inst.prefix}${jaar}${String(n).padStart(4, '0')}`;
+      return `${reeks === 'SCRADA' ? inst.prefix : 'R'}${jaar}${String(n).padStart(4, '0')}`;
     });
   }
 
@@ -153,10 +156,14 @@ export class VerkoopfacturenService {
     const wijzen = v.betalingen.length ? v.betalingen.map((b) => String(b.betaalwijze)) : v.betaalwijze ? [String(v.betaalwijze)] : [];
     const betaald = wijzen.length > 0 && wijzen.every((w) => NU_BETAALD.has(w));
     const betaalwijze = wijzen.join('+') || null;
-    const nummer = await this.volgendNummer(jaar);
+    // Zonder BTW-nummer (particulier): rekening in de kassa, niet naar Scrada; aparte reeks R…
+    const naarScrada = !!klant.btw;
+    const nummer = await this.volgendNummer(jaar, naarScrada ? 'SCRADA' : 'REKENING');
     const f = await this.prisma.verkoopfactuur.create({
       data: {
         nummer, boekjaar: jaar, bron: 'TICKET',
+        scradaStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
+        correctieStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         vervaldatum: new Date(Date.now() + inst.vervaldagen * 86400000),
         klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres,
         klantId: klant.klantId, rekeningBedrijfId: klant.bedrijfId,
@@ -190,10 +197,14 @@ export class VerkoopfacturenService {
     const laatste = verkopen[verkopen.length - 1].datum;
     const jaar = brusselDatum(new Date()).slice(0, 4);
     const inst = await this.instellingen();
-    const nummer = await this.volgendNummer(jaar);
+    // Bedrijf zonder BTW-nummer (bv. particulier op rekening): enkel rekening in de kassa, niet naar Scrada.
+    const naarScrada = !!klant.btw;
+    const nummer = await this.volgendNummer(jaar, naarScrada ? 'SCRADA' : 'REKENING');
     const f = await this.prisma.verkoopfactuur.create({
       data: {
         nummer, boekjaar: jaar, bron: 'MAANDFACTUUR', periode: brusselDatum(laatste).slice(0, 7),
+        scradaStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
+        correctieStatus: naarScrada ? 'NIET_VERSTUURD' : 'NIET_NODIG',
         vervaldatum: new Date(Date.now() + inst.vervaldagen * 86400000),
         klantNaam: klant.naam, klantBtw: klant.btw, klantEmail: klant.email, klantAdres: klant.adres,
         rekeningBedrijfId: bedrijfId,
@@ -216,6 +227,13 @@ export class VerkoopfacturenService {
     let n = 0;
     for (const { id } of open) { try { await this.maakVoorVerkoop(id); n++; } catch (e) { this.log.warn(`Ticketfactuur ${id}: ${e instanceof Error ? e.message : e}`); } }
     return n;
+  }
+
+  // Bewaarde factuurklanten (B2B) om aan de kassa te kiezen.
+  async klanten() {
+    // Bedrijven (B2B) én particulieren die al eens op naam/rekening kochten.
+    const rows = await this.prisma.klant.findMany({ where: { OR: [{ type: 'B2B' }, { facturen: { some: {} } }] }, orderBy: { naam: 'asc' }, take: 500 });
+    return rows.map((k) => ({ id: k.id, naam: k.naam, btwNummer: k.btwNummer, email: k.email, adres: k.adres }));
   }
 
   // --- lijst / status ---------------------------------------------------------------
@@ -283,7 +301,7 @@ export class VerkoopfacturenService {
       await tx.verkoop.updateMany({ where: { factuurId: id }, data: { factuurId: null, factuurGewenst: false, gefactureerd: false, gefactureerdOp: null } });
       await tx.verkoopfactuur.delete({ where: { id } });
       // Nummer vrijgeven als het het laatste van de reeks was (teller = laatst uitgegeven volgnummer).
-      const sleutel = this.reeksSleutel(f.boekjaar);
+      const sleutel = f.nummer.startsWith('R') ? `factuur.reeksR.${f.boekjaar}` : this.reeksSleutel(f.boekjaar);
       const reeks = await tx.instelling.findUnique({ where: { sleutel } });
       const laatste = Number(reeks?.waarde ?? 0) || 0;
       const eigen = Number(f.nummer.slice(-4)) || 0;

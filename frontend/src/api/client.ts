@@ -659,6 +659,11 @@ export async function getVerkoopfacturen(): Promise<Verkoopfactuur[]> {
 export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/overzicht`));
 }
+// Bewaarde factuurklanten (B2B), om aan de kassa te kiezen bij "Factuur".
+export type FactuurKlant = { id: string; naam: string; btwNummer: string | null; email: string | null; adres: string | null };
+export async function getFactuurKlanten(): Promise<FactuurKlant[]> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/klanten`));
+}
 export async function getFactuurInstellingen(): Promise<FactuurInstellingen> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`));
 }

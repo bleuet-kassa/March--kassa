@@ -19,6 +19,12 @@ export class VerkoopfacturenController {
     return this.facturen.overzicht();
   }
 
+  // GET /verkoopfacturen/klanten -> bewaarde factuurklanten (B2B) voor de keuze aan de kassa
+  @Get('klanten')
+  klanten() {
+    return this.facturen.klanten();
+  }
+
   // GET/PUT /verkoopfacturen/instellingen -> prefix nummering, verkoopdagboek in Scrada, vervaldagen
   @Get('instellingen')
   instellingen() {

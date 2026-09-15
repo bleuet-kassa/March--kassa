@@ -11,6 +11,8 @@ import {
   createProduct,
   vraagDagafsluitingAan,
   getOpenAfsluitAanvraag,
+  getFactuurKlanten,
+  type FactuurKlant,
   type AfsluitAanvraag,
   type Betaalwijze,
   type Ticket as TicketData,
@@ -132,9 +134,10 @@ type Bon = {
   factuurBtw?: string;
   factuurEmail?: string;
   factuurAdres?: string;
+  factuurKlantId?: string; // bewaarde factuurklant (B2B of particulier)
 };
 function maakBon(): Bon {
-  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '', factuur: false, factuurBedrijfId: '', factuurNaam: '', factuurBtw: '', factuurEmail: '', factuurAdres: '' };
+  return { id: genKey(), verkoperId: '', lijnen: [], betaalwijze: 'BANCONTACT', ontvangen: '', gekozenRegelingId: '', handkorting: 0, opRekening: false, rekeningBedrijfId: '', rekeningLidId: '', retourModus: false, gesplitst: false, split1Bw: 'CADEAUBON', split1Bedrag: '', split2Bw: 'BANCONTACT', split2Bedrag: '', factuur: false, factuurBedrijfId: '', factuurNaam: '', factuurBtw: '', factuurEmail: '', factuurAdres: '', factuurKlantId: '' };
 }
 
 // Kassascherm (Fase 2): scannen, aantallen, betaalwijze, BTW-uitsplitsing,
@@ -176,6 +179,7 @@ export function Kassa() {
   const [aantalLijn, setAantalLijn] = useState<string | null>(null);
   // Bedrijven met leden voor "op rekening".
   const [rekeningBedrijven, setRekeningBedrijven] = useState<RekeningBedrijf[]>([]);
+  const [factuurKlanten, setFactuurKlanten] = useState<FactuurKlant[]>([]); // bewaarde factuurklanten (B2B)
   // Prijs/kg-flow: eerst prijs per kg, dan gewicht.
   const [prijsKgStap, setPrijsKgStap] = useState<null | 'prijs' | 'gewicht'>(null);
   const [prijsKgWaarde, setPrijsKgWaarde] = useState(0);
@@ -246,6 +250,7 @@ export function Kassa() {
     getGebruikers().then(setVerkopers).catch(() => {});
     getSpeciaalProducten().then((s) => setSpeciaal(Array.isArray(s) ? s : [])).catch(() => {});
     getRekeningenKassa().then((r) => setRekeningBedrijven(Array.isArray(r) ? r : [])).catch(() => {});
+    getFactuurKlanten().then((k) => setFactuurKlanten(Array.isArray(k) ? k : [])).catch(() => {});
   }
   useEffect(() => { laadData(); }, []);
 
@@ -641,12 +646,14 @@ export function Kassa() {
     if (!bon.verkoperId) { setFout('Kies eerst de verkoper voor dit ticket.'); return; }
     if (bon.opRekening && (!bon.rekeningBedrijfId || !bon.rekeningLidId)) { setFout('Kies het bedrijf en het personeelslid voor de rekening.'); return; }
     if (bon.gesplitst && !splitOk) { setFout(`De gesplitste betalingen komen niet overeen met het te betalen bedrag (verschil € ${splitVerschil.toFixed(2)}).`); return; }
-    if (bon.factuur && !bon.opRekening && !bon.factuurBedrijfId && !bon.factuurNaam?.trim()) { setFout('Kies voor de factuur een bedrijf, of vul de naam (en het BTW-nummer) van de klant in.'); return; }
-    // Factuur gewenst: bestaand bedrijf of nieuwe klant (op rekening = maandfactuur, geen ticketfactuur).
+    if (bon.factuur && !bon.opRekening && !bon.factuurBedrijfId && !bon.factuurKlantId && !bon.factuurNaam?.trim()) { setFout('Kies voor de factuur/rekening een bestaande klant, of vul minstens de naam in.'); return; }
+    // Factuur/rekening op naam: bestaand bedrijf, bewaarde klant, of nieuwe klant (BTW-nummer optioneel).
     const factuurKeuze = bon.factuur && !bon.opRekening
       ? (bon.factuurBedrijfId
         ? { bedrijfId: bon.factuurBedrijfId }
-        : { klant: { naam: bon.factuurNaam!.trim(), btwNummer: bon.factuurBtw?.trim() || undefined, email: bon.factuurEmail?.trim() || undefined, adres: bon.factuurAdres?.trim() || undefined } })
+        : bon.factuurKlantId
+          ? { klantId: bon.factuurKlantId }
+          : { klant: { naam: bon.factuurNaam!.trim(), btwNummer: bon.factuurBtw?.trim() || undefined, email: bon.factuurEmail?.trim() || undefined, adres: bon.factuurAdres?.trim() || undefined } })
       : undefined;
     // Gesplitste betaling: de deelbetalingen (max. 2, lege bedragen weglaten).
     const betalingen = bon.gesplitst
@@ -1039,20 +1046,38 @@ export function Kassa() {
                 </label>
                 {bon.factuur && (
                   <div style={{ marginTop: 8, padding: 10, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <select value={bon.factuurBedrijfId ?? ''} onChange={(e) => patchBon(bon.id, { factuurBedrijfId: e.target.value })} style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }}>
-                      <option value="">— bestaand bedrijf, of vul hieronder een nieuwe klant in —</option>
-                      {rekeningBedrijven.map((rb) => <option key={rb.id} value={rb.id}>{rb.naam}{rb.btwNummer ? ` (${rb.btwNummer})` : ''}</option>)}
+                    {/* Bestaand bedrijf (op rekening) of bewaarde klant kiezen; anders nieuwe klant invullen (wordt bewaard). */}
+                    <select
+                      value={bon.factuurBedrijfId ? `b:${bon.factuurBedrijfId}` : bon.factuurKlantId ? `k:${bon.factuurKlantId}` : ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        patchBon(bon.id, { factuurBedrijfId: v.startsWith('b:') ? v.slice(2) : '', factuurKlantId: v.startsWith('k:') ? v.slice(2) : '' });
+                      }}
+                      style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }}
+                    >
+                      <option value="">— kies een bestaande klant, of vul hieronder een nieuwe in —</option>
+                      {rekeningBedrijven.length > 0 && (
+                        <optgroup label="Bedrijven op rekening">
+                          {rekeningBedrijven.map((rb) => <option key={rb.id} value={`b:${rb.id}`}>{rb.naam}{rb.btwNummer ? ` (${rb.btwNummer})` : ''}</option>)}
+                        </optgroup>
+                      )}
+                      {factuurKlanten.length > 0 && (
+                        <optgroup label="Bewaarde klanten">
+                          {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam}{k.btwNummer ? ` (${k.btwNummer})` : ' (particulier)'}</option>)}
+                        </optgroup>
+                      )}
                     </select>
-                    {!bon.factuurBedrijfId && (
+                    {!bon.factuurBedrijfId && !bon.factuurKlantId && (
                       <>
                         <input value={bon.factuurNaam ?? ''} onChange={(e) => patchBon(bon.id, { factuurNaam: e.target.value })} placeholder="Naam bedrijf / klant *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurNaam ? '1px solid #ccc' : '2px solid #f59e0b' }} />
-                        <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (BE0…)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
-                        <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} placeholder="E-mail (voor de factuur)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
-                        <input value={bon.factuurAdres ?? ''} onChange={(e) => patchBon(bon.id, { factuurAdres: e.target.value })} placeholder="Adres" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                        <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (optioneel — met BTW-nr gaat de factuur naar Scrada)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                        <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} placeholder="E-mail (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                        <input value={bon.factuurAdres ?? ''} onChange={(e) => patchBon(bon.id, { factuurAdres: e.target.value })} placeholder="Adres (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
                       </>
                     )}
                     <div style={{ fontSize: 12, color: '#6b7280' }}>
-                      Betaalt de klant nu (Bancontact, cash, …), dan staat dat op de factuur vermeld; kies "Overschrijving" als hij later betaalt. De factuur gaat als concept naar Scrada.
+                      De gegevens worden als klant bewaard. Met BTW-nummer gaat de factuur als concept naar Scrada; zonder BTW-nummer (particulier) blijft het een rekening in de kassa.
+                      Betaalt de klant nu (Bancontact, cash, …), dan staat dat vermeld; kies "Overschrijving" als hij later betaalt.
                     </div>
                   </div>
                 )}

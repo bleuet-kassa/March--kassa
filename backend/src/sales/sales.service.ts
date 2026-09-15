@@ -184,9 +184,20 @@ export class SalesService {
     if (factuur) {
       const normBtw = (s?: string | null) => (s ? s.replace(/[\s.]/g, '').toUpperCase() : null);
       const vindOfMaak = async (naam: string, btw: string | null, email?: string | null, adres?: string | null) => {
-        const bestaand = btw ? await this.prisma.klant.findFirst({ where: { btwNummer: btw } }) : null;
-        if (bestaand) return bestaand.id;
-        const k = await this.prisma.klant.create({ data: { naam: naam.trim(), type: 'B2B', btwNummer: btw, email: email?.trim() || null, adres: adres?.trim() || null } });
+        // Bestaande klant hergebruiken: op BTW-nummer, anders op naam (zonder dubbels aan te maken).
+        const bestaand = btw
+          ? await this.prisma.klant.findFirst({ where: { btwNummer: btw } })
+          : await this.prisma.klant.findFirst({ where: { type: 'B2B', naam: { equals: naam.trim(), mode: 'insensitive' } } });
+        if (bestaand) {
+          // Ontbrekende gegevens aanvullen (e-mail/adres) zonder bestaande te overschrijven.
+          const aanvulling: { email?: string; adres?: string } = {};
+          if (!bestaand.email && email?.trim()) aanvulling.email = email.trim();
+          if (!bestaand.adres && adres?.trim()) aanvulling.adres = adres.trim();
+          if (Object.keys(aanvulling).length) await this.prisma.klant.update({ where: { id: bestaand.id }, data: aanvulling });
+          return bestaand.id;
+        }
+        // Met BTW-nummer = bedrijf (factuur naar Scrada); zonder = particulier op rekening (enkel in de kassa).
+        const k = await this.prisma.klant.create({ data: { naam: naam.trim(), type: btw ? 'B2B' : 'PARTICULIER', btwNummer: btw, email: email?.trim() || null, adres: adres?.trim() || null } });
         return k.id;
       };
       if (factuur.bedrijfId) {
