@@ -649,6 +649,7 @@ export type Verkoopfactuur = {
   betaalstatus: 'OPENSTAAND' | 'BETAALD' | string; betaaldOp: string | null; betaalwijze: string | null;
   scradaStatus: string; scradaRef: string | null; scradaVerstuurdOp: string | null; scradaFout: string | null;
   correctieStatus: string; correctieFout: string | null; aantalTickets: number;
+  samenvatten: boolean; omschrijving: string | null; // enkel totalen per BTW-tarief naar Scrada
 };
 export type FactuurOverzicht = { openstaand: number; openstaandBedrag: number; teVersturen: number; ticketsZonderFactuur: number };
 export type FactuurVerzendResultaat = { modus: string; aangemaakt: number; gevonden?: number; verstuurd: number; mislukt: number; correcties: number; geweigerd?: boolean; melding?: string; fout?: string };
@@ -675,6 +676,10 @@ export async function verstuurFactuurNaarScrada(id: string): Promise<{ verstuurd
 }
 export async function verstuurFacturenNaarScrada(): Promise<FactuurVerzendResultaat> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/verstuur`, { method: 'POST' }));
+}
+// Weergave naar Scrada (vóór verzending): enkel totalen per BTW-tarief met eigen omschrijving.
+export async function zetFactuurWeergave(id: string, input: { samenvatten?: boolean; omschrijving?: string | null }): Promise<Verkoopfactuur> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}/weergave`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
 }
 export async function getScradaOpenstaande(): Promise<OpenstaandeVerkoop[]> {
   return (await fetch(`${BASE}/scrada/openstaande`)).json();

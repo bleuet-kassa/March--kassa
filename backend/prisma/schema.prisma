@@ -596,6 +596,9 @@ model Verkoopfactuur {
   correctieStatus   String   @default("NIET_VERSTUURD") // dagboek-correctie: NIET_VERSTUURD | WACHT_OP_DAG | VERSTUURD | FOUT | NIET_NODIG
   correctieRef      String?
   correctieFout     String?
+  // Weergave naar Scrada: enkel totalen per BTW-tarief (met eigen omschrijving) i.p.v. alle productlijnen.
+  samenvatten       Boolean  @default(false)
+  omschrijving      String?
   createdAt         DateTime @default(now())
 
   verkopen          Verkoop[]

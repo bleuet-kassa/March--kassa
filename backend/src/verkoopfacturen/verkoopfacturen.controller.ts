@@ -43,6 +43,13 @@ export class VerkoopfacturenController {
     return this.facturen.maakVoorVerkoop(verkoopId);
   }
 
+  // PUT /verkoopfacturen/:id/weergave { samenvatten, omschrijving } -> enkel totalen per BTW-tarief (vóór verzending)
+  @Put(':id/weergave')
+  @Rollen('BEHEER', 'BEHEERDER')
+  weergave(@Param('id') id: string, @Body() body: { samenvatten?: boolean; omschrijving?: string | null }) {
+    return this.facturen.zetWeergave(id, body ?? {});
+  }
+
   // POST /verkoopfacturen/:id/verstuur -> deze factuur (als concept) naar Scrada + dagboekcorrectie
   @Post(':id/verstuur')
   @Rollen('BEHEER', 'BEHEERDER')

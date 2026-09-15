@@ -230,6 +230,7 @@ export class VerkoopfacturenService {
       betaalstatus: f.betaalstatus, betaaldOp: f.betaaldOp, betaalwijze: f.betaalwijze,
       scradaStatus: f.scradaStatus, scradaRef: f.scradaRef, scradaVerstuurdOp: f.scradaVerstuurdOp, scradaFout: f.scradaFout,
       correctieStatus: f.correctieStatus, correctieFout: f.correctieFout, aantalTickets: f._count.verkopen,
+      samenvatten: f.samenvatten, omschrijving: f.omschrijving,
     }));
   }
   async detail(id: string) {
@@ -256,9 +257,24 @@ export class VerkoopfacturenService {
     return { openstaand: open, openstaandBedrag: Number(gefactureerdOnbetaald._sum.totaalIncl ?? 0), teVersturen, ticketsZonderFactuur: tickets };
   }
 
+  // Weergave naar Scrada instellen (vóór het versturen): enkel totalen per
+  // BTW-tarief met een eigen omschrijving, of alle productlijnen.
+  async zetWeergave(id: string, input: { samenvatten?: boolean; omschrijving?: string | null }) {
+    const f = await this.prisma.verkoopfactuur.findUnique({ where: { id } });
+    if (!f) throw new NotFoundException('Factuur niet gevonden.');
+    if (f.scradaStatus === 'VERSTUURD') throw new BadRequestException('Deze factuur staat al in Scrada; de weergave kan niet meer gewijzigd worden.');
+    return this.prisma.verkoopfactuur.update({
+      where: { id },
+      data: {
+        samenvatten: input.samenvatten ?? f.samenvatten,
+        omschrijving: input.omschrijving !== undefined ? (input.omschrijving?.trim() || null) : f.omschrijving,
+      },
+    });
+  }
+
   // --- Scrada: factuur (concept) --------------------------------------------------------
 
-  private bouwScrada(f: { nummer: string; boekjaar: string; datum: Date; vervaldatum: Date | null; klantNaam: string; klantBtw: string | null; klantEmail: string | null; klantAdres: string | null; totaalExcl: Prisma.Decimal | number; totaalBtw: Prisma.Decimal | number; totaalIncl: Prisma.Decimal | number; perBtw: unknown; lijnen: unknown; bron: string; periode: string | null; id: string; betaalstatus: string; betaalwijze: string | null }, inst: FactuurInstellingen) {
+  private bouwScrada(f: { nummer: string; boekjaar: string; datum: Date; vervaldatum: Date | null; klantNaam: string; klantBtw: string | null; klantEmail: string | null; klantAdres: string | null; totaalExcl: Prisma.Decimal | number; totaalBtw: Prisma.Decimal | number; totaalIncl: Prisma.Decimal | number; perBtw: unknown; lijnen: unknown; bron: string; periode: string | null; id: string; betaalstatus: string; betaalwijze: string | null; samenvatten: boolean; omschrijving: string | null }, inst: FactuurInstellingen) {
     const lijnen = (f.lijnen as FactuurLijn[]) ?? [];
     const perBtw = (f.perBtw as PerBtw[]) ?? [];
     return {
@@ -286,16 +302,28 @@ export class VerkoopfacturenService {
       totalExclVat: r2(Number(f.totaalExcl)),
       totalVat: r2(Number(f.totaalBtw)),
       totalInclVat: r2(Number(f.totaalIncl)),
-      lines: lijnen.map((l, i) => ({
-        lineNumber: String(i + 1), // Scrada verwacht een tekst
-        itemName: `${l.datum} ${l.lid ? l.lid + ' — ' : ''}${l.omschrijving}`,
-        quantity: l.aantal,
-        unitType: l.kg ? 202 : 2,
-        itemInclVat: l.eenheidsprijsIncl,
-        vatType: l.btwPct === 0 ? 2 : 1,
-        vatPercentage: l.btwPct,
-        totalInclVat: l.totaalIncl,
-      })),
+      // Samengevat: één lijn per BTW-tarief met de eigen omschrijving; anders elke productlijn.
+      lines: f.samenvatten
+        ? perBtw.map((p, i) => ({
+          lineNumber: String(i + 1),
+          itemName: `${(f.omschrijving?.trim() || 'Aankopen kassa Marché')}${f.periode ? ` (${f.periode})` : ''} — BTW ${p.percentage} %`,
+          quantity: 1,
+          unitType: 2,
+          itemInclVat: p.incl,
+          vatType: p.percentage === 0 ? 2 : 1,
+          vatPercentage: p.percentage,
+          totalInclVat: p.incl,
+        }))
+        : lijnen.map((l, i) => ({
+          lineNumber: String(i + 1), // Scrada verwacht een tekst
+          itemName: `${l.datum} ${l.lid ? l.lid + ' — ' : ''}${l.omschrijving}`,
+          quantity: l.aantal,
+          unitType: l.kg ? 202 : 2,
+          itemInclVat: l.eenheidsprijsIncl,
+          vatType: l.btwPct === 0 ? 2 : 1,
+          vatPercentage: l.btwPct,
+          totalInclVat: l.totaalIncl,
+        })),
       vatTotals: perBtw.map((p) => ({ vatType: p.percentage === 0 ? 2 : 1, vatPercentage: p.percentage, totalExclVat: p.excl, totalVat: p.btw, totalInclVat: p.incl })),
     };
   }

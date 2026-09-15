@@ -5,7 +5,7 @@ import {
   getScradaDagen, getScradaDagPreview, scradaVerstuurDag, scradaVerstuurDagen,
   type ScradaConfig, type ScradaVerbinding, type ScradaSyncVerslag,
   type ScradaDagboekInstellingen, type ScradaDagboek, type ScradaCategorie, type ScradaBetaalmethode, type ScradaDag, type ScradaDagPreview,
-  getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada,
+  getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada, zetFactuurWeergave,
   type Verkoopfactuur, type FactuurOverzicht, type FactuurInstellingen,
 } from '../api/client';
 
@@ -80,6 +80,19 @@ export function Boekhouding() {
       setMelding(r.geweigerd ? (r.melding ?? 'Geweigerd.') : `${r.aangemaakt} nieuwe ticketfactu(u)r(en) aangemaakt, ${r.verstuurd} verstuurd, ${r.correcties} correctie(s)${r.mislukt ? `, ${r.mislukt} mislukt: ${r.fout ?? 'fout'}` : ''}${r.modus === 'test' ? ' (dry-run)' : ''}.`);
       await laadFacturen();
     } catch (e) { setMelding(e instanceof Error ? e.message : 'Versturen mislukt'); }
+    finally { setBezig(false); }
+  }
+
+  // Weergave naar Scrada per factuur: enkel totalen per BTW-tarief + eigen omschrijving (vóór verzending).
+  const [omschrijvingen, setOmschrijvingen] = useState<Record<string, string>>({});
+  async function zetWeergave(f: Verkoopfactuur, samenvatten: boolean) {
+    setBezig(true); setMelding('');
+    try {
+      const omschrijving = omschrijvingen[f.id] ?? f.omschrijving ?? '';
+      await zetFactuurWeergave(f.id, { samenvatten, omschrijving });
+      setMelding(samenvatten ? `Factuur ${f.nummer}: enkel totalen per BTW-tarief${omschrijving ? ` — "${omschrijving}"` : ''}.` : `Factuur ${f.nummer}: alle productlijnen.`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
     finally { setBezig(false); }
   }
 
@@ -345,7 +358,23 @@ export function Boekhouding() {
                         : <span style={{ color: '#b45309' }}>klaar om te versturen</span>}
                     </td>
                     <td style={{ padding: 4, whiteSpace: 'nowrap', textAlign: 'right' }}>
-                      {f.scradaStatus !== 'VERSTUURD' && <button onClick={() => verstuurFactuur(f)} disabled={bezig || !vanafOpgeslagen} style={btn}>Verstuur</button>}
+                      {f.scradaStatus !== 'VERSTUURD' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                          {/* Weergave naar Scrada: enkel totalen per BTW-tarief met eigen omschrijving, of alle productlijnen */}
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }} title="Naar Scrada gaat dan één lijn per BTW-tarief met deze omschrijving i.p.v. alle producten">
+                            <input type="checkbox" checked={f.samenvatten} disabled={bezig} onChange={(e) => zetWeergave(f, e.target.checked)} />
+                            Enkel totalen
+                          </label>
+                          <input
+                            value={omschrijvingen[f.id] ?? f.omschrijving ?? ''}
+                            onChange={(e) => setOmschrijvingen({ ...omschrijvingen, [f.id]: e.target.value })}
+                            onBlur={() => { if ((omschrijvingen[f.id] ?? f.omschrijving ?? '') !== (f.omschrijving ?? '')) zetWeergave(f, f.samenvatten); }}
+                            placeholder="Omschrijving, bv. Fruit personeel september"
+                            style={{ ...inp, padding: 4, fontSize: 12, width: 220 }}
+                          />
+                          <button onClick={() => verstuurFactuur(f)} disabled={bezig || !vanafOpgeslagen} style={btn}>Verstuur</button>
+                        </div>
+                      )}
                       {f.scradaFout && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.scradaFout}</div>}
                       {f.correctieFout && f.correctieStatus === 'FOUT' && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.correctieFout}</div>}
                     </td>
