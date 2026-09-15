@@ -452,6 +452,9 @@ export class VerkoopfacturenService {
     const totaal = r2(betalingen.reduce((s, b) => s + b.bedrag, 0));
     let groep = (await this.openRekeningen()).find((g) => g.sleutel === input.sleutel);
     if (!groep) throw new NotFoundException('Geen openstaande rekening gevonden voor deze klant.');
+    // Bedrijven (klant met BTW-nummer) betalen hun factuur per overschrijving; die betaling
+    // wordt in Scrada op de factuur geboekt en hoort niet in de dagontvangsten van de kassa.
+    if (groep.btwNummer) throw new BadRequestException(`${groep.naam} is een bedrijf (BTW-nummer ${groep.btwNummer}): de factuur wordt per overschrijving betaald, niet aan de kassa.`);
     if (totaal > groep.open + 0.005) throw new BadRequestException(`Het bedrag (€ ${totaal.toFixed(2)}) is hoger dan het openstaande (€ ${groep.open.toFixed(2)}).`);
 
     // Betaalt de klant terwijl er nog niet-gefactureerde aankopen open staan, dan

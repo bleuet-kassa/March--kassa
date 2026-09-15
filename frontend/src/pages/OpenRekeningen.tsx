@@ -71,7 +71,7 @@ export function OpenRekeningen() {
         <span style={{ color: '#6b7280' }}>Totaal openstaand: <strong>{euro(totaalOpen)}</strong> · {lijst.length} klant(en)</span>
       </div>
       <p style={{ color: '#6b7280', marginTop: 4, fontSize: 14 }}>
-        Klanten die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag. Aankopen die nog niet gefactureerd zijn, worden bij de betaling automatisch gebundeld tot één rekening/factuur.
+        Particulieren die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag. Aankopen die nog niet gefactureerd zijn, worden bij de betaling automatisch gebundeld tot één rekening. Bedrijven (met BTW-nummer) betalen hun factuur per overschrijving, niet aan de kassa.
       </p>
       <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek klant…" style={{ ...inp, width: '100%', maxWidth: 360, marginBottom: 12 }} />
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
@@ -93,7 +93,9 @@ export function OpenRekeningen() {
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>
               <div style={{ fontWeight: 700, fontSize: 20, color: '#b45309' }}>{euro(g.open)}</div>
             </div>
-            {actief !== g.sleutel && <button onClick={() => open(g)} style={btnGroen}>Betaling ontvangen</button>}
+            {g.btwNummer
+              ? <div style={{ fontSize: 12, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '6px 10px', maxWidth: 220 }}>Bedrijf: betaalt per <strong>overschrijving</strong> op de factuur (via Scrada). Geen kassabetaling.</div>
+              : actief !== g.sleutel && <button onClick={() => open(g)} style={btnGroen}>Betaling ontvangen</button>}
           </div>
 
           <div style={{ overflowX: 'auto', marginTop: 8 }}>
