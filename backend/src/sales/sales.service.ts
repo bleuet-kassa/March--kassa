@@ -7,6 +7,7 @@ import {
 import { Betaalwijze, GebruikerRol, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
 
 // Wettelijke cash-limiet in België: max. €3.000 contant per transactie.
 const CASH_LIMIET = 3000;
@@ -54,7 +55,7 @@ const naarBoven = (cent: number, stap: number) => {
 
 @Injectable()
 export class SalesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private facturen: VerkoopfacturenService) {}
 
   // Rekent een verkoop af: schrijft de verkoop + lijnen weg, verlaagt de
   // winkelstock en berekent de BTW per lijn. Alles in één transactie zodat
@@ -278,6 +279,13 @@ export class SalesService {
       return v;
     });
 
+    // Factuur gewenst: meteen aanmaken (nummer toekennen), zodat ze direct bij
+    // Boekhouding → Verkoopfacturen klaarstaat. Een fout hier mag de verkoop
+    // zelf nooit blokkeren (de factuur wordt dan later alsnog aangemaakt).
+    if (factuur) {
+      try { await this.facturen.maakVoorVerkoop(verkoop.id); }
+      catch (e) { console.warn(`Ticketfactuur voor verkoop ${verkoop.id} niet aangemaakt: ${e instanceof Error ? e.message : e}`); }
+    }
     return this.metTicket(verkoop, ontvangen);
   }
 

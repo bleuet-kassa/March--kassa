@@ -221,6 +221,8 @@ export class VerkoopfacturenService {
   // --- lijst / status ---------------------------------------------------------------
 
   async lijst() {
+    // Tickets met "factuur gewenst" die (bv. door een fout) nog geen factuur kregen, alsnog aanmaken.
+    await this.maakTicketFacturen();
     const rows = await this.prisma.verkoopfactuur.findMany({ orderBy: { datum: 'desc' }, take: 200, include: { _count: { select: { verkopen: true } } } });
     return rows.map((f) => ({
       id: f.id, nummer: f.nummer, datum: f.datum, vervaldatum: f.vervaldatum, bron: f.bron, periode: f.periode,
