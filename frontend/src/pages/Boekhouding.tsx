@@ -7,6 +7,7 @@ import {
   type ScradaDagboekInstellingen, type ScradaDagboek, type ScradaCategorie, type ScradaBetaalmethode, type ScradaDag, type ScradaDagPreview,
   getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada, zetFactuurWeergave, verwijderVerkoopfactuur,
   getTeFactureren, factureerRekening, factureerAlleRekeningen, type TeFactureren,
+  getMailStatus, mailRekening, mailOpenRekeningen,
   type Verkoopfactuur, type FactuurOverzicht, type FactuurInstellingen,
 } from '../api/client';
 
@@ -49,8 +50,8 @@ export function Boekhouding() {
   const [teFactureren, setTeFactureren] = useState<TeFactureren[]>([]);
 
   async function laadFacturen() {
-    const [f, o, i, t] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen(), getTeFactureren()]);
-    setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : ''); setTeFactureren(t);
+    const [f, o, i, t, m] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen(), getTeFactureren(), getMailStatus().catch(() => null)]);
+    setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : ''); setTeFactureren(t); setMailStatus(m);
   }
   async function factureerEen(t: TeFactureren) {
     if (!window.confirm(`Alle ${t.aantal} open aankopen van ${t.naam} (${euro(t.totaal)}) bundelen tot één ${t.naarScrada ? 'factuur (naar Scrada)' : 'rekening (enkel in de kassa)'}?`)) return;
@@ -74,7 +75,7 @@ export function Boekhouding() {
     setBezig(true); setMelding('');
     try {
       const volgende = facVolgend.trim() ? Number(facVolgend) : undefined;
-      const i = await zetFactuurInstellingen({ prefix: facInst.prefix, verkoopdagboek: facInst.verkoopdagboek, vervaldagen: facInst.vervaldagen, volgendeVolgnummer: volgende && volgende > 0 ? volgende : undefined });
+      const i = await zetFactuurInstellingen({ prefix: facInst.prefix, verkoopdagboek: facInst.verkoopdagboek, vervaldagen: facInst.vervaldagen, iban: facInst.iban ?? '', mailTekst: facInst.mailTekst ?? '', volgendeVolgnummer: volgende && volgende > 0 ? volgende : undefined });
       setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : '');
       setMelding(`Factuurinstellingen opgeslagen. Volgende factuur: ${i.voorbeeld ?? ''}.`);
     }
@@ -114,6 +115,29 @@ export function Boekhouding() {
       setMelding(samenvatten ? `Factuur ${f.nummer}: enkel totalen per BTW-tarief${omschrijving ? ` — "${omschrijving}"` : ''}.` : `Factuur ${f.nummer}: alle productlijnen.`);
       await laadFacturen();
     } catch (e) { setMelding(e instanceof Error ? e.message : 'Opslaan mislukt'); }
+    finally { setBezig(false); }
+  }
+
+  // Rekening per e-mail (particulieren: niet via Scrada/Peppol). SMTP moet op Render ingesteld zijn.
+  const [mailStatus, setMailStatus] = useState<{ geconfigureerd: boolean; afzender: string | null } | null>(null);
+  async function mailEen(f: Verkoopfactuur) {
+    const naar = window.prompt(`Rekening ${f.nummer} (${f.klantNaam}, ${euro(f.totaalIncl)}) per e-mail versturen naar:`, f.gemaildNaar ?? f.klantEmail ?? '');
+    if (naar === null) return;
+    setBezig(true); setMelding('');
+    try { const r = await mailRekening(f.id, naar.trim() || undefined); setMelding(`Rekening ${r.nummer} gemaild naar ${r.naar}.`); await laadFacturen(); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Mailen mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function mailAlle() {
+    const teMailen = facturen.filter((f) => f.scradaStatus === 'NIET_NODIG' && !f.gemaildOp);
+    if (!window.confirm(`Alle ${teMailen.length} nog niet gemailde rekeningen van particulieren per e-mail versturen?`)) return;
+    setBezig(true); setMelding('');
+    try {
+      const r = await mailOpenRekeningen();
+      const fouten = r.resultaten.filter((x) => x.fout);
+      setMelding(`${r.verstuurd} rekening(en) gemaild${fouten.length ? ` · niet gelukt: ${fouten.map((x) => `${x.nummer} ${x.naam} (${x.fout})`).join('; ')}` : ''}.`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Mailen mislukt'); }
     finally { setBezig(false); }
   }
 
@@ -396,6 +420,25 @@ export function Boekhouding() {
             </button>
           </div>
           <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Zet in Scrada op dat verkoopdagboek <em>ApiInvoiceStatus = concept</em>, zodat de facturen ter nazicht klaarstaan. Nummering: jaar + volgnummer, doorlopend per jaar — volgende factuur: <strong>{facInst.voorbeeld ?? `${facInst.prefix}${new Date().getFullYear()}0001`}</strong>.</div>
+
+          {/* Rekeningen van particulieren: per e-mail vanuit de kassa (niet via Scrada/Peppol) */}
+          <div style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 700 }}>✉️ Rekeningen particulieren per e-mail</div>
+              <span style={{ fontSize: 13, color: mailStatus?.geconfigureerd ? '#166534' : '#b45309' }}>
+                {mailStatus?.geconfigureerd ? `e-mail ingesteld (afzender ${mailStatus.afzender ?? ''})` : 'e-mail nog niet ingesteld: zet op Render de variabelen SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS en SMTP_FROM'}
+              </span>
+              <button onClick={mailAlle} disabled={bezig || !mailStatus?.geconfigureerd || facturen.filter((f) => f.scradaStatus === 'NIET_NODIG' && !f.gemaildOp).length === 0} style={{ ...btn, marginLeft: 'auto' }}>
+                Alle nieuwe rekeningen mailen ({facturen.filter((f) => f.scradaStatus === 'NIET_NODIG' && !f.gemaildOp).length})
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+              <label style={{ fontSize: 13 }}>IBAN voor overschrijving <input value={facInst.iban ?? ''} onChange={(e) => setFacInst({ ...facInst, iban: e.target.value })} placeholder="BE.. .... .... ...." style={{ ...inp, width: 200 }} /></label>
+              <label style={{ fontSize: 13, flex: 1, minWidth: 240 }}>Extra tekst in de mail <input value={facInst.mailTekst ?? ''} onChange={(e) => setFacInst({ ...facInst, mailTekst: e.target.value })} placeholder="bv. Bedankt voor uw vertrouwen." style={{ ...inp, width: '100%' }} /></label>
+              <button onClick={bewaarFacInst} disabled={bezig} style={btn}>Opslaan</button>
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>De mail bevat alle aankopen van de periode, de BTW, het te betalen bedrag, en de betaalmogelijkheden (aan de kassa of overschrijving met het rekeningnummer als mededeling). Het e-mailadres vul je in aan de kassa bij de klant.</div>
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
               <thead>
@@ -416,7 +459,11 @@ export function Boekhouding() {
                       {f.scradaStatus === 'VERSTUURD'
                         ? <span style={{ color: '#166534' }}>✔ concept in Scrada{f.correctieStatus === 'VERSTUURD' ? '' : f.correctieStatus === 'WACHT_OP_DAG' ? ' · correctie wacht op dag' : f.correctieStatus === 'FOUT' ? ' · correctie: fout' : ' · correctie volgt'}</span>
                         : f.scradaStatus === 'FOUT' ? <span style={{ color: 'crimson' }} title={f.scradaFout ?? ''}>✖ fout</span>
-                        : f.scradaStatus === 'NIET_NODIG' ? <span style={{ color: '#6b7280' }} title="Geen BTW-nummer: rekening in de kassa, gaat niet naar Scrada">rekening in kassa (niet naar Scrada)</span>
+                        : f.scradaStatus === 'NIET_NODIG' ? (
+                          <span style={{ color: '#6b7280' }} title="Geen BTW-nummer: rekening in de kassa, gaat niet naar Scrada">
+                            particulier · {f.gemaildOp ? <span style={{ color: '#166534' }}>✔ gemaild {datumNl(f.gemaildOp)}{f.gemaildNaar ? ` (${f.gemaildNaar})` : ''}</span> : <span style={{ color: '#b45309' }}>nog te mailen{f.klantEmail ? '' : ' — geen e-mail bekend'}</span>}
+                          </span>
+                        )
                         : <span style={{ color: '#b45309' }}>klaar om te versturen</span>}
                     </td>
                     <td style={{ padding: 4, whiteSpace: 'nowrap', textAlign: 'right' }}>
@@ -437,7 +484,10 @@ export function Boekhouding() {
                           <button onClick={() => verstuurFactuur(f)} disabled={bezig || !vanafOpgeslagen} style={btn}>Verstuur</button>
                         </div>
                       )}
-                      <div style={{ marginTop: 4 }}>
+                      <div style={{ marginTop: 4, display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        {f.scradaStatus === 'NIET_NODIG' && (
+                          <button onClick={() => mailEen(f)} disabled={bezig || !mailStatus?.geconfigureerd} title={mailStatus?.geconfigureerd ? 'Rekening per e-mail naar de klant' : 'E-mail nog niet ingesteld op Render'} style={btn}>{f.gemaildOp ? 'Opnieuw mailen' : '✉️ Mail rekening'}</button>
+                        )}
                         <button onClick={() => verwijderFactuur(f)} disabled={bezig} title="Factuur verwijderen (bv. testfactuur); tickets worden losgemaakt" style={{ ...btn, color: '#b91c1c', borderColor: '#fca5a5' }}>Verwijder</button>
                       </div>
                       {f.scradaFout && <div style={{ fontSize: 11, color: 'crimson', maxWidth: 260, whiteSpace: 'normal' }}>{f.scradaFout}</div>}

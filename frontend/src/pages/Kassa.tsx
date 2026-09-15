@@ -11,7 +11,7 @@ import {
   createProduct,
   vraagDagafsluitingAan,
   getOpenAfsluitAanvraag,
-  getFactuurKlanten,
+  getFactuurKlanten, zetKlantGegevens,
   type FactuurKlant,
   type AfsluitAanvraag,
   type Betaalwijze,
@@ -183,7 +183,17 @@ export function Kassa() {
   const [aantalLijn, setAantalLijn] = useState<string | null>(null);
   // Bedrijven met leden voor "op rekening".
   const [rekeningBedrijven, setRekeningBedrijven] = useState<RekeningBedrijf[]>([]);
-  const [factuurKlanten, setFactuurKlanten] = useState<FactuurKlant[]>([]); // bewaarde factuurklanten (B2B)
+  const [factuurKlanten, setFactuurKlanten] = useState<FactuurKlant[]>([]); // bewaarde klanten (met BTW-nr = bedrijf, zonder = particulier)
+  // E-mail van een bewaarde klant aanvullen vanuit de kassa (voor de maandelijkse rekening).
+  const [klantEmailBewerk, setKlantEmailBewerk] = useState<Record<string, string>>({});
+  async function bewaarKlantEmail(klantId: string, email: string) {
+    const k = factuurKlanten.find((x) => x.id === klantId);
+    if (!k || (k.email ?? '') === email.trim()) return;
+    try {
+      const bij = await zetKlantGegevens(klantId, { email: email.trim() || null });
+      setFactuurKlanten(factuurKlanten.map((x) => (x.id === klantId ? { ...x, email: bij.email } : x)));
+    } catch (e) { setFout(e instanceof Error ? e.message : 'E-mail bewaren mislukt'); }
+  }
   // Prijs/kg-flow: eerst prijs per kg, dan gewicht.
   const [prijsKgStap, setPrijsKgStap] = useState<null | 'prijs' | 'gewicht'>(null);
   const [prijsKgWaarde, setPrijsKgWaarde] = useState(0);
@@ -1084,9 +1094,15 @@ export function Kassa() {
                           {rekeningBedrijven.map((rb) => <option key={rb.id} value={`b:${rb.id}`}>{rb.naam}{rb.btwNummer ? ` (${rb.btwNummer})` : ''}</option>)}
                         </optgroup>
                       )}
-                      {factuurKlanten.length > 0 && (
-                        <optgroup label="Bewaarde klanten">
-                          {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam}{k.btwNummer ? ` (${k.btwNummer})` : ' (particulier)'}</option>)}
+                      {/* Klant met BTW-nummer = bedrijf; zonder = particulier. */}
+                      {factuurKlanten.some((k) => k.btwNummer) && (
+                        <optgroup label="Bedrijven (klanten met BTW-nummer)">
+                          {factuurKlanten.filter((k) => k.btwNummer).map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam} ({k.btwNummer})</option>)}
+                        </optgroup>
+                      )}
+                      {factuurKlanten.some((k) => !k.btwNummer) && (
+                        <optgroup label="Particulieren">
+                          {factuurKlanten.filter((k) => !k.btwNummer).map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}</option>)}
                         </optgroup>
                       )}
                     </select>
@@ -1133,13 +1149,37 @@ export function Kassa() {
                       {rekeningBedrijven.map((rb) => <option key={rb.id} value={`b:${rb.id}`}>{rb.naam}</option>)}
                     </optgroup>
                   )}
-                  {factuurKlanten.length > 0 && (
-                    <optgroup label="Bewaarde klanten">
-                      {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`} style={k.rekeningTeLaat ? { color: '#b91c1c', fontWeight: 700 } : undefined}>{k.rekeningTeLaat ? '⚠ ' : ''}{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}{k.btwNummer ? ` (${k.btwNummer})` : ''}{k.rekeningTeLaat ? ' — rekening open > 1 maand' : ''}</option>)}
+                  {/* Klant met BTW-nummer = bedrijf (komt automatisch bij de bedrijven); zonder = particulier. */}
+                  {factuurKlanten.some((k) => k.btwNummer) && (
+                    <optgroup label="Bedrijven (klanten met BTW-nummer)">
+                      {factuurKlanten.filter((k) => k.btwNummer).map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam} ({k.btwNummer})</option>)}
+                    </optgroup>
+                  )}
+                  {factuurKlanten.some((k) => !k.btwNummer) && (
+                    <optgroup label="Particulieren">
+                      {factuurKlanten.filter((k) => !k.btwNummer).map((k) => <option key={k.id} value={`k:${k.id}`} style={k.rekeningTeLaat ? { color: '#b91c1c', fontWeight: 700 } : undefined}>{k.rekeningTeLaat ? '⚠ ' : ''}{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}{k.rekeningTeLaat ? ' — rekening open > 1 maand' : ''}</option>)}
                     </optgroup>
                   )}
                   <option value="nieuw">+ Nieuwe klant…</option>
                 </select>
+                {/* Bewaarde klant gekozen: e-mail (voor de maandelijkse rekening) meteen aanvulbaar. */}
+                {bon.factuurKlantId && (() => {
+                  const k = factuurKlanten.find((x) => x.id === bon.factuurKlantId);
+                  if (!k) return null;
+                  const huidig = klantEmailBewerk[k.id] ?? k.email ?? '';
+                  return (
+                    <div style={{ flexBasis: '100%', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        value={huidig} type="email" inputMode="email"
+                        onChange={(e) => setKlantEmailBewerk({ ...klantEmailBewerk, [k.id]: e.target.value })}
+                        onBlur={() => bewaarKlantEmail(k.id, huidig)}
+                        placeholder={k.btwNummer ? 'E-mail (optioneel)' : 'E-mail voor de maandelijkse rekening'}
+                        style={{ flex: 1, minWidth: 200, padding: 9, fontSize: 15, borderRadius: 6, border: !k.btwNummer && !huidig.trim() ? '2px solid #f59e0b' : '1px solid #ccc' }}
+                      />
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>{k.btwNummer ? 'Bedrijf: factuur via Scrada/Peppol.' : 'Particulier: de rekening wordt maandelijks per e-mail verstuurd vanuit de kassa.'}</span>
+                    </div>
+                  );
+                })()}
                 {(() => {
                   const k = factuurKlanten.find((x) => x.id === bon.factuurKlantId);
                   if (!k || !k.rekeningTeLaat) return null;
@@ -1161,9 +1201,14 @@ export function Kassa() {
                     <input value={bon.factuurAchternaam ?? ''} onChange={(e) => patchBon(bon.id, { factuurAchternaam: e.target.value })} placeholder="Achternaam *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurAchternaam?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
                     <input value={bon.factuurTelefoon ?? ''} onChange={(e) => patchBon(bon.id, { factuurTelefoon: e.target.value })} placeholder="Telefoonnummer *" inputMode="tel" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurTelefoon?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
                     <input value={bon.factuurAdres ?? ''} onChange={(e) => patchBon(bon.id, { factuurAdres: e.target.value })} placeholder="Adres *" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: bon.factuurAdres?.trim() ? '1px solid #ccc' : '2px solid #f59e0b' }} />
-                    <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
-                    <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} placeholder="E-mail (optioneel)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
-                    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#6b7280' }}>Voor- en achternaam, telefoon en adres zijn verplicht om op rekening te kopen. De klant wordt bewaard in de klantenlijst; de rekening verschijnt bij "Open rekeningen".</div>
+                    <input value={bon.factuurEmail ?? ''} onChange={(e) => patchBon(bon.id, { factuurEmail: e.target.value })} type="email" inputMode="email" placeholder={bon.factuurBtw?.trim() ? 'E-mail (optioneel)' : 'E-mail (voor de maandelijkse rekening)'} style={{ padding: 9, fontSize: 15, borderRadius: 6, border: !bon.factuurBtw?.trim() && !bon.factuurEmail?.trim() ? '2px solid #f59e0b' : '1px solid #ccc' }} />
+                    <input value={bon.factuurBtw ?? ''} onChange={(e) => patchBon(bon.id, { factuurBtw: e.target.value })} placeholder="BTW-nummer (enkel bedrijven)" style={{ padding: 9, fontSize: 15, borderRadius: 6, border: '1px solid #ccc' }} />
+                    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#6b7280' }}>
+                      Voor- en achternaam, telefoon en adres zijn verplicht om op rekening te kopen. De klant wordt bewaard in de klantenlijst; de rekening verschijnt bij "Open rekeningen".
+                      {bon.factuurBtw?.trim()
+                        ? ' Met BTW-nummer wordt dit een bedrijf: de maandfactuur gaat via Scrada/Peppol.'
+                        : ' Particulier: de maandelijkse rekening wordt per e-mail verstuurd vanuit de kassa — vul daarom het e-mailadres in.'}
+                    </div>
                   </div>
                 )}
                 {/* Maandbudget van het gekozen personeelslid: wat er nog beschikbaar is (de server weigert bij overschrijding). */}

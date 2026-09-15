@@ -328,22 +328,41 @@ export class SalesService {
     }
     const rows = await this.prisma.verkoop.findMany({
       where,
-      include: { gebruiker: true, _count: { select: { lijnen: true } } },
+      include: {
+        gebruiker: true, _count: { select: { lijnen: true } },
+        klant: { select: { naam: true, btwNummer: true } }, rekeningBedrijf: { select: { naam: true } }, rekeningLid: { select: { naam: true } },
+        factuur: { select: { id: true, nummer: true, bron: true, betaalstatus: true, betaalwijze: true, betaaldBedrag: true, totaalIncl: true, scradaStatus: true } },
+      },
       orderBy: { datum: 'desc' },
       take: 200,
     });
-    return rows.map((v) => ({
-      id: v.id,
-      datum: v.datum,
-      totaal: Number(v.totaal),
-      betaalwijze: v.betaalwijze,
-      kanaal: v.kanaal,
-      leverwijze: v.leverwijze,
-      verkoper: v.gebruiker?.naam ?? null,
-      aantalLijnen: v._count.lijnen,
-      afgesloten: v.afgesloten,
-      geannuleerd: v.geannuleerd,
-    }));
+    return rows.map((v) => {
+      // Op rekening = niet betaald (geen betaalwijze) en op naam (bedrijf of klant).
+      const opRekening = !v.betaalwijze && !!(v.rekeningBedrijfId || v.klantId);
+      const klantNaam = v.rekeningBedrijf ? `${v.rekeningBedrijf.naam}${v.rekeningLid ? ' · ' + v.rekeningLid.naam : ''}` : v.klant?.naam ?? null;
+      return {
+        id: v.id,
+        datum: v.datum,
+        totaal: Number(v.totaal),
+        betaalwijze: v.betaalwijze,
+        kanaal: v.kanaal,
+        leverwijze: v.leverwijze,
+        verkoper: v.gebruiker?.naam ?? null,
+        aantalLijnen: v._count.lijnen,
+        afgesloten: v.afgesloten,
+        geannuleerd: v.geannuleerd,
+        // Factuur/rekening-status (wordt bijgewerkt zodra de bundelfactuur of de betaling er is).
+        opRekening,
+        klantNaam,
+        factuurGewenst: v.factuurGewenst,
+        factuur: v.factuur ? {
+          id: v.factuur.id, nummer: v.factuur.nummer, bron: v.factuur.bron,
+          betaalstatus: v.factuur.betaalstatus, betaalwijze: v.factuur.betaalwijze,
+          betaald: Number(v.factuur.betaaldBedrag), totaal: Number(v.factuur.totaalIncl),
+          naarScrada: v.factuur.scradaStatus !== 'NIET_NODIG', inScrada: v.factuur.scradaStatus === 'VERSTUURD',
+        } : null,
+      };
+    });
   }
 
   // Annuleert (schrapt) een verkoop: telt niet meer mee in de dagafsluiting of

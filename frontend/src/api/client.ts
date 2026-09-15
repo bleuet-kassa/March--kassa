@@ -92,6 +92,9 @@ export type VerkoopKort = {
   betaalwijze: Betaalwijze | null; kanaal: string; leverwijze: string | null;
   verkoper: string | null; aantalLijnen: number;
   afgesloten?: boolean; geannuleerd?: boolean;
+  // Op rekening / factuur: status die meebeweegt (nog te factureren → factuur X → betaald).
+  opRekening?: boolean; klantNaam?: string | null; factuurGewenst?: boolean;
+  factuur?: { id: string; nummer: string; bron: string; betaalstatus: string; betaalwijze: string | null; betaald: number; totaal: number; naarScrada: boolean; inScrada: boolean } | null;
 };
 export async function getVerkopen(datum?: string): Promise<VerkoopKort[]> {
   const q = datum ? `?datum=${encodeURIComponent(datum)}` : '';
@@ -642,7 +645,8 @@ export async function scradaVerstuurDagen(): Promise<{ modus: string; gevonden: 
 
 // --- Verkoopfacturen uit de kassa (per ticket / maandfactuur per bedrijf) -> Scrada concept ---
 // prefix leeg = nummering <jaar><volgnummer>, bv. 20260001; volgend/voorbeeld = eerstvolgend nummer (alleen-lezen).
-export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number; jaar?: string; volgend?: number; voorbeeld?: string };
+// iban/mailTekst: voor de rekening die particulieren per e-mail krijgen (niet via Scrada/Peppol).
+export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number; iban?: string; mailTekst?: string; jaar?: string; volgend?: number; voorbeeld?: string };
 export type Verkoopfactuur = {
   id: string; nummer: string; datum: string; vervaldatum: string | null; bron: 'TICKET' | 'MAANDFACTUUR' | string; periode: string | null;
   klantNaam: string; klantBtw: string | null; totaalExcl: number; totaalBtw: number; totaalIncl: number;
@@ -650,7 +654,22 @@ export type Verkoopfactuur = {
   scradaStatus: string; scradaRef: string | null; scradaVerstuurdOp: string | null; scradaFout: string | null;
   correctieStatus: string; correctieFout: string | null; aantalTickets: number;
   samenvatten: boolean; omschrijving: string | null; // enkel totalen per BTW-tarief naar Scrada
+  klantEmail?: string | null; gemaildOp?: string | null; gemaildNaar?: string | null; // rekening per e-mail (particulieren)
 };
+// Klantgegevens bijwerken vanuit de kassa (e-mail voor de maandelijkse rekening, telefoon, adres).
+export async function zetKlantGegevens(id: string, input: { email?: string | null; telefoon?: string | null; adres?: string | null }): Promise<FactuurKlant> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/klanten/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function getMailStatus(): Promise<{ geconfigureerd: boolean; afzender: string | null; host: string | null }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/mail-status`));
+}
+// Rekening per e-mail naar de klant (particulier, niet via Scrada).
+export async function mailRekening(id: string, naar?: string): Promise<{ ok: true; naar: string; nummer: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/${id}/mail`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naar }) }));
+}
+export async function mailOpenRekeningen(): Promise<{ verstuurd: number; resultaten: { nummer: string; naam: string; naar?: string; fout?: string }[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/mail-rekeningen`, { method: 'POST' }));
+}
 export type FactuurOverzicht = { openstaand: number; openstaandBedrag: number; teVersturen: number; ticketsZonderFactuur: number; teFactureren?: number; teFacturerenBedrag?: number };
 // Te factureren: per klant/bedrijf de open aankopen op rekening die nog in geen factuur zitten.
 export type TeFactureren = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; aantal: number; totaal: number; oudste: string; laatste: string; naarScrada: boolean };

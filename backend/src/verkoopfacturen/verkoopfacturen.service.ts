@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScradaService } from '../scrada/scrada.service';
 import { ScradaDagboekService } from '../scrada/scrada.dagboek.service';
+import { MailService } from '../mail/mail.service';
 
 // ---------------------------------------------------------------------------
 //  Verkoopfacturen uit de kassa.
@@ -31,7 +32,8 @@ const BTW_TYPE_BE: Record<string, string> = {
 };
 const SLEUTEL = 'factuur.instellingen';
 
-export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number };
+// iban/mailTekst: voor de rekening die particulieren per e-mail krijgen (niet via Scrada).
+export type FactuurInstellingen = { prefix: string; verkoopdagboek: string; vervaldagen: number; iban: string; mailTekst: string };
 export type FactuurLijn = {
   datum: string; verkoopId: string; omschrijving: string; lid?: string | null;
   aantal: number; kg: boolean; eenheidsprijsIncl: number; btwPct: number; btwBedrag: number; totaalIncl: number;
@@ -56,7 +58,7 @@ type VerkoopVol = Prisma.VerkoopGetPayload<{ include: typeof VERKOOP_INCLUDE }>;
 @Injectable()
 export class VerkoopfacturenService {
   private readonly log = new Logger(VerkoopfacturenService.name);
-  constructor(private prisma: PrismaService, private scrada: ScradaService, private dagboek: ScradaDagboekService) {}
+  constructor(private prisma: PrismaService, private scrada: ScradaService, private dagboek: ScradaDagboekService, private mail: MailService) {}
 
   // --- instellingen -----------------------------------------------------------
 
@@ -65,7 +67,7 @@ export class VerkoopfacturenService {
   private huidigJaar() { return brusselDatum(new Date()).slice(0, 4); }
 
   async instellingen(): Promise<FactuurInstellingen & { jaar: string; volgend: number; voorbeeld: string }> {
-    const basis: FactuurInstellingen = { prefix: '', verkoopdagboek: 'KASSA', vervaldagen: 30 };
+    const basis: FactuurInstellingen = { prefix: '', verkoopdagboek: 'KASSA', vervaldagen: 30, iban: '', mailTekst: '' };
     const i = await this.prisma.instelling.findUnique({ where: { sleutel: SLEUTEL } });
     let inst = basis;
     if (i?.waarde) { try { inst = { ...basis, ...JSON.parse(i.waarde) }; } catch { inst = basis; } }
@@ -81,6 +83,8 @@ export class VerkoopfacturenService {
       prefix: (input.prefix ?? huidig.prefix).trim(),
       verkoopdagboek: (input.verkoopdagboek ?? huidig.verkoopdagboek).trim(),
       vervaldagen: Math.max(0, Math.round(Number(input.vervaldagen ?? huidig.vervaldagen) || 30)),
+      iban: (input.iban ?? huidig.iban ?? '').trim(),
+      mailTekst: (input.mailTekst ?? huidig.mailTekst ?? '').trim(),
     };
     await this.prisma.instelling.upsert({ where: { sleutel: SLEUTEL }, create: { sleutel: SLEUTEL, waarde: JSON.stringify(nieuw) }, update: { waarde: JSON.stringify(nieuw) } });
     if (input.volgendeVolgnummer != null) {
@@ -313,6 +317,84 @@ export class VerkoopfacturenService {
     });
   }
 
+  // Klantgegevens bijwerken vanuit de kassa (e-mail voor de maandelijkse rekening, telefoon, adres).
+  async zetKlantGegevens(id: string, input: { email?: string | null; telefoon?: string | null; adres?: string | null }) {
+    const k = await this.prisma.klant.findUnique({ where: { id } });
+    if (!k) throw new NotFoundException('Klant niet gevonden.');
+    const email = input.email !== undefined ? (input.email?.trim() || null) : k.email;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('Geen geldig e-mailadres.');
+    const bij = await this.prisma.klant.update({
+      where: { id },
+      data: {
+        email,
+        telefoon: input.telefoon !== undefined ? (input.telefoon?.trim() || null) : k.telefoon,
+        adres: input.adres !== undefined ? (input.adres?.trim() || null) : k.adres,
+      },
+    });
+    return { id: bij.id, naam: bij.naam, btwNummer: bij.btwNummer, email: bij.email, adres: bij.adres, telefoon: bij.telefoon };
+  }
+
+  // --- rekening per e-mail (particulieren: niet via Scrada/Peppol) --------------------------
+  mailStatus() { return this.mail.status(); }
+
+  private rekeningHtml(f: { nummer: string; datum: Date; vervaldatum: Date | null; periode: string | null; klantNaam: string; klantAdres: string | null; lijnen: unknown; perBtw: unknown; totaalIncl: Prisma.Decimal | number; betaaldBedrag: Prisma.Decimal | number; betaalstatus: string }, inst: FactuurInstellingen, winkel: { naam: string; btwNummer: string | null; adres: string | null } | null) {
+    const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+    const eur = (n: number) => '€ ' + n.toFixed(2).replace('.', ',');
+    const dNl = (d: Date | string) => new Date(d).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' });
+    const lijnen = (f.lijnen as FactuurLijn[]) ?? [];
+    const perBtw = (f.perBtw as PerBtw[]) ?? [];
+    const rest = r2(Number(f.totaalIncl) - Number(f.betaaldBedrag));
+    const rijen = lijnen.map((l) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;white-space:nowrap">${dNl(l.datum)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee">${esc(l.omschrijving)}${l.lid ? ` <span style="color:#6b7280">(${esc(l.lid)})</span>` : ''}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${l.kg ? l.aantal.toFixed(3).replace('.', ',') + ' kg' : l.aantal}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${eur(l.totaalIncl)}</td></tr>`).join('');
+    const btwRijen = perBtw.map((p) => `<tr><td colspan="3" style="padding:2px 8px;text-align:right;color:#6b7280">BTW ${p.percentage} % (op ${eur(p.excl)})</td><td style="padding:2px 8px;text-align:right;color:#6b7280">${eur(p.btw)}</td></tr>`).join('');
+    const betaalBlok = f.betaalstatus === 'BETAALD'
+      ? `<p style="color:#166534;font-weight:bold">Deze rekening is volledig betaald. Bedankt!</p>`
+      : `<p><strong>Te betalen: ${eur(rest)}</strong>${Number(f.betaaldBedrag) > 0 ? ` (reeds betaald: ${eur(Number(f.betaaldBedrag))})` : ''}${f.vervaldatum ? `, graag vóór ${dNl(f.vervaldatum)}` : ''}.</p>
+         <p>U kunt betalen aan de kassa (Bancontact, cash, cadeaubon)${inst.iban ? ` of per overschrijving op <strong>${esc(inst.iban)}</strong> met mededeling <strong>${esc(f.nummer)}</strong>` : ''}.</p>`;
+    const tekst = inst.mailTekst ? `<p>${esc(inst.mailTekst).replace(/\n/g, '<br>')}</p>` : '';
+    return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;max-width:640px">
+      <h2 style="margin:0 0 4px">${esc(winkel?.naam ?? 'Marché')}</h2>
+      <div style="color:#6b7280;font-size:12px;margin-bottom:16px">${esc(winkel?.adres ?? '')}${winkel?.btwNummer ? ` · ${esc(winkel.btwNummer)}` : ''}</div>
+      <h3 style="margin:0 0 8px">Rekening ${esc(f.nummer)}${f.periode ? ` — ${esc(f.periode)}` : ''}</h3>
+      <div style="margin-bottom:12px">${esc(f.klantNaam)}${f.klantAdres ? `<br>${esc(f.klantAdres)}` : ''}<br><span style="color:#6b7280">Datum: ${dNl(f.datum)}</span></div>
+      <p>Beste ${esc(f.klantNaam)},</p>
+      <p>Hierbij het overzicht van uw aankopen op rekening.</p>
+      ${tekst}
+      <table style="border-collapse:collapse;width:100%;font-size:13px">
+        <thead><tr style="background:#f3f4f6"><th style="padding:6px 8px;text-align:left">Datum</th><th style="padding:6px 8px;text-align:left">Omschrijving</th><th style="padding:6px 8px;text-align:right">Aantal</th><th style="padding:6px 8px;text-align:right">Bedrag</th></tr></thead>
+        <tbody>${rijen}${btwRijen}
+        <tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold;border-top:2px solid #111">Totaal incl. BTW</td><td style="padding:8px;text-align:right;font-weight:bold;border-top:2px solid #111">${eur(Number(f.totaalIncl))}</td></tr></tbody>
+      </table>
+      ${betaalBlok}
+      <p style="color:#6b7280;font-size:12px">Met vriendelijke groeten,<br>${esc(winkel?.naam ?? 'Marché')}</p>
+    </div>`;
+  }
+
+  // Rekening per e-mail naar de klant (particulier: niet via Scrada). Kan ook opnieuw.
+  async mailRekening(id: string, naarOverride?: string) {
+    const f = await this.prisma.verkoopfactuur.findUnique({ where: { id }, include: { klant: { select: { email: true } } } });
+    if (!f) throw new NotFoundException('Factuur niet gevonden.');
+    const naar = (naarOverride?.trim() || f.klantEmail || f.klant?.email || '').trim();
+    if (!naar) throw new BadRequestException(`Geen e-mailadres bekend voor ${f.klantNaam}. Vul het in bij de klant (kassa → op rekening) en probeer opnieuw.`);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(naar)) throw new BadRequestException('Geen geldig e-mailadres.');
+    const [inst, winkel] = await Promise.all([this.instellingen(), this.prisma.onderneming.findFirst({ where: { isImporteur: false }, select: { naam: true, btwNummer: true, adres: true } })]);
+    const html = this.rekeningHtml(f, inst, winkel);
+    const onderwerp = `${winkel?.naam ?? 'Marché'} — rekening ${f.nummer}${f.periode ? ` (${f.periode})` : ''}`;
+    await this.mail.verstuur({ naar, onderwerp, html });
+    await this.prisma.verkoopfactuur.update({ where: { id }, data: { gemaildOp: new Date(), gemaildNaar: naar, ...(f.klantEmail ? {} : { klantEmail: naar }) } });
+    return { ok: true, naar, nummer: f.nummer };
+  }
+
+  // Alle nog niet gemailde rekeningen van particulieren (niet naar Scrada) in één keer.
+  async mailOpenRekeningen() {
+    const rows = await this.prisma.verkoopfactuur.findMany({ where: { scradaStatus: 'NIET_NODIG', gemaildOp: null }, orderBy: { datum: 'asc' }, select: { id: true, nummer: true, klantNaam: true } });
+    const uit: { nummer: string; naam: string; naar?: string; fout?: string }[] = [];
+    for (const r of rows) {
+      try { const m = await this.mailRekening(r.id); uit.push({ nummer: r.nummer, naam: r.klantNaam, naar: m.naar }); }
+      catch (e) { uit.push({ nummer: r.nummer, naam: r.klantNaam, fout: e instanceof Error ? e.message : 'fout' }); }
+    }
+    return { verstuurd: uit.filter((u) => u.naar).length, resultaten: uit };
+  }
+
   // --- open rekeningen: betalingen ontvangen aan de kassa (alle medewerkers) ----------
   // Een rekening/factuur wordt betaald met echte betaalwijzen (nooit opnieuw "op
   // rekening"). De betaling komt op de dagafsluiting van vandaag (+ betaalwijze,
@@ -424,6 +506,7 @@ export class VerkoopfacturenService {
       scradaStatus: f.scradaStatus, scradaRef: f.scradaRef, scradaVerstuurdOp: f.scradaVerstuurdOp, scradaFout: f.scradaFout,
       correctieStatus: f.correctieStatus, correctieFout: f.correctieFout, aantalTickets: f._count.verkopen,
       samenvatten: f.samenvatten, omschrijving: f.omschrijving,
+      klantEmail: f.klantEmail, gemaildOp: f.gemaildOp, gemaildNaar: f.gemaildNaar,
     }));
   }
   async detail(id: string) {

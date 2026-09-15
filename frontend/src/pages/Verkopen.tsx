@@ -19,6 +19,7 @@ function betaalNaam(b?: string | null): string {
     case 'QR': return 'QR-code';
     case 'EIGEN_REKENING': return 'Eigen rekening';
     case 'ONLINE': return 'Online';
+    case 'CADEAUBON': return 'Cadeaubon';
     default: return b ?? '-';
   }
 }
@@ -165,8 +166,23 @@ export function Verkopen() {
                     {BETAALWIJZEN.map((b) => <option key={b} value={b}>{betaalNaam(b)}</option>)}
                   </select>
                 ) : (
-                  <span style={{ textDecoration: v.geannuleerd ? 'line-through' : 'none' }}>{betaalNaam(v.betaalwijze)}</span>
+                  <span style={{ textDecoration: v.geannuleerd ? 'line-through' : 'none' }}>{v.opRekening ? 'Op rekening' : betaalNaam(v.betaalwijze)}</span>
                 )}
+                {/* Factuur/rekening-status: verschijnt meteen en wordt bijgewerkt zodra de (bundel)factuur bestaat of betaald is. */}
+                {(v.opRekening || v.factuur || v.factuurGewenst) && !v.geannuleerd && (() => {
+                  const f = v.factuur;
+                  const naam = v.klantNaam ? `${v.klantNaam} · ` : '';
+                  if (!f) return <div style={{ fontSize: 11, color: '#b45309' }}>{naam}{v.opRekening ? 'nog te factureren' : 'factuur volgt'}</div>;
+                  const soort = f.naarScrada ? 'factuur' : 'rekening';
+                  const status = f.betaalstatus === 'BETAALD'
+                    ? `betaald${f.betaalwijze ? ` (${f.betaalwijze.split('+').map((b) => betaalNaam(b)).join(' + ')})` : ''}`
+                    : f.betaald > 0.005 ? `€ ${f.betaald.toFixed(2)} van € ${f.totaal.toFixed(2)} betaald` : 'nog te betalen';
+                  return (
+                    <div style={{ fontSize: 11, color: f.betaalstatus === 'BETAALD' ? '#166534' : '#b45309' }} title={f.bron === 'MAANDFACTUUR' ? 'Gebundelde maandfactuur/rekening' : 'Factuur voor dit ticket'}>
+                      {naam}{soort} <strong>{f.nummer}</strong> · {status}{f.inScrada ? ' · in Scrada' : ''}
+                    </div>
+                  );
+                })()}
               </td>
               <td style={{ padding: 6 }}>{v.verkoper ?? '-'}</td>
               <td style={{ padding: 6, textAlign: 'right' }}>{v.aantalLijnen}</td>

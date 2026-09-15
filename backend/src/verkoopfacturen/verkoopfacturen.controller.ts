@@ -38,6 +38,32 @@ export class VerkoopfacturenController {
     return this.facturen.registreerBetaling({ sleutel: body?.sleutel, betalingen: body?.betalingen ?? [], gebruikerId: req.user?.sub });
   }
 
+  // PUT /verkoopfacturen/klanten/:id { email, telefoon, adres } -> klantgegevens bijwerken vanuit de kassa (alle medewerkers)
+  @Put('klanten/:id')
+  zetKlant(@Param('id') id: string, @Body() body: { email?: string | null; telefoon?: string | null; adres?: string | null }) {
+    return this.facturen.zetKlantGegevens(id, body ?? {});
+  }
+
+  // GET /verkoopfacturen/mail-status -> is e-mail (SMTP) ingesteld?
+  @Get('mail-status')
+  mailStatus() {
+    return this.facturen.mailStatus();
+  }
+
+  // POST /verkoopfacturen/mail-rekeningen -> alle nog niet gemailde rekeningen (particulieren) versturen
+  @Post('mail-rekeningen')
+  @Rollen('BEHEER', 'BEHEERDER')
+  mailRekeningen() {
+    return this.facturen.mailOpenRekeningen();
+  }
+
+  // POST /verkoopfacturen/:id/mail { naar? } -> deze rekening per e-mail naar de klant
+  @Post(':id/mail')
+  @Rollen('BEHEER', 'BEHEERDER')
+  mailRekening(@Param('id') id: string, @Body() body: { naar?: string }) {
+    return this.facturen.mailRekening(id, body?.naar);
+  }
+
   // GET /verkoopfacturen/te-factureren -> per klant/bedrijf de open aankopen die nog in geen factuur zitten
   @Get('te-factureren')
   teFactureren() {

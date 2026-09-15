@@ -603,6 +603,9 @@ model Verkoopfactuur {
   omschrijving      String?
   // Betalingen van de rekening aan de kassa (Bancontact, cash, ...): som van RekeningBetaling.
   betaaldBedrag     Decimal  @default(0) @db.Decimal(10, 2)
+  // Rekening per e-mail verstuurd vanuit de kassa (particulieren: niet via Scrada/Peppol).
+  gemaildOp         DateTime?
+  gemaildNaar       String?
   createdAt         DateTime @default(now())
 
   verkopen          Verkoop[]
