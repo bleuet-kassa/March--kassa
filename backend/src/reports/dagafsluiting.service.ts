@@ -37,6 +37,16 @@ export class DagafsluitingService {
     return this.prisma.onderneming.findFirst({ where: { isImporteur: false } });
   }
 
+  // Betalingen van openstaande rekeningen die nog in geen dagafsluiting zitten.
+  private async openRekeningBetalingen(tx?: Prisma.TransactionClient) {
+    const rows = await (tx ?? this.prisma).rekeningBetaling.findMany({ where: { afgesloten: false }, orderBy: { datum: 'asc' } });
+    return rows.map((b) => ({
+      id: b.id,
+      bedrag: Number(b.bedrag),
+      betalingen: ((b.betalingen as unknown) as { betaalwijze: string; bedrag: number }[]) ?? [],
+    }));
+  }
+
   private openVerkopen(locatieId: string) {
     return this.prisma.verkoop.findMany({
       where: { locatieId, kanaal: 'KASSA', afgesloten: false, geannuleerd: false },
@@ -80,6 +90,9 @@ export class DagafsluitingService {
       verkoper: string | null;
       onderneming: { naam: string; ondernemingsnummer: string; btwNummer: string | null; adres: string | null } | null;
       locatie: string;
+      // Betalingen van openstaande rekeningen aan de kassa in deze periode:
+      // +bedrag op de betaalwijze, -bedrag op "op rekening" (totaal blijft gelijk).
+      rekeningBetalingen?: { bedrag: number; betalingen: { betaalwijze: string; bedrag: number }[] }[];
     },
   ) {
     const perBetaalwijze: Record<string, number> = {};
@@ -126,6 +139,21 @@ export class DagafsluitingService {
       }
     }
 
+    // Betalingen van openstaande rekeningen: verschuiving tussen betaalwijzen
+    // (+ op de gebruikte betaalwijze, - op "op rekening"); de omzet/BTW wijzigt niet.
+    const rb = meta.rekeningBetalingen ?? [];
+    let rbTotaal = 0;
+    const rbPerBetaalwijze: Record<string, number> = {};
+    for (const b of rb) {
+      rbTotaal += Number(b.bedrag);
+      for (const d of b.betalingen) {
+        perBetaalwijze[d.betaalwijze] = r2((perBetaalwijze[d.betaalwijze] ?? 0) + Number(d.bedrag));
+        rbPerBetaalwijze[d.betaalwijze] = r2((rbPerBetaalwijze[d.betaalwijze] ?? 0) + Number(d.bedrag));
+      }
+      perBetaalwijze['OP_REKENING'] = r2((perBetaalwijze['OP_REKENING'] ?? 0) - Number(b.bedrag));
+    }
+    if (rb.length && Math.abs(perBetaalwijze['OP_REKENING'] ?? 0) < 0.005) delete perBetaalwijze['OP_REKENING'];
+
     const perBtwTarief = [...perBtw.values()]
       .sort((a, b) => a.percentage - b.percentage)
       .map((t) => ({ percentage: t.percentage, maatstaf: r2(t.maatstaf), btw: r2(t.btw) }));
@@ -151,6 +179,8 @@ export class DagafsluitingService {
       },
       // Eigen gebruik: apart vermeld, telt niet mee in de dagontvangsten hierboven.
       eigenGebruik: { aantal: eigenAantal, incl: r2(eigenIncl) },
+      // Betalingen van openstaande rekeningen (verschuiving van "op rekening" naar de betaalwijze).
+      rekeningBetalingen: { aantal: rb.length, totaal: r2(rbTotaal), perBetaalwijze: rbPerBetaalwijze },
       facturen,
       facturenTotaal: { aantal: facturen.length, excl: r2(facExcl), btw: r2(facBtw), incl: r2(facIncl) },
       algemeenTotaalIncl: r2(ontvIncl + facIncl),
@@ -161,7 +191,9 @@ export class DagafsluitingService {
   async overzicht() {
     const [locatie, onderneming] = await Promise.all([this.winkelLocatie(), this.winkelOnderneming()]);
     const verkopen = await this.openVerkopen(locatie.id);
+    const rekeningBetalingen = await this.openRekeningBetalingen();
     return this.bouwRapport(verkopen, {
+      rekeningBetalingen,
       volgnummer: null,
       vanaf: verkopen[0]?.datum ?? null,
       tot: new Date(),
@@ -190,7 +222,10 @@ export class DagafsluitingService {
       const vanaf = verkopen[0]?.datum ?? nu;
       const volgnummer = (await tx.dagafsluiting.count()) + 1;
 
+      // Betalingen van openstaande rekeningen die in deze afsluiting meegaan.
+      const rekeningBetalingen = await this.openRekeningBetalingen(tx);
       const rapport = this.bouwRapport(verkopen, {
+        rekeningBetalingen,
         volgnummer,
         vanaf,
         tot: nu,
@@ -221,6 +256,14 @@ export class DagafsluitingService {
       if (verkopen.length) {
         await tx.verkoop.updateMany({
           where: { id: { in: verkopen.map((v) => v.id) } },
+          data: { afgesloten: true, dagafsluitingId: afsluiting.id },
+        });
+      }
+
+      // De meegenomen rekeningbetalingen vastzetten op deze afsluiting.
+      if (rekeningBetalingen.length) {
+        await tx.rekeningBetaling.updateMany({
+          where: { id: { in: rekeningBetalingen.map((b) => b.id) } },
           data: { afgesloten: true, dagafsluitingId: afsluiting.id },
         });
       }

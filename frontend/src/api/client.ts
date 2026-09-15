@@ -664,6 +664,17 @@ export type FactuurKlant = { id: string; naam: string; btwNummer: string | null;
 export async function getFactuurKlanten(): Promise<FactuurKlant[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/klanten`));
 }
+
+// --- Open rekeningen (alle medewerkers): openstaand per klant + betaling ontvangen aan de kassa ---
+export type OpenRekeningItem = { id: string; nummer: string; datum: string; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean };
+export type OpenRekening = { sleutel: string; naam: string; btwNummer: string | null; open: number; items: OpenRekeningItem[] };
+export async function getOpenRekeningen(): Promise<OpenRekening[]> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/open-rekeningen`));
+}
+// Betaling van een rekening: één of twee echte betaalwijzen (nooit opnieuw "op rekening"); oudste-eerst toegewezen.
+export async function registreerRekeningBetaling(sleutel: string, betalingen: { betaalwijze: string; bedrag: number }[]): Promise<{ ok: true; totaal: number; toegewezen: { factuurId: string; nummer: string; bedrag: number }[]; restNaBetaling: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/betaling`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel, betalingen }) }));
+}
 export async function getFactuurInstellingen(): Promise<FactuurInstellingen> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/instellingen`));
 }

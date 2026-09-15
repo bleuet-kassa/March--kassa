@@ -11,6 +11,7 @@ import { Facturen } from './pages/Facturen';
 import { Boekhouding } from './pages/Boekhouding';
 import { Rapporten } from './pages/Rapporten';
 import { Cadeaubonnen } from './pages/Cadeaubonnen';
+import { OpenRekeningen } from './pages/OpenRekeningen';
 import { Instellingen } from './pages/Instellingen';
 import { Kortingen } from './pages/Kortingen';
 import { WebshopAssortiment } from './pages/WebshopAssortiment';
@@ -131,6 +132,7 @@ function StaffApp() {
         <Link to="/kassa/verkopen">Verkopen</Link>
         <Link to="/kassa/beheer">Beheer</Link>
         <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>
+        <Link to="/kassa/open-rekeningen">Open rekeningen</Link>
         {isAdmin && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
         {isAdmin && <Link to="/kassa/bestellingen">Bestellingen</Link>}
         {isAdmin && <Link to="/kassa/kortingen">Kortingen</Link>}
@@ -175,6 +177,7 @@ function StaffApp() {
           <Route path="dagafsluiting" element={isAdmin ? <Dagafsluiting /> : <div>Enkel voor beheerders.</div>} />
           <Route path="beheer" element={<Beheer />} />
           <Route path="cadeaubonnen" element={<Cadeaubonnen />} />
+          <Route path="open-rekeningen" element={<OpenRekeningen />} />
           <Route path="facturen" element={isAdmin ? <Facturen /> : <div>Enkel voor beheerders.</div>} />
           <Route path="boekhouding" element={isAdmin ? <Boekhouding /> : <div>Enkel voor beheerders.</div>} />
           <Route path="rapporten" element={isAdmin ? <Rapporten /> : <div>Enkel voor beheerders.</div>} />

@@ -599,7 +599,30 @@ model Verkoopfactuur {
   // Weergave naar Scrada: enkel totalen per BTW-tarief (met eigen omschrijving) i.p.v. alle productlijnen.
   samenvatten       Boolean  @default(false)
   omschrijving      String?
+  // Betalingen van de rekening aan de kassa (Bancontact, cash, ...): som van RekeningBetaling.
+  betaaldBedrag     Decimal  @default(0) @db.Decimal(10, 2)
   createdAt         DateTime @default(now())
 
   verkopen          Verkoop[]
+  betalingen        RekeningBetaling[]
+}
+
+// Betaling van een openstaande rekening/factuur aan de kassa (bv. op het einde
+// van de maand): met echte betaalwijzen (nooit opnieuw "op rekening"). Komt op
+// de dagafsluiting van die dag als +bedrag op de betaalwijze en -bedrag op
+// "op rekening", zodat dagontvangsten en het Scrada-dagboek kloppen.
+model RekeningBetaling {
+  id              String         @id @default(cuid())
+  factuur         Verkoopfactuur @relation(fields: [factuurId], references: [id], onDelete: Cascade)
+  factuurId       String
+  datum           DateTime       @default(now())
+  bedrag          Decimal        @db.Decimal(10, 2)
+  betalingen      Json           // [{ betaalwijze, bedrag }] (max. 2)
+  gebruikerId     String?
+  afgesloten      Boolean        @default(false) // meegenomen in een dagafsluiting
+  dagafsluitingId String?
+  createdAt       DateTime       @default(now())
+
+  @@index([factuurId])
+  @@index([afgesloten])
 }

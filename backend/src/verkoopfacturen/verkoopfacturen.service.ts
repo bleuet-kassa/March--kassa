@@ -236,6 +236,71 @@ export class VerkoopfacturenService {
     return rows.map((k) => ({ id: k.id, naam: k.naam, btwNummer: k.btwNummer, email: k.email, adres: k.adres }));
   }
 
+  // --- open rekeningen: betalingen ontvangen aan de kassa (alle medewerkers) ----------
+  // Een rekening/factuur wordt betaald met echte betaalwijzen (nooit opnieuw "op
+  // rekening"). De betaling komt op de dagafsluiting van vandaag (+ betaalwijze,
+  // - op rekening) en wordt oudste-eerst toegewezen aan de open posten van de klant.
+  private static readonly BETAALBAAR = new Set(['CASH', 'BANCONTACT', 'KAART', 'OVERSCHRIJVING', 'QR', 'CADEAUBON']);
+
+  private groepSleutel(f: { rekeningBedrijfId: string | null; klantId: string | null; id: string }) {
+    return f.rekeningBedrijfId ? `b:${f.rekeningBedrijfId}` : f.klantId ? `k:${f.klantId}` : `f:${f.id}`;
+  }
+
+  async openRekeningen() {
+    const rows = await this.prisma.verkoopfactuur.findMany({ where: { betaalstatus: 'OPENSTAAND' }, orderBy: { datum: 'asc' } });
+    type Groep = { sleutel: string; naam: string; btwNummer: string | null; open: number; items: { id: string; nummer: string; datum: Date; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean }[] };
+    const groepen = new Map<string, Groep>();
+    for (const f of rows) {
+      const rest = r2(Number(f.totaalIncl) - Number(f.betaaldBedrag));
+      if (rest <= 0.005) continue;
+      const sleutel = this.groepSleutel(f);
+      const g = groepen.get(sleutel) ?? { sleutel, naam: f.klantNaam, btwNummer: f.klantBtw, open: 0, items: [] };
+      g.open = r2(g.open + rest);
+      g.items.push({ id: f.id, nummer: f.nummer, datum: f.datum, bron: f.bron, periode: f.periode, totaal: Number(f.totaalIncl), betaald: Number(f.betaaldBedrag), rest, naarScrada: f.scradaStatus !== 'NIET_NODIG' });
+      groepen.set(sleutel, g);
+    }
+    return [...groepen.values()].sort((a, b) => a.naam.localeCompare(b.naam, 'nl'));
+  }
+
+  async registreerBetaling(input: { sleutel: string; betalingen: { betaalwijze: string; bedrag: number }[]; gebruikerId?: string }) {
+    const betalingen = (input.betalingen ?? []).map((b) => ({ betaalwijze: String(b.betaalwijze ?? '').toUpperCase(), bedrag: r2(Number(b.bedrag) || 0) })).filter((b) => b.bedrag !== 0);
+    if (!betalingen.length || betalingen.length > 2) throw new BadRequestException('Geef één of twee betaalwijzen met een bedrag.');
+    for (const b of betalingen) {
+      if (!VerkoopfacturenService.BETAALBAAR.has(b.betaalwijze)) throw new BadRequestException(`Betaalwijze ${b.betaalwijze} kan niet: een rekening kan niet opnieuw op rekening gezet worden.`);
+      if (b.bedrag <= 0) throw new BadRequestException('Elk bedrag moet groter zijn dan 0.');
+    }
+    const totaal = r2(betalingen.reduce((s, b) => s + b.bedrag, 0));
+    const groep = (await this.openRekeningen()).find((g) => g.sleutel === input.sleutel);
+    if (!groep) throw new NotFoundException('Geen openstaande rekening gevonden voor deze klant.');
+    if (totaal > groep.open + 0.005) throw new BadRequestException(`Het bedrag (€ ${totaal.toFixed(2)}) is hoger dan het openstaande (€ ${groep.open.toFixed(2)}).`);
+
+    const toegewezen: { factuurId: string; nummer: string; bedrag: number }[] = [];
+    await this.prisma.$transaction(async (tx) => {
+      let over = totaal;
+      for (const item of groep.items) {
+        if (over <= 0.005) break;
+        const deel = r2(Math.min(item.rest, over));
+        over = r2(over - deel);
+        // Deelbetalingen evenredig verdelen over de betaalwijzen (laatste krijgt het restje).
+        const verdeling = betalingen.map((b) => ({ betaalwijze: b.betaalwijze, bedrag: r2((b.bedrag * deel) / totaal) }));
+        const somV = r2(verdeling.reduce((s, v) => s + v.bedrag, 0));
+        verdeling[verdeling.length - 1].bedrag = r2(verdeling[verdeling.length - 1].bedrag + (deel - somV));
+        await tx.rekeningBetaling.create({ data: { factuurId: item.id, bedrag: new Prisma.Decimal(deel), betalingen: verdeling as unknown as Prisma.InputJsonValue, gebruikerId: input.gebruikerId ?? null } });
+        const nieuwBetaald = r2(item.betaald + deel);
+        const volledig = nieuwBetaald >= item.totaal - 0.005;
+        await tx.verkoopfactuur.update({
+          where: { id: item.id },
+          data: {
+            betaaldBedrag: new Prisma.Decimal(nieuwBetaald),
+            ...(volledig ? { betaalstatus: 'BETAALD', betaaldOp: new Date(), betaalwijze: betalingen.map((b) => b.betaalwijze).join('+') } : {}),
+          },
+        });
+        toegewezen.push({ factuurId: item.id, nummer: item.nummer, bedrag: deel });
+      }
+    });
+    return { ok: true, totaal, toegewezen, restNaBetaling: r2(groep.open - totaal) };
+  }
+
   // --- lijst / status ---------------------------------------------------------------
 
   async lijst() {

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Req } from '@nestjs/common';
 import { VerkoopfacturenService, type FactuurInstellingen } from './verkoopfacturen.service';
 import { Rollen } from '../auth/auth.guard';
 
@@ -23,6 +23,19 @@ export class VerkoopfacturenController {
   @Get('klanten')
   klanten() {
     return this.facturen.klanten();
+  }
+
+  // GET /verkoopfacturen/open-rekeningen -> openstaande rekeningen per klant (alle medewerkers)
+  @Get('open-rekeningen')
+  openRekeningen() {
+    return this.facturen.openRekeningen();
+  }
+
+  // POST /verkoopfacturen/betaling { sleutel, betalingen:[{betaalwijze,bedrag}] }
+  // -> betaling van een rekening ontvangen aan de kassa (alle medewerkers)
+  @Post('betaling')
+  betaling(@Req() req: any, @Body() body: { sleutel: string; betalingen: { betaalwijze: string; bedrag: number }[] }) {
+    return this.facturen.registreerBetaling({ sleutel: body?.sleutel, betalingen: body?.betalingen ?? [], gebruikerId: req.user?.sub });
   }
 
   // GET/PUT /verkoopfacturen/instellingen -> prefix nummering, verkoopdagboek in Scrada, vervaldagen
