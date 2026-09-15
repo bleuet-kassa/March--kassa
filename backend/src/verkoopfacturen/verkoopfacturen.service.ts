@@ -275,7 +275,8 @@ export class VerkoopfacturenService {
         vatNumber: f.klantBtw ?? undefined,
         email: f.klantEmail ?? undefined,
         invoiceEmail: f.klantEmail ?? undefined,
-        address: f.klantAdres ? { street: f.klantAdres, countryCode: 'BE' } : undefined,
+        // Scrada: 'address' is verplicht (met landcode); straat enkel als we ze kennen.
+        address: { countryCode: 'BE', ...(f.klantAdres ? { street: f.klantAdres } : {}) },
       },
       // Informatief voor het nazicht in Scrada: betaald aan de kassa (en hoe) of nog te betalen.
       note: (f.bron === 'MAANDFACTUUR'
@@ -286,7 +287,7 @@ export class VerkoopfacturenService {
       totalVat: r2(Number(f.totaalBtw)),
       totalInclVat: r2(Number(f.totaalIncl)),
       lines: lijnen.map((l, i) => ({
-        lineNumber: i + 1,
+        lineNumber: String(i + 1), // Scrada verwacht een tekst
         itemName: `${l.datum} ${l.lid ? l.lid + ' — ' : ''}${l.omschrijving}`,
         quantity: l.aantal,
         unitType: l.kg ? 202 : 2,
