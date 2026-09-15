@@ -181,6 +181,8 @@ export class SalesService {
     // wordt daarvoor als Klant (B2B) hergebruikt/aangemaakt — de verkoop zelf blijft
     // gewoon betaald aan de kassa (dus niet "open op rekening").
     let factuurKlantId: string | null = null;
+    // Op rekening op naam van een klant (geen betaling nu, geen bedrijf met personeelslid).
+    const opRekeningKlant = !!factuur && !betaalwijze && !(betalingen && betalingen.length) && !rekeningBedrijfId;
     if (factuur) {
       const normBtw = (s?: string | null) => (s ? s.replace(/[\s.]/g, '').toUpperCase() : null);
       const vindOfMaak = async (naam: string, btw: string | null, email?: string | null, adres?: string | null, telefoon?: string | null) => {
@@ -203,7 +205,7 @@ export class SalesService {
       };
       // Op rekening (geen betaling nu) met een nieuwe klant: voor- én achternaam, telefoon en adres
       // zijn verplicht — anders kan de rekening later niet opgevolgd/afgesloten worden.
-      const opRekening = !betaalwijze && !(betalingen && betalingen.length) && !rekeningBedrijfId;
+      const opRekening = opRekeningKlant;
       if (factuur.bedrijfId) {
         const b = await this.prisma.rekeningBedrijf.findUnique({ where: { id: factuur.bedrijfId } });
         if (!b) throw new BadRequestException('Bedrijf voor de factuur niet gevonden.');
@@ -261,7 +263,9 @@ export class SalesService {
           locatieId: locatie.id,
           gebruikerId: gebruikerId ?? null,
           klantId: factuurKlantId ?? klantId ?? null,
-          factuurGewenst: !!factuur, // factuur volgt (per ticket) bij de volgende verzending
+          // Factuur per ticket enkel als er nu betaald wordt. Op rekening: de aankoop
+          // blijft open op naam en wordt later gebundeld (maandfactuur / bij betaling).
+          factuurGewenst: !!factuur && !opRekeningKlant,
           kanaal: kanaal ?? 'KASSA',
           betaalwijze: hoofdBetaalwijze,
           leverwijze: leverwijze ?? null,
@@ -302,10 +306,11 @@ export class SalesService {
       return v;
     });
 
-    // Factuur gewenst: meteen aanmaken (nummer toekennen), zodat ze direct bij
-    // Boekhouding → Verkoopfacturen klaarstaat. Een fout hier mag de verkoop
-    // zelf nooit blokkeren (de factuur wordt dan later alsnog aangemaakt).
-    if (factuur) {
+    // Factuur bij een betaald ticket: meteen aanmaken (nummer toekennen), zodat ze
+    // direct bij Boekhouding → Verkoopfacturen klaarstaat. Een fout hier mag de
+    // verkoop zelf nooit blokkeren (de factuur wordt dan later alsnog aangemaakt).
+    // Op rekening: géén factuur nu — de aankoop blijft open en wordt gebundeld.
+    if (factuur && !opRekeningKlant) {
       try { await this.facturen.maakVoorVerkoop(verkoop.id); }
       catch (e) { console.warn(`Ticketfactuur voor verkoop ${verkoop.id} niet aangemaakt: ${e instanceof Error ? e.message : e}`); }
     }

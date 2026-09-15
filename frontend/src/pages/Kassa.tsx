@@ -1048,7 +1048,7 @@ export function Kassa() {
                 );
               })}
               <button
-                onClick={() => patchBon(bon.id, { opRekening: true, gesplitst: false })}
+                onClick={() => { patchBon(bon.id, { opRekening: true, gesplitst: false }); getFactuurKlanten().then((k) => setFactuurKlanten(Array.isArray(k) ? k : [])).catch(() => {}); }}
                 style={{ flex: '1 1 45%', padding: '10px 4px', borderRadius: 6, cursor: 'pointer', border: bon.opRekening ? '2px solid #2563eb' : '1px solid #ccc', background: bon.opRekening ? '#eff6ff' : '#fff', fontWeight: bon.opRekening ? 600 : 400 }}
               >
                 Op rekening
@@ -1119,7 +1119,13 @@ export function Kassa() {
                       rekeningNieuw: v === 'nieuw',
                     });
                   }}
-                  style={{ flexBasis: '100%', padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningBedrijfId || bon.factuurKlantId || bon.rekeningNieuw ? '1px solid #ccc' : '2px solid #f59e0b' }}
+                  style={{
+                    flexBasis: '100%', padding: 9, fontSize: 15, borderRadius: 6,
+                    // Rood: particulier met een rekening die al langer dan een maand open staat.
+                    ...(factuurKlanten.find((k) => k.id === bon.factuurKlantId)?.rekeningTeLaat
+                      ? { border: '2px solid #dc2626', background: '#fef2f2', color: '#b91c1c', fontWeight: 700 }
+                      : { border: bon.rekeningBedrijfId || bon.factuurKlantId || bon.rekeningNieuw ? '1px solid #ccc' : '2px solid #f59e0b' }),
+                  }}
                 >
                   <option value="">— wie koopt op rekening? —</option>
                   {rekeningBedrijven.length > 0 && (
@@ -1129,11 +1135,20 @@ export function Kassa() {
                   )}
                   {factuurKlanten.length > 0 && (
                     <optgroup label="Bewaarde klanten">
-                      {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`}>{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}{k.btwNummer ? ` (${k.btwNummer})` : ''}</option>)}
+                      {factuurKlanten.map((k) => <option key={k.id} value={`k:${k.id}`} style={k.rekeningTeLaat ? { color: '#b91c1c', fontWeight: 700 } : undefined}>{k.rekeningTeLaat ? '⚠ ' : ''}{k.naam}{k.telefoon ? ` · ${k.telefoon}` : ''}{k.btwNummer ? ` (${k.btwNummer})` : ''}{k.rekeningTeLaat ? ' — rekening open > 1 maand' : ''}</option>)}
                     </optgroup>
                   )}
                   <option value="nieuw">+ Nieuwe klant…</option>
                 </select>
+                {(() => {
+                  const k = factuurKlanten.find((x) => x.id === bon.factuurKlantId);
+                  if (!k || !k.rekeningTeLaat) return null;
+                  return (
+                    <div style={{ flexBasis: '100%', padding: '8px 10px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', fontWeight: 700, fontSize: 14 }}>
+                      ⚠ {k.naam} heeft een openstaande rekening van € {(k.openBedrag ?? 0).toFixed(2)}{k.openSinds ? ` sinds ${new Date(k.openSinds).toLocaleDateString('nl-BE')}` : ''} — langer dan een maand open.
+                    </div>
+                  );
+                })()}
                 {bon.rekeningBedrijfId && (
                   <select value={bon.rekeningLidId} onChange={(e) => patchBon(bon.id, { rekeningLidId: e.target.value })} style={{ flex: 1, minWidth: 140, padding: 9, fontSize: 15, borderRadius: 6, border: bon.rekeningLidId ? '1px solid #ccc' : '2px solid #f59e0b' }}>
                     <option value="">— personeelslid —</option>

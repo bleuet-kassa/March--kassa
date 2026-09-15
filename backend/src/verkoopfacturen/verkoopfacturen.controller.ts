@@ -38,6 +38,27 @@ export class VerkoopfacturenController {
     return this.facturen.registreerBetaling({ sleutel: body?.sleutel, betalingen: body?.betalingen ?? [], gebruikerId: req.user?.sub });
   }
 
+  // GET /verkoopfacturen/te-factureren -> per klant/bedrijf de open aankopen die nog in geen factuur zitten
+  @Get('te-factureren')
+  teFactureren() {
+    return this.facturen.teFactureren();
+  }
+
+  // POST /verkoopfacturen/factureer { sleutel } -> alle open aankopen van die klant/bedrijf in één factuur
+  @Post('factureer')
+  @Rollen('BEHEER', 'BEHEERDER')
+  async factureer(@Body() body: { sleutel: string }) {
+    const r = await this.facturen.maakBundelVoorSleutel(String(body?.sleutel ?? ''));
+    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer } };
+  }
+
+  // POST /verkoopfacturen/factureer-alles -> maandafsluiting: elke open rekening één factuur
+  @Post('factureer-alles')
+  @Rollen('BEHEER', 'BEHEERDER')
+  factureerAlles() {
+    return this.facturen.factureerAlles();
+  }
+
   // GET/PUT /verkoopfacturen/instellingen -> prefix nummering, verkoopdagboek in Scrada, vervaldagen
   @Get('instellingen')
   instellingen() {

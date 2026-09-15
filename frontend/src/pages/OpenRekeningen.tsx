@@ -3,6 +3,12 @@ import { getOpenRekeningen, registreerRekeningBetaling, type OpenRekening } from
 
 const euro = (n: number) => '€ ' + Number(n).toFixed(2);
 const datumNl = (s: string) => new Date(s).toLocaleDateString('nl-BE');
+// Particulier (geen BTW-nummer) met een rekening die al langer dan een maand open staat.
+function teLaat(g: OpenRekening) {
+  if (g.btwNummer || !g.oudste) return false;
+  const grens = new Date(); grens.setMonth(grens.getMonth() - 1);
+  return new Date(g.oudste) < grens;
+}
 // Echte betaalwijzen om een rekening te vereffenen — nooit opnieuw "op rekening".
 const BETAALWIJZEN: [string, string][] = [
   ['BANCONTACT', 'Bancontact'], ['CASH', 'Cash'], ['KAART', 'Kaart'], ['OVERSCHRIJVING', 'Overschrijving'], ['QR', 'QR-code'], ['CADEAUBON', 'Cadeaubon'],
@@ -48,7 +54,7 @@ export function OpenRekeningen() {
     setBezig(true); setFout(''); setMelding('');
     try {
       const r = await registreerRekeningBetaling(g.sleutel, betalingen);
-      setMelding(`✔ ${euro(r.totaal)} ontvangen van ${g.naam}${r.restNaBetaling > 0.005 ? ` — blijft open: ${euro(r.restNaBetaling)}` : ' — rekening volledig betaald'}. Staat op de dagafsluiting van vandaag.`);
+      setMelding(`✔ ${euro(r.totaal)} ontvangen van ${g.naam}${r.nieuweFactuur ? ` — ${g.btwNummer ? 'factuur' : 'rekening'} ${r.nieuweFactuur.nummer} opgemaakt voor de open aankopen` : ''}${r.restNaBetaling > 0.005 ? ` — blijft open: ${euro(r.restNaBetaling)}` : ' — rekening volledig betaald'}. Staat op de dagafsluiting van vandaag.`);
       setActief(null);
       await laad();
     } catch (e) { setFout(e instanceof Error ? e.message : 'Betaling registreren mislukt'); }
@@ -65,7 +71,7 @@ export function OpenRekeningen() {
         <span style={{ color: '#6b7280' }}>Totaal openstaand: <strong>{euro(totaalOpen)}</strong> · {lijst.length} klant(en)</span>
       </div>
       <p style={{ color: '#6b7280', marginTop: 4, fontSize: 14 }}>
-        Klanten die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag.
+        Klanten die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag. Aankopen die nog niet gefactureerd zijn, worden bij de betaling automatisch gebundeld tot één rekening/factuur.
       </p>
       <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek klant…" style={{ ...inp, width: '100%', maxWidth: 360, marginBottom: 12 }} />
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
@@ -79,6 +85,9 @@ export function OpenRekeningen() {
               <div style={{ fontSize: 12, color: '#6b7280' }}>
                 {g.btwNummer ? g.btwNummer : 'particulier'}{g.telefoon ? ` · ☎ ${g.telefoon}` : ''}{g.adres ? ` · ${g.adres}` : ''} · {g.items.length} open post(en)
               </div>
+              {teLaat(g) && (
+                <div style={{ fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>⚠ Open sinds {datumNl(g.oudste!)} — ouder dan een maand</div>
+              )}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>
@@ -93,7 +102,11 @@ export function OpenRekeningen() {
                 {g.items.map((it) => (
                   <tr key={it.id} style={{ borderTop: '1px solid #f3f4f6' }}>
                     <td style={{ padding: 4, whiteSpace: 'nowrap' }}>{datumNl(it.datum)}</td>
-                    <td style={{ padding: 4 }}>{it.nummer} · {it.bron === 'MAANDFACTUUR' ? `maandfactuur ${it.periode ?? ''}` : 'ticket'}{it.naarScrada ? '' : ' (rekening)'}</td>
+                    <td style={{ padding: 4 }}>
+                      {it.bron === 'OPEN_AANKOOP'
+                        ? <span>aankoop{it.omschrijving ? ` · ${it.omschrijving}` : ''} <span style={{ color: '#6b7280' }}>(nog te factureren)</span></span>
+                        : <span>{it.nummer} · {it.bron === 'MAANDFACTUUR' ? `${it.naarScrada ? 'factuur' : 'rekening'} ${it.periode ?? ''}` : 'ticket'}{it.naarScrada ? '' : ' (kassa)'}</span>}
+                    </td>
                     <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap', color: '#6b7280' }}>{it.betaald > 0 ? `${euro(it.betaald)} betaald van ${euro(it.totaal)}` : euro(it.totaal)}</td>
                     <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>{euro(it.rest)}</td>
                   </tr>

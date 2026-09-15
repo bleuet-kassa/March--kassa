@@ -6,6 +6,7 @@ import {
   type ScradaConfig, type ScradaVerbinding, type ScradaSyncVerslag,
   type ScradaDagboekInstellingen, type ScradaDagboek, type ScradaCategorie, type ScradaBetaalmethode, type ScradaDag, type ScradaDagPreview,
   getVerkoopfacturen, getFactuurOverzicht, getFactuurInstellingen, zetFactuurInstellingen, verstuurFactuurNaarScrada, verstuurFacturenNaarScrada, zetFactuurWeergave, verwijderVerkoopfactuur,
+  getTeFactureren, factureerRekening, factureerAlleRekeningen, type TeFactureren,
   type Verkoopfactuur, type FactuurOverzicht, type FactuurInstellingen,
 } from '../api/client';
 
@@ -44,10 +45,30 @@ export function Boekhouding() {
   const [facInst, setFacInst] = useState<FactuurInstellingen>({ prefix: 'K', verkoopdagboek: 'KASSA', vervaldagen: 30 });
   const [toonAlleFacturen, setToonAlleFacturen] = useState(false);
   const [facVolgend, setFacVolgend] = useState(''); // eerstvolgend volgnummer (bv. 1 -> 20260001)
+  // Open rekeningen (aankopen op naam die nog in geen factuur zitten) -> maandelijks bundelen.
+  const [teFactureren, setTeFactureren] = useState<TeFactureren[]>([]);
 
   async function laadFacturen() {
-    const [f, o, i] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen()]);
-    setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : '');
+    const [f, o, i, t] = await Promise.all([getVerkoopfacturen(), getFactuurOverzicht(), getFactuurInstellingen(), getTeFactureren()]);
+    setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : ''); setTeFactureren(t);
+  }
+  async function factureerEen(t: TeFactureren) {
+    if (!window.confirm(`Alle ${t.aantal} open aankopen van ${t.naam} (${euro(t.totaal)}) bundelen tot één ${t.naarScrada ? 'factuur (naar Scrada)' : 'rekening (enkel in de kassa)'}?`)) return;
+    setBezig(true); setMelding('');
+    try { const r = await factureerRekening(t.sleutel); setMelding(`${t.naarScrada ? 'Factuur' : 'Rekening'} ${r.factuur.nummer} voor ${t.naam}: ${r.aantal} aankopen, ${euro(r.totaal)}.`); await laadFacturen(); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Factureren mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function factureerAlles() {
+    if (!window.confirm(`Maandafsluiting: voor alle ${teFactureren.length} klanten met open aankopen één factuur/rekening maken?\n\nFacturen van klanten met BTW-nummer staan daarna klaar om naar Scrada te sturen.`)) return;
+    setBezig(true); setMelding('');
+    try {
+      const r = await factureerAlleRekeningen();
+      const fouten = r.resultaten.filter((x) => x.fout);
+      setMelding(`${r.aantal} factuur/rekening(en) gemaakt${fouten.length ? ` · mislukt: ${fouten.map((x) => `${x.naam} (${x.fout})`).join(', ')}` : ''}.`);
+      await laadFacturen();
+    } catch (e) { setMelding(e instanceof Error ? e.message : 'Factureren mislukt'); }
+    finally { setBezig(false); }
   }
   async function bewaarFacInst() {
     setBezig(true); setMelding('');
@@ -335,7 +356,34 @@ export function Boekhouding() {
             )}
           </div>
           <div style={{ fontSize: 13, color: '#6b7280', margin: '4px 0 8px' }}>
-            Facturen worden in de kassa gemaakt (knop "Factuur" bij het afrekenen, of "Factureren" per bedrijf op Klant factuur) en gaan bij je bevestiging als <strong>concept</strong> naar het verkoopdagboek in Scrada, samen met de correctie in het dagontvangstenboek. Nazicht en verzending via Peppol doe je in Scrada.
+            Aankopen op rekening blijven open op naam en worden hieronder gebundeld tot <strong>één factuur per klant</strong> (maandelijks, of vroeger zodra de klant aan de kassa betaalt). Klant met BTW-nummer = bedrijf → factuur gaat bij je bevestiging als <strong>concept</strong> naar het verkoopdagboek in Scrada (met de correctie in het dagontvangstenboek); nazicht en Peppol doe je daar. Zonder BTW-nummer = rekening enkel in de kassa. Een ticket dat meteen betaald wordt met "Factuur" aangevinkt, krijgt wél zijn eigen factuur.
+          </div>
+
+          {/* Open rekeningen bundelen: per klant/bedrijf de open aankopen -> één factuur (maandafsluiting) */}
+          <div style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 700 }}>📅 Te factureren (open aankopen op rekening)</div>
+              <span style={{ fontSize: 13, color: '#6b7280' }}>{teFactureren.length} klant(en) · {euro(teFactureren.reduce((s, t) => s + t.totaal, 0))}</span>
+              <button onClick={factureerAlles} disabled={bezig || teFactureren.length === 0} style={{ ...btn, marginLeft: 'auto' }}>Alle open rekeningen factureren (maandafsluiting)</button>
+            </div>
+            {teFactureren.length > 0 && (
+              <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
+                  <tbody>
+                    {teFactureren.map((t) => (
+                      <tr key={t.sleutel} style={{ borderTop: '1px solid #fde68a' }}>
+                        <td style={{ padding: 4, fontWeight: 600 }}>{t.naam}{t.btwNummer ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · {t.btwNummer}</span> : <span style={{ color: '#6b7280', fontWeight: 400 }}> · particulier</span>}</td>
+                        <td style={{ padding: 4, whiteSpace: 'nowrap', color: '#6b7280' }}>{t.aantal} aankopen · {datumNl(t.oudste)}{t.laatste !== t.oudste ? ` → ${datumNl(t.laatste)}` : ''}</td>
+                        <td style={{ padding: 4, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>{euro(t.totaal)}</td>
+                        <td style={{ padding: 4, whiteSpace: 'nowrap', color: '#6b7280' }}>{t.naarScrada ? 'factuur → Scrada' : 'rekening in kassa'}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}><button onClick={() => factureerEen(t)} disabled={bezig} style={btn}>Factureren</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {teFactureren.length === 0 && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Geen open aankopen die nog gefactureerd moeten worden.</div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
             <label style={{ fontSize: 13 }}>Verkoopdagboek in Scrada <input value={facInst.verkoopdagboek} onChange={(e) => setFacInst({ ...facInst, verkoopdagboek: e.target.value })} style={{ ...inp, width: 110 }} /></label>

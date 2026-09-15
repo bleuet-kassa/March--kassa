@@ -651,7 +651,20 @@ export type Verkoopfactuur = {
   correctieStatus: string; correctieFout: string | null; aantalTickets: number;
   samenvatten: boolean; omschrijving: string | null; // enkel totalen per BTW-tarief naar Scrada
 };
-export type FactuurOverzicht = { openstaand: number; openstaandBedrag: number; teVersturen: number; ticketsZonderFactuur: number };
+export type FactuurOverzicht = { openstaand: number; openstaandBedrag: number; teVersturen: number; ticketsZonderFactuur: number; teFactureren?: number; teFacturerenBedrag?: number };
+// Te factureren: per klant/bedrijf de open aankopen op rekening die nog in geen factuur zitten.
+export type TeFactureren = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; aantal: number; totaal: number; oudste: string; laatste: string; naarScrada: boolean };
+export async function getTeFactureren(): Promise<TeFactureren[]> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/te-factureren`));
+}
+// Alle open aankopen van één klant/bedrijf bundelen tot één factuur (maandfactuur).
+export async function factureerRekening(sleutel: string): Promise<{ aantal: number; totaal: number; factuur: { id: string; nummer: string } }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/factureer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel }) }));
+}
+// Maandafsluiting: elke open rekening één factuur.
+export async function factureerAlleRekeningen(): Promise<{ aantal: number; resultaten: { sleutel: string; naam: string; nummer?: string; totaal?: number; fout?: string }[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/factureer-alles`, { method: 'POST' }));
+}
 export type FactuurVerzendResultaat = { modus: string; aangemaakt: number; gevonden?: number; verstuurd: number; mislukt: number; correcties: number; geweigerd?: boolean; melding?: string; fout?: string };
 export async function getVerkoopfacturen(): Promise<Verkoopfactuur[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen`));
@@ -660,19 +673,21 @@ export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/overzicht`));
 }
 // Bewaarde factuurklanten (B2B), om aan de kassa te kiezen bij "Factuur".
-export type FactuurKlant = { id: string; naam: string; btwNummer: string | null; email: string | null; adres: string | null; telefoon?: string | null };
+// openBedrag/openSinds: wat nog open staat; rekeningTeLaat = particulier met een rekening ouder dan 1 maand (kassa toont rood).
+export type FactuurKlant = { id: string; naam: string; btwNummer: string | null; email: string | null; adres: string | null; telefoon?: string | null; openBedrag?: number; openSinds?: string | null; rekeningTeLaat?: boolean };
 export async function getFactuurKlanten(): Promise<FactuurKlant[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/klanten`));
 }
 
 // --- Open rekeningen (alle medewerkers): openstaand per klant + betaling ontvangen aan de kassa ---
-export type OpenRekeningItem = { id: string; nummer: string; datum: string; bron: string; periode: string | null; totaal: number; betaald: number; rest: number; naarScrada: boolean };
-export type OpenRekening = { sleutel: string; naam: string; btwNummer: string | null; telefoon?: string | null; adres?: string | null; open: number; items: OpenRekeningItem[] };
+// bron OPEN_AANKOOP = aankoop op rekening die nog in geen factuur zit (wordt gebundeld bij betaling of maandelijks).
+export type OpenRekeningItem = { id: string; nummer: string; datum: string; bron: string; periode: string | null; omschrijving?: string; totaal: number; betaald: number; rest: number; naarScrada: boolean };
+export type OpenRekening = { sleutel: string; naam: string; btwNummer: string | null; telefoon?: string | null; adres?: string | null; open: number; oudste?: string | null; items: OpenRekeningItem[] };
 export async function getOpenRekeningen(): Promise<OpenRekening[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/open-rekeningen`));
 }
 // Betaling van een rekening: één of twee echte betaalwijzen (nooit opnieuw "op rekening"); oudste-eerst toegewezen.
-export async function registreerRekeningBetaling(sleutel: string, betalingen: { betaalwijze: string; bedrag: number }[]): Promise<{ ok: true; totaal: number; toegewezen: { factuurId: string; nummer: string; bedrag: number }[]; restNaBetaling: number }> {
+export async function registreerRekeningBetaling(sleutel: string, betalingen: { betaalwijze: string; bedrag: number }[]): Promise<{ ok: true; totaal: number; toegewezen: { factuurId: string; nummer: string; bedrag: number }[]; nieuweFactuur?: { id: string; nummer: string } | null; restNaBetaling: number }> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/betaling`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel, betalingen }) }));
 }
 export async function getFactuurInstellingen(): Promise<FactuurInstellingen> {
