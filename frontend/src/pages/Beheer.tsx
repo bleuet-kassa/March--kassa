@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getMeta, getProductenBeheer, getProduct, getProductByBarcode, nieuweBarcode,
   createProduct, updateProduct, createCategorie, createAfdeling, createLeverancier, voorraadOntvangst,
-  uploadSiteAfbeelding,
+  uploadSiteAfbeelding, zetProductCategorie, verwijderProduct,
   type Meta, type ProductVol, type ProductInput,
 } from '../api/client';
 
@@ -35,6 +35,21 @@ export function Beheer() {
       setBewerken({ mode: 'nieuw', product: null, prefillBarcode: code });
     }
     setBarcode('');
+  }
+
+  const [melding, setMelding] = useState('');
+  // Categorie rechtstreeks in de lijst wijzigen (alle medewerkers).
+  async function wijzigCategorie(p: ProductVol, categorieId: string) {
+    setFout(''); setMelding('');
+    try { await zetProductCategorie(p.id, categorieId || null); await laadLijst(); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Categorie wijzigen mislukt'); }
+  }
+  // Product verwijderen (alle medewerkers): met verkoophistoriek wordt het enkel gedeactiveerd.
+  async function verwijder(p: ProductVol) {
+    if (!window.confirm(`"${p.naam}" verwijderen?\n\nHet product verdwijnt uit de kassa, het beheer en de webshop. Oude tickets blijven kloppen.`)) return;
+    setFout(''); setMelding('');
+    try { const r = await verwijderProduct(p.id); setMelding(r.melding); await laadLijst(); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
   }
 
   if (bewerken && meta) {
@@ -70,15 +85,19 @@ export function Beheer() {
         <button onClick={() => setBewerken({ mode: 'nieuw', product: null })} style={btnBlauw}>+ Nieuw product</button>
       </div>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
+      {melding && <p style={{ color: '#166534', background: '#f0fdf4', border: '1px solid #86efac', padding: '8px 12px', borderRadius: 8 }}>{melding}</p>}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
         <thead>
           <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: 12, color: '#666' }}>
             <th style={{ padding: '6px 4px' }}>Naam</th>
             <th style={{ padding: '6px 4px' }}>Barcode</th>
+            <th style={{ padding: '6px 4px' }}>Categorie</th>
             <th style={{ padding: '6px 4px', textAlign: 'right' }}>Verkoop</th>
             <th style={{ padding: '6px 4px' }}>BTW</th>
             <th style={{ padding: '6px 4px', textAlign: 'right' }}>Voorraad</th>
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -89,15 +108,31 @@ export function Beheer() {
                 style={{ borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}>
                 <td style={{ padding: '8px 4px' }}>{p.naam}{p.isAlcohol && ' 🍷'}</td>
                 <td style={{ padding: '8px 4px', fontFamily: 'monospace', fontSize: 13 }}>{p.barcode}</td>
+                <td style={{ padding: '4px' }} onClick={(e) => e.stopPropagation()}>
+                  {/* Categorie meteen hier wijzigen; de afdeling volgt de categorie. */}
+                  <select value={p.categorieId ?? ''} onChange={(e) => wijzigCategorie(p, e.target.value)} title="Categorie wijzigen" style={{ ...inp, padding: 6, fontSize: 13, width: 'auto', maxWidth: 220 }}>
+                    <option value="">— geen categorie —</option>
+                    {(meta?.afdelingen ?? []).map((a) => (
+                      <optgroup key={a.id} label={a.naam}>
+                        {(meta?.categorieen ?? []).filter((c) => c.afdelingId === a.id).map((c) => <option key={c.id} value={c.id}>{c.naam}</option>)}
+                      </optgroup>
+                    ))}
+                    {(meta?.categorieen ?? []).filter((c) => !c.afdelingId).map((c) => <option key={c.id} value={c.id}>{c.naam}</option>)}
+                  </select>
+                </td>
                 <td style={{ padding: '8px 4px', textAlign: 'right' }}>€ {Number(p.verkoopprijs).toFixed(2)}</td>
                 <td style={{ padding: '8px 4px' }}>{p.btwTarief.percentage}%</td>
                 <td style={{ padding: '8px 4px', textAlign: 'right' }}>{totaalStock}</td>
+                <td style={{ padding: '4px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => verwijder(p)} title="Product verwijderen (niet meer gebruikt)" style={{ padding: '4px 10px', border: '1px solid #fca5a5', borderRadius: 6, background: '#fff', color: '#b91c1c', cursor: 'pointer', fontSize: 13 }}>Verwijder</button>
+                </td>
               </tr>
             );
           })}
-          {lijst.length === 0 && <tr><td colSpan={5} style={{ padding: 16, color: '#999' }}>Geen producten gevonden.</td></tr>}
+          {lijst.length === 0 && <tr><td colSpan={7} style={{ padding: 16, color: '#999' }}>Geen producten gevonden.</td></tr>}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -301,6 +336,21 @@ export function ProductForm({
       <button onClick={opslaan} disabled={bezig} style={{ ...btnGroen, width: '100%' }}>
         {bezig ? 'Bezig…' : product ? 'Wijzigingen opslaan' : 'Product aanmaken'}
       </button>
+      {product && (
+        <button
+          onClick={async () => {
+            if (!window.confirm(`"${product.naam}" verwijderen?\n\nHet product verdwijnt uit de kassa, het beheer en de webshop. Oude tickets blijven kloppen.`)) return;
+            setBezig(true); setFout('');
+            try { await verwijderProduct(product.id); onKlaar(); }
+            catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
+            finally { setBezig(false); }
+          }}
+          disabled={bezig}
+          style={{ ...btnGrijs, width: '100%', marginTop: 8, color: '#b91c1c', borderColor: '#fca5a5' }}
+        >
+          Product verwijderen (niet meer gebruikt)
+        </button>
+      )}
 
       {product && <Ontvangst product={product} meta={meta} />}
     </div>

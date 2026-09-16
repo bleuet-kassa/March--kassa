@@ -152,6 +152,48 @@ export class ProductsService {
     });
   }
 
+  // Snel de categorie (en daarmee de afdeling) van een product wijzigen vanuit de lijst.
+  async zetCategorie(id: string, categorieId: string | null) {
+    await this.findOne(id);
+    let afdelingId: string | null | undefined = undefined;
+    if (categorieId) {
+      const c = await this.prisma.categorie.findUnique({ where: { id: categorieId }, select: { afdelingId: true } });
+      if (!c) throw new NotFoundException('Categorie niet gevonden.');
+      afdelingId = c.afdelingId;
+    }
+    return this.prisma.product.update({
+      where: { id },
+      data: { categorieId: categorieId || null, ...(afdelingId !== undefined ? { afdelingId } : {}) },
+      include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true, voorraad: true },
+    });
+  }
+
+  // Product verwijderen (alle medewerkers). Zit het product al in verkopen,
+  // bestellingen of verplaatsingen, dan wordt het enkel gedeactiveerd (verdwijnt
+  // uit kassa, beheer en webshop) zodat oude tickets en rapporten blijven kloppen.
+  async verwijder(id: string) {
+    const p = await this.prisma.product.findUnique({
+      where: { id },
+      include: { _count: { select: { verkoopLijnen: true, importLijnen: true, verplaatsingen: true } } },
+    });
+    if (!p) throw new NotFoundException('Product niet gevonden.');
+    const inGebruik = p._count.verkoopLijnen + p._count.importLijnen + p._count.verplaatsingen;
+    if (inGebruik === 0) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.voorraad.deleteMany({ where: { productId: id } });
+          await tx.prijslijstItem.deleteMany({ where: { productId: id } });
+          await tx.product.delete({ where: { id } });
+        });
+        return { ok: true, verwijderd: true, naam: p.naam, melding: `"${p.naam}" is definitief verwijderd.` };
+      } catch {
+        // Onverwachte koppeling: veilig terugvallen op deactiveren.
+      }
+    }
+    await this.prisma.product.update({ where: { id }, data: { actief: false, webshopZichtbaar: false } });
+    return { ok: true, verwijderd: false, naam: p.naam, melding: `"${p.naam}" is uit de kassa en de webshop gehaald (gedeactiveerd, omdat het in eerdere verkopen voorkomt).` };
+  }
+
   // Bepaalt de afdeling van een product: expliciet gekozen, anders afgeleid uit
   // de categorie (zodat een product altijd onder de juiste sectie-tegel valt).
   private async bepaalAfdeling(input: ProductInput): Promise<string | null> {

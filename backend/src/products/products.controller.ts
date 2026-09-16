@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Patch, Query } from '@nestjs/common';
 import { ProductsService, ProductInput } from './products.service';
 
 @Controller('producten')
@@ -50,5 +50,17 @@ export class ProductsController {
   @Patch(':id/webshop')
   setWebshop(@Param('id') id: string, @Body() body: { zichtbaar: boolean }) {
     return this.products.setWebshop(id, body.zichtbaar);
+  }
+
+  // PATCH /producten/:id/categorie { categorieId }  -> snel van categorie veranderen (alle medewerkers)
+  @Patch(':id/categorie')
+  zetCategorie(@Param('id') id: string, @Body() body: { categorieId?: string | null }) {
+    return this.products.zetCategorie(id, body?.categorieId ?? null);
+  }
+
+  // DELETE /producten/:id  -> product verwijderen (alle medewerkers); met verkoophistoriek = deactiveren
+  @Delete(':id')
+  verwijder(@Param('id') id: string) {
+    return this.products.verwijder(id);
   }
 }

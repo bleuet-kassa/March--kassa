@@ -382,6 +382,15 @@ export async function updateProduct(id: string, input: ProductInput): Promise<Pr
 }
 
 // Snel een product in/uit de webshop zetten (webshop-assortiment).
+// Snel van categorie veranderen (alle medewerkers); de afdeling volgt de categorie.
+export async function zetProductCategorie(id: string, categorieId: string | null): Promise<ProductVol> {
+  return jsonOrThrow(await fetch(`${BASE}/producten/${id}/categorie`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categorieId }) }));
+}
+// Product verwijderen (alle medewerkers). Met verkoophistoriek wordt het gedeactiveerd i.p.v. gewist.
+export async function verwijderProduct(id: string): Promise<{ ok: true; verwijderd: boolean; naam: string; melding: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/producten/${id}`, { method: 'DELETE' }));
+}
+
 export async function setProductWebshop(id: string, zichtbaar: boolean): Promise<ProductVol> {
   return jsonOrThrow(
     await fetch(`${BASE}/producten/${id}/webshop`, {
