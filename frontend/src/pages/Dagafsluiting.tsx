@@ -182,9 +182,13 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
       <div style={{ textAlign: 'center', fontWeight: 700 }}>
         DAGONTVANGSTEN {rapport.volgnummer != null ? `nr ${rapport.volgnummer}` : '(voorbeeld)'}
       </div>
+      {rapport.boekdatum && (
+        <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, color: '#000', margin: '2px 0' }}>
+          DAG: {new Date(rapport.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
+        </div>
+      )}
       <div style={{ textAlign: 'center', fontSize: 12, color: '#555' }}>
-        {rapport.boekdatum && <><strong>Dag: {new Date(rapport.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE')}</strong><br /></>}
-        {rapport.tot ? `${rapport.boekdatum ? 'afgesloten ' : ''}${new Date(rapport.tot).toLocaleString('nl-BE')}` : ''}<br />
+        {rapport.tot ? `${rapport.volgnummer != null ? 'afgesloten op' : 'afgedrukt op'} ${new Date(rapport.tot).toLocaleString('nl-BE')}` : ''}<br />
         {rapport.locatie}{rapport.verkoper ? ` · ${rapport.verkoper}` : ''}
       </div>
       <hr />

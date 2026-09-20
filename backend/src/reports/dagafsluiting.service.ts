@@ -170,6 +170,8 @@ export class DagafsluitingService {
       verkoper: meta.verkoper,
       vanaf: meta.vanaf,
       tot: meta.tot,
+      // De dag die afgesloten wordt (eerste verkoop sinds de vorige afsluiting) — staat op het ticket.
+      boekdatum: kassadag(meta.vanaf ?? meta.tot),
       dagontvangsten: {
         aantal: ontvAantal,
         perBetaalwijze,
