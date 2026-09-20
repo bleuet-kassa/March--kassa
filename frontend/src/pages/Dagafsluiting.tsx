@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useState, type CSSProperties } from 'react';
 import {
   getDagoverzicht, dagAfsluiten, getAfsluitingen, getDagRapport, dagafsluitingCsvUrl,
   getMeta, updateOnderneming, scradaVerstuurDag,
@@ -7,6 +7,8 @@ import {
 import { getVerkoper } from '../auth';
 
 const euro = (n: number | string) => '€ ' + Number(n).toFixed(2);
+// "2026-09" -> "september 2026"
+const maandNaam = (m: string) => new Date(m + '-15T12:00:00').toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
 
 // Nette naam van een betaalwijze op het dagafsluiting-ticket.
 function betaalNaam(b?: string | null): string {
@@ -129,8 +131,21 @@ export function Dagafsluiting() {
             </tr>
           </thead>
           <tbody>
-            {register.map((a) => (
-              <tr key={a.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+            {register.map((a, i) => {
+              // Per maand een kopregel met het maandtotaal van de dagontvangsten.
+              const maand = (a.boekdatum ?? a.tot).slice(0, 7);
+              const vorige = i > 0 ? (register[i - 1].boekdatum ?? register[i - 1].tot).slice(0, 7) : null;
+              const inMaand = register.filter((x) => (x.boekdatum ?? x.tot).slice(0, 7) === maand);
+              return (
+              <Fragment key={a.id}>
+              {maand !== vorige && (
+                <tr style={{ background: '#f3f4f6', fontWeight: 700 }}>
+                  <td colSpan={2} style={{ padding: '6px 4px' }}>{maandNaam(maand)} <span style={{ fontWeight: 400, color: '#6b7280' }}>· {inMaand.length} dag{inMaand.length === 1 ? '' : 'en'}</span></td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{euro(inMaand.reduce((s, x) => s + Number(x.totaal), 0))}</td>
+                  <td style={{ padding: '6px 4px', fontWeight: 400, fontSize: 12, color: '#6b7280' }}>maandtotaal</td>
+                </tr>
+              )}
+              <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ padding: 4 }}>{a.volgnummer ?? '—'}</td>
                 <td style={{ padding: 4 }} title={`Afgesloten op ${new Date(a.tot).toLocaleString('nl-BE')}`}>{a.boekdatum ? new Date(a.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE') : new Date(a.tot).toLocaleDateString('nl-BE')}</td>
                 <td style={{ padding: 4, textAlign: 'right' }}>{euro(a.totaal)}</td>
@@ -139,7 +154,9 @@ export function Dagafsluiting() {
                   <a href={dagafsluitingCsvUrl(a.id)} style={{ ...btnMini, textDecoration: 'none', color: '#2563eb' }}>CSV</a>
                 </td>
               </tr>
-            ))}
+              </Fragment>
+              );
+            })}
             {register.length === 0 && <tr><td colSpan={4} style={{ padding: 12, color: '#999' }}>Nog geen afsluitingen.</td></tr>}
           </tbody>
         </table>
@@ -253,6 +270,12 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15 }}>
         <span>TOTAAL</span><span>{euro(d.totaalIncl)}</span>
       </div>
+      {rapport.maandtotaal && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #999' }}>
+          <span>Maandtotaal {maandNaam(rapport.maandtotaal.maand)} <span style={{ color: '#777' }}>({rapport.maandtotaal.dagen} dag{rapport.maandtotaal.dagen === 1 ? '' : 'en'}, t.e.m. deze dag)</span></span>
+          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{euro(rapport.maandtotaal.totaal)}</span>
+        </div>
+      )}
       <div style={{ fontSize: 11, color: '#777', marginTop: 8, textAlign: 'center' }}>
         {afgesloten ? 'Onwijzigbaar bewaard — bewaarplicht 7 jaar.' : 'Voorbeeld — nog niet afgesloten.'}
       </div>

@@ -173,6 +173,7 @@ export type Dagrapport = {
   vanaf: string | null;
   tot: string | null;
   boekdatum?: string | null; // kassadag YYYY-MM-DD (afsluiten na middernacht = nog de vorige dag)
+  maandtotaal?: { maand: string; totaal: number; dagen: number } | null; // dagontvangsten van de maand t.e.m. deze dag
   dagontvangsten: {
     aantal: number;
     perBetaalwijze: Record<string, number>;

@@ -191,12 +191,24 @@ export class DagafsluitingService {
     };
   }
 
+  // Maandtotaal van de dagontvangsten: alle afgesloten dagen van dezelfde maand t.e.m.
+  // `boekdatum` (+ `extra` voor de dag die nog niet bewaard is, bv. het voorbeeld).
+  private async maandtotaal(boekdatum: string, extra = 0, client: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const maand = boekdatum.slice(0, 7);
+    const rows = await client.dagafsluiting.findMany({
+      where: { boekdatum: { startsWith: maand, lte: boekdatum } },
+      select: { totaal: true },
+    });
+    return { maand, totaal: r2(rows.reduce((s, r) => s + Number(r.totaal), 0) + extra), dagen: rows.length + (extra !== 0 ? 1 : 0) };
+  }
+
   // Voorbeeld van het dagontvangsten-rapport (nog niet afgesloten).
   async overzicht() {
     const [locatie, onderneming] = await Promise.all([this.winkelLocatie(), this.winkelOnderneming()]);
     const verkopen = await this.openVerkopen(locatie.id);
     const rekeningBetalingen = await this.openRekeningBetalingen();
-    return this.bouwRapport(verkopen, {
+    const vandaagTotaal = verkopen.filter((v) => v.betaalwijze !== 'EIGEN_REKENING').reduce((s, v) => s + Number(v.totaal), 0);
+    const rapport = this.bouwRapport(verkopen, {
       rekeningBetalingen,
       volgnummer: null,
       vanaf: verkopen[0]?.datum ?? null,
@@ -205,6 +217,7 @@ export class DagafsluitingService {
       onderneming: onderneming ? { naam: onderneming.naam, ondernemingsnummer: onderneming.ondernemingsnummer, btwNummer: onderneming.btwNummer, adres: onderneming.adres } : null,
       locatie: locatie.naam,
     });
+    return { ...rapport, maandtotaal: await this.maandtotaal(rapport.boekdatum, r2(vandaagTotaal)) };
   }
 
   // Sluit de dag af: bewaart het rapport onwijzigbaar (met volgnummer) en
@@ -276,7 +289,7 @@ export class DagafsluitingService {
         });
       }
 
-      return { id: afsluiting.id, ...rapport, boekdatum };
+      return { id: afsluiting.id, ...rapport, boekdatum, maandtotaal: await this.maandtotaal(boekdatum, 0, tx) };
     });
   }
 
@@ -474,6 +487,7 @@ export class DagafsluitingService {
       vanaf: a.vanaf,
       tot: a.tot,
       boekdatum: boekdatumVan(a), // de kassadag (niet het afsluitmoment)
+      maandtotaal: await this.maandtotaal(boekdatumVan(a)),
       dagontvangsten: {
         aantal: a.aantalVerkopen,
         perBetaalwijze,
@@ -519,7 +533,7 @@ export class DagafsluitingService {
   async geschiedenis() {
     const rows = await this.prisma.dagafsluiting.findMany({
       orderBy: { tot: 'desc' },
-      take: 60,
+      take: 130, // ruim 4 maanden, zodat de maandtotalen in het register volledig zijn
       select: { id: true, volgnummer: true, vanaf: true, tot: true, boekdatum: true, totaal: true, aantalVerkopen: true },
     });
     // boekdatum = de kassadag (afsluiten na middernacht hoort nog bij de vorige dag).
