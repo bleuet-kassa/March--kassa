@@ -46,6 +46,7 @@ export type Ticket = {
     origineelTotaal?: number | null; // lijntotaal vóór de lijnkorting
   }[];
   btwOverzicht: { percentage: number; maatstaf: number; btw: number }[];
+  tegoedbon?: { nummer: string; bedrag: number } | null; // terugbetaling als tegoedbon (bv. leeggoed)
 };
 
 export async function getProductByBarcode(barcode: string): Promise<Product> {
@@ -171,6 +172,7 @@ export type Dagrapport = {
   verkoper: string | null;
   vanaf: string | null;
   tot: string | null;
+  boekdatum?: string | null; // kassadag YYYY-MM-DD (afsluiten na middernacht = nog de vorige dag)
   dagontvangsten: {
     aantal: number;
     perBetaalwijze: Record<string, number>;
@@ -185,7 +187,7 @@ export type Dagrapport = {
   facturenTotaal: { aantal: number; excl: number; btw: number; incl: number };
   algemeenTotaalIncl: number;
 };
-export type AfsluitingKort = { id: string; volgnummer: number | null; tot: string; totaal: string; aantalVerkopen: number };
+export type AfsluitingKort = { id: string; volgnummer: number | null; tot: string; boekdatum?: string | null; totaal: string; aantalVerkopen: number };
 
 export async function getDagoverzicht(): Promise<Dagrapport> {
   return (await fetch(`${BASE}/dagafsluiting/overzicht`)).json();
@@ -317,7 +319,22 @@ export type ProductVol = Product & {
   categorieId: string | null;
   leverancierId: string | null;
   voorraad: { locatieId: string; aantal: string; locatie?: Locatie }[];
+  // Statiegeld: een statiegeldsoort is zelf een product (isStatiegeld); een artikel verwijst ernaar.
+  isStatiegeld?: boolean;
+  statiegeldProductId?: string | null;
 };
+
+// Statiegeldsoorten (vaste bedragen, 0% BTW) — aan te maken vanuit kassa en beheer.
+export type StatiegeldSoort = { id: string; naam: string; verkoopprijs: string; btwTarief: BtwTarief };
+export async function getStatiegeldSoorten(): Promise<StatiegeldSoort[]> {
+  return jsonOrThrow(await fetch(`${BASE}/producten/statiegeld`));
+}
+export async function maakStatiegeldSoort(naam: string, bedrag: number): Promise<StatiegeldSoort> {
+  return jsonOrThrow(await fetch(`${BASE}/producten/statiegeld`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naam, bedrag }) }));
+}
+export async function wijzigStatiegeldSoort(id: string, input: { naam?: string; bedrag?: number }): Promise<StatiegeldSoort> {
+  return jsonOrThrow(await fetch(`${BASE}/producten/statiegeld/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
 
 export type ProductInput = {
   naam: string;
@@ -334,6 +351,7 @@ export type ProductInput = {
   afdelingId?: string | null;
   categorieId?: string | null;
   leverancierId?: string | null;
+  statiegeldProductId?: string | null; // statiegeldsoort die bij dit artikel hoort
 };
 
 async function jsonOrThrow(res: Response) {

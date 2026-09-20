@@ -182,6 +182,13 @@ model Product {
   vrijePrijs   Boolean  @default(false) // "diversen"/vrij-bedrag-knop: kassier tikt zelf het bedrag in
   fotoUrl      String?  // productfoto voor de webshop
   weegNummer   Int?     @unique // kort nummer voor de weeg-etiketbarcode (KG-producten)
+  // Statiegeld: een statiegeldsoort is zelf een product (isStatiegeld, 0% BTW, vast
+  // bedrag, geen voorraad, geen korting). Een gewoon artikel verwijst ernaar; de kassa
+  // zet het statiegeld dan automatisch mee op het ticket. Leeggoed terug = negatieve lijn.
+  isStatiegeld Boolean  @default(false)
+  statiegeld   Product? @relation("ProductStatiegeld", fields: [statiegeldProductId], references: [id], onDelete: SetNull)
+  statiegeldProductId String?
+  metStatiegeld Product[] @relation("ProductStatiegeld")
   createdAt    DateTime @default(now())
 
   btwTarief    BtwTarief   @relation(fields: [btwTariefId], references: [id])
@@ -334,6 +341,9 @@ model Cadeaubon {
   datumUitgifte DateTime  @default(now())
   ingewisseld   Boolean   @default(false)
   ingewisseldOp DateTime?
+  // CADEAUBON (verkocht) of TEGOED (tegoedbon uit een terugbetaling, bv. leeggoed/statiegeld).
+  soort         String    @default("CADEAUBON")
+  verkoopId     String?   // de verkoop (terugbetaling) waaruit de tegoedbon ontstond
   gebruiker     Gebruiker? @relation(fields: [gebruikerId], references: [id])
   gebruikerId   String?
   createdAt     DateTime  @default(now())
@@ -501,6 +511,9 @@ model Dagafsluiting {
   gebruikerId    String?
   vanaf          DateTime     // begin van de afgesloten periode
   tot            DateTime     // einde (moment van afsluiten)
+  // Boekdatum (YYYY-MM-DD, Brussel): de kassadag waarop deze ontvangsten horen = dag van
+  // de laatste verkoop; afsluiten ná middernacht (tot 05:00) telt dus nog bij de vorige dag.
+  boekdatum      String?
   aantalVerkopen Int
   totaal         Decimal      @db.Decimal(10, 2)
   perBetaalwijze Json         // { CASH: 123.45, BANCONTACT: ... }

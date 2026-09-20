@@ -3,7 +3,8 @@ import {
   getMeta, getProductenBeheer, getProduct, getProductByBarcode, nieuweBarcode,
   createProduct, updateProduct, createCategorie, createAfdeling, createLeverancier, voorraadOntvangst,
   uploadSiteAfbeelding, zetProductCategorie, verwijderProduct,
-  type Meta, type ProductVol, type ProductInput,
+  getStatiegeldSoorten, maakStatiegeldSoort,
+  type Meta, type ProductVol, type ProductInput, type StatiegeldSoort,
 } from '../api/client';
 
 // Beheerscherm (Fase 1): producten manueel of via barcode toevoegen/bewerken en
@@ -166,6 +167,22 @@ export function ProductForm({
   const [eenheid, setEenheid] = useState(product?.eenheid ?? 'STUK');
   const [fout, setFout] = useState('');
   const [bezig, setBezig] = useState(false);
+  // Statiegeld: de soort (vast bedrag) die bij dit artikel hoort; komt automatisch mee op het ticket.
+  const [statiegeldId, setStatiegeldId] = useState(product?.statiegeldProductId ?? '');
+  const [soorten, setSoorten] = useState<StatiegeldSoort[]>([]);
+  useEffect(() => { getStatiegeldSoorten().then(setSoorten).catch(() => {}); }, []);
+  const isStatiegeldSoort = !!product?.isStatiegeld; // dit product ís een statiegeldsoort
+  async function nieuweStatiegeldSoort() {
+    const naam = window.prompt('Naam van de statiegeldsoort (bv. Bierflesje, Bak 24)?');
+    if (!naam?.trim()) return;
+    const bedrag = Number((window.prompt('Statiegeldbedrag in euro (bv. 0,10)?') ?? '').replace(',', '.'));
+    if (!(bedrag > 0)) { setFout('Geef een geldig statiegeldbedrag.'); return; }
+    try {
+      const s = await maakStatiegeldSoort(naam.trim(), bedrag);
+      setSoorten(await getStatiegeldSoorten());
+      setStatiegeldId(s.id);
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Statiegeldsoort aanmaken mislukt'); }
+  }
 
   const num = (s: string) => Number(s.replace(',', '.'));
 
@@ -173,7 +190,7 @@ export function ProductForm({
     setFout('');
     if (!naam.trim()) { setFout('Naam is verplicht.'); return; }
     if (!verkoop || Number.isNaN(num(verkoop))) { setFout('Geef een geldige verkoopprijs.'); return; }
-    if (!afdId) { setFout('Kies een afdeling.'); return; }
+    if (!afdId && !isStatiegeldSoort) { setFout('Kies een afdeling.'); return; } // statiegeldsoorten staan in geen afdeling
     setBezig(true);
     const input: ProductInput = {
       naam: naam.trim(),
@@ -188,6 +205,7 @@ export function ProductForm({
       afdelingId: afdId || null,
       categorieId: catId || null,
       leverancierId: levId || null,
+      statiegeldProductId: isStatiegeldSoort ? null : (statiegeldId || null),
     };
     try {
       if (product) await updateProduct(product.id, input);
@@ -313,6 +331,23 @@ export function ProductForm({
           </div>
         </div>
       </div>
+
+      {isStatiegeldSoort ? (
+        <div style={{ margin: '12px 0 0', padding: 10, borderRadius: 8, background: '#f0f9ff', border: '1px solid #bae6fd', fontSize: 13, color: '#075985' }}>
+          ♻ Dit is een <strong>statiegeldsoort</strong>: de verkoopprijs is het vaste statiegeldbedrag (0% BTW, geen korting, geen voorraad). Koppel ze aan artikelen via het veld "Statiegeld" van dat artikel.
+        </div>
+      ) : (
+        <div style={{ marginTop: 12 }}>
+          <label style={muted}>Statiegeld (komt automatisch mee op het ticket)</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select value={statiegeldId} onChange={(e) => setStatiegeldId(e.target.value)} style={{ ...inp, flex: 1 }}>
+              <option value="">— geen statiegeld —</option>
+              {soorten.map((s) => <option key={s.id} value={s.id}>{s.naam} — € {Number(s.verkoopprijs).toFixed(2)}</option>)}
+            </select>
+            <button onClick={nieuweStatiegeldSoort} title="Nieuwe statiegeldsoort (naam + vast bedrag)" style={btnGrijs}>+</button>
+          </div>
+        </div>
+      )}
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 6px' }}>
         <input type="checkbox" checked={alcohol} onChange={(e) => setAlcohol(e.target.checked)} />

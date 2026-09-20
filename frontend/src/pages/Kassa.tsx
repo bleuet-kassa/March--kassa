@@ -11,7 +11,7 @@ import {
   createProduct,
   vraagDagafsluitingAan,
   getOpenAfsluitAanvraag,
-  getFactuurKlanten, zetKlantGegevens,
+  getFactuurKlanten, zetKlantGegevens, maakStatiegeldSoort,
   type FactuurKlant,
   type AfsluitAanvraag,
   type Betaalwijze,
@@ -48,6 +48,7 @@ type Lijn = {
   vrijBedrag?: boolean; // "diversen"/cadeaubon: bedrag door de kassier ingetikt
   vastAantal?: boolean; // aantal/gewicht ligt vast (bv. prijs/kg) — niet wijzigbaar
   retour?: boolean; // terugname/correctie: deze lijn wordt afgetrokken (negatief)
+  statiegeld?: boolean; // statiegeldlijn: vast bedrag, geen korting, geen afronding
 };
 
 // Het "getekende" aantal: bij een retour telt de lijn negatief mee, zodat ze
@@ -384,27 +385,79 @@ export function Kassa() {
       if (!ok) return;
     }
     setLijnen((l) => {
-      if (!weeg) {
-        // Losse stukproducten zonder eigen korting tellen we samen — maar enkel
-        // met een lijn van hetzelfde teken (gewone verkoop bij verkoop, retour bij retour).
-        const bestaat = l.find((x) => x.productId === p.id && x.kortingPct === 0 && !!x.retour === retourModus);
-        if (bestaat) return l.map((x) => (x === bestaat ? { ...x, aantal: x.aantal + aantal } : x));
-      }
-      return [
+      let nieuw: Lijn[];
+      // Losse stukproducten zonder eigen korting tellen we samen — maar enkel
+      // met een lijn van hetzelfde teken (gewone verkoop bij verkoop, retour bij retour).
+      const bestaat = weeg ? undefined : l.find((x) => x.productId === p.id && x.kortingPct === 0 && !!x.retour === retourModus);
+      if (bestaat) nieuw = l.map((x) => (x === bestaat ? { ...x, aantal: x.aantal + aantal } : x));
+      else nieuw = [
         ...l,
         {
           key: genKey(),
           productId: p.id,
           naam: p.naam,
-          prijs: weeg ? Number(p.verkoopprijs) : rond5(Number(p.verkoopprijs)), // stuk: stukprijs op 5 cent; weeg: prijs/kg ongewijzigd (lijntotaal wordt afgerond)
+          prijs: weeg || p.isStatiegeld ? Number(p.verkoopprijs) : rond5(Number(p.verkoopprijs)), // stuk: stukprijs op 5 cent; weeg: prijs/kg ongewijzigd (lijntotaal wordt afgerond); statiegeld: exact
           btwPercentage: Number(p.btwTarief.percentage),
           isAlcohol: p.isAlcohol,
           aantal,
           kortingPct: 0,
           retour: retourModus,
+          statiegeld: !!p.isStatiegeld,
         },
       ];
+      // Artikel met statiegeld: het statiegeld komt automatisch mee op het ticket.
+      return weeg ? nieuw : pasStatiegeldAan(nieuw, p, aantal, retourModus);
     });
+  }
+
+  // Statiegeld volgt het artikel: past de statiegeldlijn (zelfde teken) aan met `delta` stuks.
+  function pasStatiegeldAan(l: Lijn[], p: ProductVol | undefined, delta: number, retour: boolean): Lijn[] {
+    const sp = p?.statiegeldProductId ? producten.find((x) => x.id === p.statiegeldProductId) : undefined;
+    if (!sp || !delta) return l;
+    const bestaat = l.find((x) => x.statiegeld && x.productId === sp.id && !!x.retour === retour);
+    if (bestaat) {
+      return l
+        .map((x) => (x === bestaat ? { ...x, aantal: Math.round((x.aantal + delta) * 1000) / 1000 } : x))
+        .filter((x) => x.aantal > 0);
+    }
+    if (delta < 0) return l;
+    return [...l, { key: genKey(), productId: sp.id, naam: sp.naam, prijs: Number(sp.verkoopprijs), btwPercentage: Number(sp.btwTarief.percentage), isAlcohol: false, aantal: delta, kortingPct: 0, retour, statiegeld: true }];
+  }
+  const productVanLijn = (x: Lijn) => (x.statiegeld ? undefined : producten.find((p) => p.id === x.productId));
+
+  // Leeggoed terug: per statiegeldsoort het aantal -> negatieve statiegeldlijnen op het ticket.
+  const statiegeldSoorten = useMemo(
+    () => producten.filter((p) => p.isStatiegeld).sort((a, b) => Number(a.verkoopprijs) - Number(b.verkoopprijs) || a.naam.localeCompare(b.naam)),
+    [producten],
+  );
+  const [leeggoedOpen, setLeeggoedOpen] = useState(false);
+  const [leegTelling, setLeegTelling] = useState<Record<string, number>>({});
+  const [nieuweSoort, setNieuweSoort] = useState({ naam: '', bedrag: '' });
+  const leegTotaal = statiegeldSoorten.reduce((s, sp) => s + (leegTelling[sp.id] ?? 0) * Number(sp.verkoopprijs), 0);
+  function leeggoedBevestig() {
+    setLijnen((l) => {
+      let nieuw = l;
+      for (const sp of statiegeldSoorten) {
+        const n = leegTelling[sp.id] ?? 0;
+        if (n <= 0) continue;
+        const bestaat = nieuw.find((x) => x.statiegeld && x.productId === sp.id && x.retour);
+        nieuw = bestaat
+          ? nieuw.map((x) => (x === bestaat ? { ...x, aantal: x.aantal + n } : x))
+          : [...nieuw, { key: genKey(), productId: sp.id, naam: `${sp.naam} (leeggoed terug)`, prijs: Number(sp.verkoopprijs), btwPercentage: Number(sp.btwTarief.percentage), isAlcohol: false, aantal: n, kortingPct: 0, retour: true, statiegeld: true }];
+      }
+      return nieuw;
+    });
+    setLeegTelling({}); setLeeggoedOpen(false);
+  }
+  async function maakNieuweSoort() {
+    const bedrag = Number(nieuweSoort.bedrag.replace(',', '.'));
+    if (!nieuweSoort.naam.trim() || !(bedrag > 0)) { setFout('Geef een naam en een bedrag voor de nieuwe statiegeldsoort.'); return; }
+    try {
+      await maakStatiegeldSoort(nieuweSoort.naam.trim(), bedrag);
+      await ververCache();
+      setProducten(getCachedProducten());
+      setNieuweSoort({ naam: '', bedrag: '' }); setFout('');
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Statiegeldsoort aanmaken mislukt'); }
   }
 
   // Klik op een producttegel: weegproduct -> gewicht vragen; anders 1 stuk.
@@ -481,18 +534,27 @@ export function Kassa() {
   }
 
   function wijzigAantal(key: string, delta: number) {
-    setLijnen((l) =>
-      l
+    setLijnen((l) => {
+      const x0 = l.find((x) => x.key === key);
+      const nieuw = l
         .map((x) => (x.key === key ? { ...x, aantal: Math.round((x.aantal + delta) * 1000) / 1000 } : x))
-        .filter((x) => x.aantal > 0),
-    );
+        .filter((x) => x.aantal > 0);
+      if (!x0) return nieuw;
+      // Het statiegeld volgt het artikel (verdwijnt de lijn, dan ook haar statiegeld).
+      const echt = x0.aantal + delta <= 0 ? -x0.aantal : delta;
+      return pasStatiegeldAan(nieuw, productVanLijn(x0), echt, !!x0.retour);
+    });
   }
 
   // Direct een aantal invoeren (handig voor gewichten, bv. 0,750 kg).
   function zetAantal(key: string, waarde: string) {
     const n = Number(waarde.replace(',', '.'));
     if (Number.isNaN(n)) return;
-    setLijnen((l) => l.map((x) => (x.key === key ? { ...x, aantal: n } : x)));
+    setLijnen((l) => {
+      const x0 = l.find((x) => x.key === key);
+      const nieuw = l.map((x) => (x.key === key ? { ...x, aantal: n } : x));
+      return x0 ? pasStatiegeldAan(nieuw, productVanLijn(x0), n - x0.aantal, !!x0.retour) : nieuw;
+    });
   }
 
   // Korting per lijn (0-100%), begrensd.
@@ -502,13 +564,24 @@ export function Kassa() {
   }
 
   function verwijder(key: string) {
-    setLijnen((l) => l.filter((x) => x.key !== key));
+    setLijnen((l) => {
+      const x0 = l.find((x) => x.key === key);
+      const nieuw = l.filter((x) => x.key !== key);
+      return x0 ? pasStatiegeldAan(nieuw, productVanLijn(x0), -x0.aantal, !!x0.retour) : nieuw;
+    });
   }
 
   // Retour/terugname: zet deze lijn op negatief (of terug op positief). Handig om
   // een verkeerd aangeslagen artikel of diverse af te trekken van (o.a.) de rekening.
   function wisselRetour(key: string) {
-    setLijnen((l) => l.map((x) => (x.key === key ? { ...x, retour: !x.retour } : x)));
+    setLijnen((l) => {
+      const x0 = l.find((x) => x.key === key);
+      const nieuw = l.map((x) => (x.key === key ? { ...x, retour: !x.retour } : x));
+      if (!x0) return nieuw;
+      // Het statiegeld van dit artikel wisselt mee van teken.
+      const p = productVanLijn(x0);
+      return pasStatiegeldAan(pasStatiegeldAan(nieuw, p, -x0.aantal, !!x0.retour), p, x0.aantal, !x0.retour);
+    });
   }
 
   // Gekozen kortingsregeling (personeel/F&F) geldt voor de héle verkoop.
@@ -524,7 +597,7 @@ export function Kassa() {
     : undefined;
   // Lijnkorting (enkel op deze lijn). De nettoprijs is de stukprijs ná lijnkorting;
   // de verkoopbrede korting komt daar bovenop op het subtotaal.
-  const lijnKorting = (l: Lijn) => Math.min(100, Math.max(l.kortingPct || 0, 0));
+  const lijnKorting = (l: Lijn) => (l.statiegeld ? 0 : Math.min(100, Math.max(l.kortingPct || 0, 0))); // statiegeld: nooit korting
   const nettoPrijs = (l: Lijn) => l.prijs * (1 - lijnKorting(l) / 100);
   // Weeglijn (prijs/kg × gewicht): het gewogen lijntotaal wordt op 5 cent afgerond.
   const isWeegLijn = (l: Lijn) => (!!l.vrijBedrag && !!l.vastAantal) || producten.find((p) => p.id === l.productId)?.eenheid === 'KG';
@@ -539,14 +612,17 @@ export function Kassa() {
     () => lijnen.reduce((s, l) => s + lijnBedrag(l), 0),
     [lijnen],
   );
-  const totaal = Math.round(subtotaal * saleFactor * 100) / 100;
+  // Statiegeld valt buiten de verkoopbrede korting (vast bedrag).
+  const statiegeldSub = useMemo(() => lijnen.filter((l) => l.statiegeld).reduce((s, l) => s + lijnBedrag(l), 0), [lijnen]);
+  const totaal = Math.round(((subtotaal - statiegeldSub) * saleFactor + statiegeldSub) * 100) / 100;
 
   // BTW-uitsplitsing per tarief (na lijnkorting, dan geschaald met de
   // verkoopbrede korting). De server rekent het definitief uit bij het afrekenen.
   const btwOverzicht = useMemo(() => {
     const per = new Map<number, { maatstaf: number; btw: number }>();
     for (const l of lijnen) {
-      const bruto = lijnBedrag(l);
+      // Alles behalve statiegeld schaalt mee met de verkoopbrede korting (hieronder ×saleFactor).
+      const bruto = l.statiegeld && saleFactor > 0 ? lijnBedrag(l) / saleFactor : lijnBedrag(l);
       const excl = bruto / (1 + l.btwPercentage / 100);
       const rij = per.get(l.btwPercentage) ?? { maatstaf: 0, btw: 0 };
       rij.maatstaf += excl;
@@ -606,8 +682,11 @@ export function Kassa() {
 
   // Bancontact/Kaart kan je niet gebruiken om cash terug te geven: bij een netto
   // terugbetaling (en niet op rekening) zetten we de betaalwijze op Cash.
+  // Uitzondering: een TEGOEDBON (betaalwijze Cadeaubon, negatief) — bv. voor leeggoed.
   useEffect(() => {
-    if (isTerugbetaling && !bon.opRekening && !bon.gesplitst && betaalwijze !== 'CASH') setBetaalwijze('CASH');
+    if (isTerugbetaling && !bon.opRekening && !bon.gesplitst && betaalwijze !== 'CASH' && betaalwijze !== 'CADEAUBON') setBetaalwijze('CASH');
+    // Geen terugbetaling (meer): "Cadeaubon" is geen gewone betaalwijze (dat gaat via Gesplitst).
+    if (!isTerugbetaling && betaalwijze === 'CADEAUBON') setBetaalwijze('BANCONTACT');
   }, [isTerugbetaling, bon.opRekening, bon.gesplitst, betaalwijze]);
 
   // Gesplitste betaling: betaalwijzen die je kan combineren (incl. cadeaubon).
@@ -841,10 +920,53 @@ export function Kassa() {
               {sp.naam}
             </button>
           ))}
+          <button onClick={() => { setLeegTelling({}); setLeeggoedOpen(true); }} style={{ ...diversenKnop, background: '#f0f9ff', borderColor: '#bae6fd', color: '#075985' }}>
+            ♻ Leeggoed terug
+          </button>
           <button onClick={() => setNieuwArtikel('')} style={{ ...diversenKnop, background: '#ecfdf5', borderColor: '#a7f3d0', color: '#166534' }}>
             + Nieuw artikel
           </button>
         </div>
+
+        {/* Leeggoed terug: per statiegeldsoort het aantal aanduiden -> wordt afgetrokken op het ticket */}
+        {leeggoedOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={() => setLeeggoedOpen(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 16, width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>♻ Leeggoed terug</div>
+              <div style={{ fontSize: 13, color: '#6b7280', margin: '4px 0 10px' }}>Duid aan wat de klant terugbrengt. Het statiegeld wordt afgetrokken van het ticket; is er geen aankoop, dan geef je het terug als tegoedbon of cash.</div>
+              {statiegeldSoorten.length === 0 && <div style={{ color: '#b45309', fontSize: 14, marginBottom: 8 }}>Nog geen statiegeldsoorten. Maak er hieronder een aan.</div>}
+              {statiegeldSoorten.map((sp) => {
+                const n = leegTelling[sp.id] ?? 0;
+                return (
+                  <div key={sp.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{sp.naam}</div>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>€ {Number(sp.verkoopprijs).toFixed(2)} per stuk</div>
+                    </div>
+                    <button onClick={() => setLeegTelling({ ...leegTelling, [sp.id]: Math.max(0, n - 1) })} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>−</button>
+                    <input value={n || ''} onChange={(e) => setLeegTelling({ ...leegTelling, [sp.id]: Math.max(0, Math.round(Number(e.target.value) || 0)) })} inputMode="numeric" placeholder="0" style={{ width: 56, padding: 8, fontSize: 16, textAlign: 'center', borderRadius: 6, border: '1px solid #cbd5e1' }} />
+                    <button onClick={() => setLeegTelling({ ...leegTelling, [sp.id]: n + 1 })} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>+</button>
+                    <div style={{ width: 70, textAlign: 'right', fontWeight: 600 }}>{n > 0 ? `−€ ${(n * Number(sp.verkoopprijs)).toFixed(2)}` : ''}</div>
+                  </div>
+                );
+              })}
+              <div style={{ marginTop: 10, padding: 10, background: '#f9fafb', borderRadius: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>+ Nieuwe statiegeldsoort</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <input value={nieuweSoort.naam} onChange={(e) => setNieuweSoort({ ...nieuweSoort, naam: e.target.value })} placeholder="bv. Bierflesje, Bak 24" style={{ flex: 1, minWidth: 140, padding: 8, fontSize: 15, borderRadius: 6, border: '1px solid #cbd5e1' }} />
+                  <input value={nieuweSoort.bedrag} onChange={(e) => setNieuweSoort({ ...nieuweSoort, bedrag: e.target.value })} inputMode="decimal" placeholder="€ 0,10" style={{ width: 90, padding: 8, fontSize: 15, borderRadius: 6, border: '1px solid #cbd5e1', textAlign: 'right' }} />
+                  <button onClick={maakNieuweSoort} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>Toevoegen</button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button onClick={leeggoedBevestig} disabled={leegTotaal <= 0} style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: leegTotaal > 0 ? '#0369a1' : '#cbd5e1', color: '#fff', fontWeight: 700, fontSize: 16, cursor: leegTotaal > 0 ? 'pointer' : 'not-allowed' }}>
+                  {leegTotaal > 0 ? `−€ ${leegTotaal.toFixed(2)} op het ticket` : 'Duid het leeggoed aan'}
+                </button>
+                <button onClick={() => setLeeggoedOpen(false)} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>Annuleren</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Tegels: eerst de afdelingen (winkelsecties), dan de producten. */}
         {afdId === '' ? (
@@ -1256,8 +1378,12 @@ export function Kassa() {
 
           {!bon.opRekening && !bon.gesplitst && isTerugbetaling && (
             <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
-              <div style={{ fontSize: 13, color: '#b91c1c' }}>Terugbetaling — cash uit de lade</div>
+              <div style={{ fontSize: 13, color: '#b91c1c' }}>Terugbetaling — {betaalwijze === 'CADEAUBON' ? 'als tegoedbon (nummer komt op het ticket)' : 'cash uit de lade'}</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: '#b91c1c' }}>Terug te geven: € {Math.abs(totaal).toFixed(2)}</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button onClick={() => setBetaalwijze('CADEAUBON' as Betaalwijze)} style={{ flex: 1, padding: 10, borderRadius: 8, cursor: 'pointer', fontWeight: 700, border: betaalwijze === 'CADEAUBON' ? '2px solid #b91c1c' : '1px solid #fca5a5', background: betaalwijze === 'CADEAUBON' ? '#b91c1c' : '#fff', color: betaalwijze === 'CADEAUBON' ? '#fff' : '#b91c1c' }}>🎟 Tegoedbon</button>
+                <button onClick={() => setBetaalwijze('CASH')} style={{ flex: 1, padding: 10, borderRadius: 8, cursor: 'pointer', fontWeight: 700, border: betaalwijze === 'CASH' ? '2px solid #b91c1c' : '1px solid #fca5a5', background: betaalwijze === 'CASH' ? '#b91c1c' : '#fff', color: betaalwijze === 'CASH' ? '#fff' : '#b91c1c' }}>Cash terug</button>
+              </div>
             </div>
           )}
 
@@ -1854,6 +1980,14 @@ export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop',
               </div>
             )}
           </>
+        )}
+        {ticket.tegoedbon && (
+          <div style={{ margin: '10px 0', padding: 10, border: '2px dashed #111', textAlign: 'center' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>TEGOEDBON</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>€ {ticket.tegoedbon.bedrag.toFixed(2)}</div>
+            <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{ticket.tegoedbon.nummer}</div>
+            <div style={{ fontSize: 11, marginTop: 4 }}>Geldig als betaalmiddel in de winkel. Bewaar dit ticket; niet inwisselbaar voor geld.</div>
+          </div>
         )}
         <hr />
         <div style={{ textAlign: 'center', fontSize: 11, color: '#555', marginTop: 6, lineHeight: 1.5 }}>

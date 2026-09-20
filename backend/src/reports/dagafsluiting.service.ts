@@ -6,6 +6,7 @@ import { PushService } from '../push/push.service';
 import { ScradaService } from '../scrada/scrada.service';
 import { ScradaDagboekService } from '../scrada/scrada.dagboek.service';
 import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
+import { kassadag, boekdatumVan } from '../common/kassadag';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
@@ -222,6 +223,9 @@ export class DagafsluitingService {
       const nu = new Date();
       const vanaf = verkopen[0]?.datum ?? nu;
       const volgnummer = (await tx.dagafsluiting.count()) + 1;
+      // Boekdatum = de gestarte kassadag: de dag van de eerste verkoop sinds de vorige
+      // afsluiting (zonder verkopen: vandaag). Afsluiten na middernacht boekt dus nog op die dag.
+      const boekdatum = kassadag(vanaf);
 
       // Betalingen van openstaande rekeningen die in deze afsluiting meegaan.
       const rekeningBetalingen = await this.openRekeningBetalingen(tx);
@@ -247,6 +251,7 @@ export class DagafsluitingService {
           gebruikerId: gebruikerId ?? null,
           vanaf,
           tot: nu,
+          boekdatum,
           aantalVerkopen: verkopen.length,
           totaal: new Prisma.Decimal(r2(totaalIncl)),
           perBetaalwijze: rapport.dagontvangsten.perBetaalwijze as Prisma.InputJsonValue,
@@ -269,7 +274,7 @@ export class DagafsluitingService {
         });
       }
 
-      return { id: afsluiting.id, ...rapport };
+      return { id: afsluiting.id, ...rapport, boekdatum };
     });
   }
 
@@ -466,6 +471,7 @@ export class DagafsluitingService {
       verkoper: a.gebruiker?.naam ?? null,
       vanaf: a.vanaf,
       tot: a.tot,
+      boekdatum: boekdatumVan(a), // de kassadag (niet het afsluitmoment)
       dagontvangsten: {
         aantal: a.aantalVerkopen,
         perBetaalwijze,
@@ -508,11 +514,13 @@ export class DagafsluitingService {
     return [kop, ...rijen].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   }
 
-  geschiedenis() {
-    return this.prisma.dagafsluiting.findMany({
+  async geschiedenis() {
+    const rows = await this.prisma.dagafsluiting.findMany({
       orderBy: { tot: 'desc' },
       take: 60,
-      select: { id: true, volgnummer: true, tot: true, totaal: true, aantalVerkopen: true },
+      select: { id: true, volgnummer: true, vanaf: true, tot: true, boekdatum: true, totaal: true, aantalVerkopen: true },
     });
+    // boekdatum = de kassadag (afsluiten na middernacht hoort nog bij de vorige dag).
+    return rows.map((r) => ({ ...r, boekdatum: boekdatumVan(r) }));
   }
 }

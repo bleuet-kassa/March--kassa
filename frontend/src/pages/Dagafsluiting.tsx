@@ -132,7 +132,7 @@ export function Dagafsluiting() {
             {register.map((a) => (
               <tr key={a.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ padding: 4 }}>{a.volgnummer ?? '—'}</td>
-                <td style={{ padding: 4 }}>{new Date(a.tot).toLocaleDateString('nl-BE')}</td>
+                <td style={{ padding: 4 }} title={`Afgesloten op ${new Date(a.tot).toLocaleString('nl-BE')}`}>{a.boekdatum ? new Date(a.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE') : new Date(a.tot).toLocaleDateString('nl-BE')}</td>
                 <td style={{ padding: 4, textAlign: 'right' }}>{euro(a.totaal)}</td>
                 <td style={{ padding: 4, whiteSpace: 'nowrap' }}>
                   <button onClick={() => bekijk(a.id)} style={btnMini}>Bekijk</button>{' '}
@@ -183,7 +183,8 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
         DAGONTVANGSTEN {rapport.volgnummer != null ? `nr ${rapport.volgnummer}` : '(voorbeeld)'}
       </div>
       <div style={{ textAlign: 'center', fontSize: 12, color: '#555' }}>
-        {rapport.tot ? new Date(rapport.tot).toLocaleString('nl-BE') : ''}<br />
+        {rapport.boekdatum && <><strong>Dag: {new Date(rapport.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE')}</strong><br /></>}
+        {rapport.tot ? `${rapport.boekdatum ? 'afgesloten ' : ''}${new Date(rapport.tot).toLocaleString('nl-BE')}` : ''}<br />
         {rapport.locatie}{rapport.verkoper ? ` · ${rapport.verkoper}` : ''}
       </div>
       <hr />

@@ -3,6 +3,7 @@ import { Dagafsluiting } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScradaService } from './scrada.service';
+import { boekdatumVan } from '../common/kassadag';
 
 // ---------------------------------------------------------------------------
 //  Scrada-DAGONTVANGSTENBOEK: per afgesloten kassadag (Dagafsluiting) één
@@ -143,7 +144,7 @@ export class ScradaDagboekService {
     const vanaf = await this.scrada.vanaf();
     const rows = await this.prisma.dagafsluiting.findMany({ orderBy: { tot: 'desc' }, take: 90 });
     return rows.map((a) => ({
-      id: a.id, volgnummer: a.volgnummer, datum: brusselDatum(a.tot), tot: a.tot, totaal: Number(a.totaal), aantalVerkopen: a.aantalVerkopen,
+      id: a.id, volgnummer: a.volgnummer, datum: boekdatumVan(a), tot: a.tot, totaal: Number(a.totaal), aantalVerkopen: a.aantalVerkopen,
       scradaStatus: a.scradaStatus, scradaRef: a.scradaRef, scradaVerstuurdOp: a.scradaVerstuurdOp, scradaFout: a.scradaFout,
       inAanmerking: !!vanaf && a.tot >= vanaf,
     }));
@@ -194,7 +195,8 @@ export class ScradaDagboekService {
         ontbreekt.push(`betalingen (€ ${somP.toFixed(2)}) ≠ lijnen (€ ${somL.toFixed(2)})`);
       }
     }
-    return { boeking: { date: brusselDatum(a.tot), lines, paymentMethods }, ontbreekt };
+    // Datum in Scrada = de kassadag (afsluiten na middernacht blijft de vorige dag).
+    return { boeking: { date: boekdatumVan(a), lines, paymentMethods }, ontbreekt };
   }
 
   async preview(id: string) {

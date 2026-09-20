@@ -23,6 +23,22 @@ export class ProductsController {
     return this.products.speciaal();
   }
 
+  // GET /producten/statiegeld -> statiegeldsoorten (vaste bedragen) voor kassa en beheer
+  @Get('statiegeld')
+  statiegeld() {
+    return this.products.statiegeldSoorten();
+  }
+  // POST /producten/statiegeld { naam, bedrag } -> nieuwe statiegeldsoort (alle medewerkers, ook vanuit de kassa)
+  @Post('statiegeld')
+  maakStatiegeld(@Body() body: { naam: string; bedrag: number }) {
+    return this.products.maakStatiegeldSoort(body);
+  }
+  // PATCH /producten/statiegeld/:id { naam?, bedrag? } -> statiegeldsoort aanpassen
+  @Patch('statiegeld/:id')
+  wijzigStatiegeld(@Param('id') id: string, @Body() body: { naam?: string; bedrag?: number }) {
+    return this.products.wijzigStatiegeldSoort(id, body ?? {});
+  }
+
   // GET /producten/barcode/5410228123456  -> product voor de kassa
   @Get('barcode/:barcode')
   findByBarcode(@Param('barcode') barcode: string) {

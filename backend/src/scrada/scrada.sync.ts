@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
 import { ScradaService, SYNC_UUR } from './scrada.service';
 import { ScradaDagboekService } from './scrada.dagboek.service';
+import { boekdatumVan } from '../common/kassadag';
 
 // Dagelijkse HERINNERING om 23:59 (Europe/Brussels). Er wordt NIETS automatisch
 // verstuurd: de beheerder bevestigt het versturen altijd zelf. Staan er
@@ -86,7 +87,8 @@ export class ScradaSync implements OnModuleInit, OnModuleDestroy {
     // Link naar de oudste openstaande dag; zijn er enkel facturen, dan naar de laatste afgesloten dag.
     const doel = open[0] ?? (await this.prisma.dagafsluiting.findFirst({ orderBy: { tot: 'desc' } }));
     const url = doel ? `${basis}/bevestig-afsluiting/${await this.dagboek.tokenVoorDag(doel.id)}` : `${basis}/kassa/boekhouding`;
-    const datumNl = open[0]?.tot.toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' });
+    // Kassadag (niet het afsluitmoment): afsluiten na middernacht hoort nog bij de vorige dag.
+    const datumNl = open[0] ? boekdatumVan(open[0]).split('-').reverse().join('/') : undefined;
     const delen: string[] = [];
     if (open.length === 1) delen.push(`Dagafsluiting${open[0].volgnummer ? ` #${open[0].volgnummer}` : ''} van ${datumNl} (€ ${Number(open[0].totaal).toFixed(2)}) staat nog niet in Scrada.`);
     else if (open.length > 1) delen.push(`${open.length} afgesloten dagen staan nog niet in Scrada (oudste: ${datumNl}).`);

@@ -19,6 +19,7 @@ export type ProductInput = {
   afdelingId?: string | null;
   categorieId?: string | null;
   leverancierId?: string | null;
+  statiegeldProductId?: string | null; // de statiegeldsoort die bij dit artikel hoort
 };
 
 @Injectable()
@@ -111,8 +112,46 @@ export class ProductsService {
         afdelingId,
         categorieId: input.categorieId || null,
         leverancierId: input.leverancierId || null,
+        statiegeldProductId: input.statiegeldProductId || null,
       },
       include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
+    });
+  }
+
+  // --- statiegeld ---------------------------------------------------------------
+  // Een statiegeldsoort (bv. "Bierflesje € 0,10", "Bak € 4,50") is een product in de
+  // categorie "Statiegeld": 0% BTW, vast bedrag, geen voorraad, geen korting.
+  statiegeldSoorten() {
+    return this.prisma.product.findMany({ where: { isStatiegeld: true, actief: true }, include: { btwTarief: true }, orderBy: [{ verkoopprijs: 'asc' }, { naam: 'asc' }] });
+  }
+  private async statiegeldBasis() {
+    let btw = await this.prisma.btwTarief.findFirst({ where: { percentage: 0 } });
+    if (!btw) btw = await this.prisma.btwTarief.create({ data: { naam: 'Statiegeld 0%', percentage: new Prisma.Decimal(0) } });
+    let cat = await this.prisma.categorie.findFirst({ where: { naam: { equals: 'Statiegeld', mode: 'insensitive' } } });
+    if (!cat) cat = await this.prisma.categorie.create({ data: { naam: 'Statiegeld' } });
+    return { btwTariefId: btw.id, categorieId: cat.id };
+  }
+  async maakStatiegeldSoort(input: { naam: string; bedrag: number }) {
+    const naam = String(input.naam ?? '').trim();
+    const bedrag = Math.round(Number(input.bedrag) * 100) / 100;
+    if (!naam) throw new BadRequestException('Geef een naam voor de statiegeldsoort (bv. "Bierflesje").');
+    if (!(bedrag > 0)) throw new BadRequestException('Geef een geldig statiegeldbedrag.');
+    const { btwTariefId, categorieId } = await this.statiegeldBasis();
+    const volledigeNaam = /^statiegeld/i.test(naam) ? naam : `Statiegeld ${naam}`;
+    return this.prisma.product.create({
+      data: { naam: volledigeNaam, verkoopprijs: new Prisma.Decimal(bedrag), btwTariefId, categorieId, isStatiegeld: true, webshopZichtbaar: false },
+      include: { btwTarief: true },
+    });
+  }
+  async wijzigStatiegeldSoort(id: string, input: { naam?: string; bedrag?: number }) {
+    const p = await this.prisma.product.findUnique({ where: { id } });
+    if (!p || !p.isStatiegeld) throw new NotFoundException('Statiegeldsoort niet gevonden.');
+    const bedrag = input.bedrag != null ? Math.round(Number(input.bedrag) * 100) / 100 : null;
+    if (bedrag != null && !(bedrag > 0)) throw new BadRequestException('Geef een geldig statiegeldbedrag.');
+    return this.prisma.product.update({
+      where: { id },
+      data: { ...(input.naam?.trim() ? { naam: input.naam.trim() } : {}), ...(bedrag != null ? { verkoopprijs: new Prisma.Decimal(bedrag) } : {}) },
+      include: { btwTarief: true },
     });
   }
 
@@ -137,6 +176,8 @@ export class ProductsService {
         afdelingId,
         categorieId: input.categorieId || null,
         leverancierId: input.leverancierId || null,
+        // Een statiegeldsoort kan zelf geen statiegeld dragen; niet meegestuurd = ongewijzigd.
+        ...(input.statiegeldProductId !== undefined ? { statiegeldProductId: input.statiegeldProductId && input.statiegeldProductId !== id ? input.statiegeldProductId : null } : {}),
       },
       include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
     });

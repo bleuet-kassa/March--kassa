@@ -119,7 +119,10 @@ export class SalesService {
       // verkoopprijs is de consumentenprijs INCL. BTW.
       const pct = Number(product.btwTarief.percentage);
       // korting per lijn (0-100%): verlaagt de effectieve stukprijs.
-      const korting = Math.min(Math.max(Number(l.kortingPct) || 0, 0), 100);
+      // Statiegeld: vast bedrag — nooit korting (lijn noch verkoopbreed) en geen afronding.
+      const isStatiegeld = product.isStatiegeld;
+      const korting = isStatiegeld ? 0 : Math.min(Math.max(Number(l.kortingPct) || 0, 0), 100);
+      const lijnVerkoopKorting = isStatiegeld ? 0 : verkoopKorting;
       // "Diversen"/vrij-bedrag: enkel producten met vrijePrijs mogen een eigen
       // bedrag meesturen (kassier tikt het in). Anders altijd de vaste prijs.
       const vrij = product.vrijePrijs && Number(l.bedrag) > 0;
@@ -132,11 +135,11 @@ export class SalesService {
       //  - stukproduct/diversen: op 5 cent, op de stukprijs
       //  - weegproduct: op 5 cent, maar op het gewogen lijntotaal (zie hieronder)
       if (aanKassa && isCadeaubon) stukCent = naarBoven(stukCent, 100);
-      else if (aanKassa && !isKg) stukCent = naarBoven(stukCent, 5);
+      else if (aanKassa && !isKg && !isStatiegeld) stukCent = naarBoven(stukCent, 5);
       const aantal = l.aantal; // bedrag is de stukprijs; aantal telt (ook bij diversen)
       // Eerst de lijnkorting, dan de verkoopbrede korting (gestapeld).
       const naLijnKortingCent = stukCent * (1 - korting / 100);
-      const effUnitCent = Math.round(naLijnKortingCent * (1 - verkoopKorting / 100));
+      const effUnitCent = Math.round(naLijnKortingCent * (1 - lijnVerkoopKorting / 100));
       let brutoCent = Math.round(effUnitCent * aantal);
       // Weegproduct: het gewogen lijntotaal (prijs/kg × gewicht) op 5 cent afronden.
       if (aanKassa && isKg) brutoCent = naarBoven(brutoCent, 5);
@@ -288,8 +291,8 @@ export class SalesService {
       // product op deze locatie, dan maken we ze aan (kan negatief worden —
       // dat is een signaal dat de stock niet klopte, niet een blokkering).
       for (const l of lijnen) {
-        // Diversen/cadeaubon (vrijePrijs) hebben geen voorraad — overslaan.
-        if (perId.get(l.productId)?.vrijePrijs) continue;
+        // Diversen/cadeaubon (vrijePrijs) en statiegeld hebben geen voorraad — overslaan.
+        if (perId.get(l.productId)?.vrijePrijs || perId.get(l.productId)?.isStatiegeld) continue;
         await tx.voorraad.upsert({
           where: {
             productId_locatieId: { productId: l.productId, locatieId: locatie.id },
@@ -314,7 +317,35 @@ export class SalesService {
       try { await this.facturen.maakVoorVerkoop(verkoop.id); }
       catch (e) { console.warn(`Ticketfactuur voor verkoop ${verkoop.id} niet aangemaakt: ${e instanceof Error ? e.message : e}`); }
     }
-    return this.metTicket(verkoop, ontvangen);
+    // Terugbetaling als TEGOEDBON (betaalwijze Cadeaubon met een negatief bedrag, bv. leeggoed
+    // zonder nieuwe aankoop): de bon komt in het cadeaubon-register en op het ticket.
+    const tegoedBedrag = Math.round(-betaalLijnen.filter((b) => b.betaalwijze === 'CADEAUBON' && b.bedrag < 0).reduce((s, b) => s + b.bedrag, 0) * 100) / 100;
+    if (tegoedBedrag > 0) {
+      try { await this.maakTegoedbon(verkoop.id, tegoedBedrag, gebruikerId); }
+      catch (e) { console.warn(`Tegoedbon voor verkoop ${verkoop.id} niet aangemaakt: ${e instanceof Error ? e.message : e}`); }
+    }
+    return this.metTicket(verkoop, ontvangen, await this.tegoedbonVan(verkoop.id));
+  }
+
+  // Tegoedbon TB00001… in het cadeaubon-register (soort TEGOED), gekoppeld aan de verkoop.
+  private async maakTegoedbon(verkoopId: string, bedrag: number, gebruikerId?: string) {
+    const bestaat = await this.prisma.cadeaubon.findFirst({ where: { verkoopId, soort: 'TEGOED' } });
+    if (bestaat) return bestaat;
+    let n = (await this.prisma.cadeaubon.count({ where: { soort: 'TEGOED' } })) + 1;
+    for (let poging = 0; poging < 20; poging++, n++) {
+      const nummer = 'TB' + String(n).padStart(5, '0');
+      try {
+        return await this.prisma.cadeaubon.create({ data: { nummer, bedrag: new Prisma.Decimal(bedrag), soort: 'TEGOED', verkoopId, gebruikerId: gebruikerId ?? null } });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue; // nummer bestaat al -> volgende
+        throw e;
+      }
+    }
+    throw new BadRequestException('Geen vrij tegoedbonnummer gevonden.');
+  }
+  private async tegoedbonVan(verkoopId: string) {
+    const b = await this.prisma.cadeaubon.findFirst({ where: { verkoopId, soort: 'TEGOED' } });
+    return b ? { nummer: b.nummer, bedrag: Number(b.bedrag) } : null;
   }
 
   // Lijst van recente verkopen (voor het terugvinden/herafdrukken van tickets).
@@ -381,7 +412,7 @@ export class SalesService {
       // Voorraad terugboeken (spiegelbeeld van het afrekenen): diversen/vrijePrijs
       // hebben geen voorraad. Het teken van l.aantal (negatief bij retour) klopt vanzelf.
       for (const l of verkoop.lijnen) {
-        if (l.product?.vrijePrijs) continue;
+        if (l.product?.vrijePrijs || l.product?.isStatiegeld) continue;
         if (!verkoop.locatieId) continue;
         await tx.voorraad.upsert({
           where: { productId_locatieId: { productId: l.productId, locatieId: verkoop.locatieId } },
@@ -448,7 +479,7 @@ export class SalesService {
       // (bij een annulatie is de stock al teruggeboekt — anders zou hij dubbel tellen).
       if (!verkoop.geannuleerd) {
         for (const l of verkoop.lijnen) {
-          if (l.product?.vrijePrijs) continue;
+          if (l.product?.vrijePrijs || l.product?.isStatiegeld) continue;
           if (!verkoop.locatieId) continue;
           await tx.voorraad.upsert({
             where: { productId_locatieId: { productId: l.productId, locatieId: verkoop.locatieId } },
@@ -471,7 +502,7 @@ export class SalesService {
       include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
     });
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
-    return this.metTicket(verkoop);
+    return this.metTicket(verkoop, undefined, await this.tegoedbonVan(verkoop.id));
   }
 
   // Bouwt het ticket-overzicht: BTW gegroepeerd per tarief + wisselgeld.
@@ -480,6 +511,7 @@ export class SalesService {
       include: { lijnen: { include: { product: true } }; gebruiker: true; betalingen: true };
     }>,
     ontvangen?: number,
+    tegoedbon: { nummer: string; bedrag: number } | null = null,
   ) {
     const perTarief = new Map<
       string,
@@ -520,7 +552,9 @@ export class SalesService {
     const lijnen = verkoop.lijnen.map((l) => {
       const aantal = Number(l.aantal);
       const finalLineTotal = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * aantal; // beide kortingen
-      const naLijnTotal = saleKorting > 0 ? finalLineTotal / saleFactor : finalLineTotal; // vóór verkoopkorting
+      // Statiegeld krijgt nooit de verkoopbrede korting -> ook niet terugrekenen.
+      const metSaleKorting = saleKorting > 0 && !l.product.isStatiegeld;
+      const naLijnTotal = metSaleKorting ? finalLineTotal / saleFactor : finalLineTotal; // vóór verkoopkorting
       const lineKorting = l.kortingPct != null ? Number(l.kortingPct) : 0;
       const origineelTotaal = lineKorting > 0 ? r2(naLijnTotal / (1 - lineKorting / 100)) : null;
       return {
@@ -529,7 +563,7 @@ export class SalesService {
         // De échte opgeslagen stuk-/kg-prijs (vóór verkoopkorting) tonen — niet
         // afleiden uit lijntotaal/aantal, want bij een afgerond weeg-lijntotaal
         // zou dat een verkeerde prijs/kg geven.
-        eenheidsprijs: saleKorting > 0 ? r2(Number(l.eenheidsprijs) / saleFactor) : Number(l.eenheidsprijs),
+        eenheidsprijs: metSaleKorting ? r2(Number(l.eenheidsprijs) / saleFactor) : Number(l.eenheidsprijs),
         btwPercentage: Number(l.btwPercentage),
         totaal: r2(naLijnTotal),
         kortingPct: lineKorting > 0 ? lineKorting : null,
@@ -553,6 +587,7 @@ export class SalesService {
       teruggeven,
       lijnen,
       btwOverzicht,
+      tegoedbon, // tegoedbon uit een terugbetaling (nummer + bedrag), anders null
     };
   }
 }
