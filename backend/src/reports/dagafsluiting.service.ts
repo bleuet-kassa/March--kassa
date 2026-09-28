@@ -43,17 +43,29 @@ export class DagafsluitingService {
     const rows = await (tx ?? this.prisma).rekeningBetaling.findMany({ where: { afgesloten: false }, orderBy: { datum: 'asc' } });
     return rows.map((b) => ({
       id: b.id,
+      datum: b.datum,
       bedrag: Number(b.bedrag),
       betalingen: ((b.betalingen as unknown) as { betaalwijze: string; bedrag: number }[]) ?? [],
     }));
   }
 
-  private openVerkopen(locatieId: string) {
-    return this.prisma.verkoop.findMany({
+  private openVerkopen(locatieId: string, tx?: Prisma.TransactionClient) {
+    return (tx ?? this.prisma).verkoop.findMany({
       where: { locatieId, kanaal: 'KASSA', afgesloten: false, geannuleerd: false },
       include: LIJN_INCLUDE,
       orderBy: { datum: 'asc' },
     });
+  }
+
+  // Eén afsluiting = één kassadag. Staan er verkopen van meerdere dagen open (dag
+  // vergeten af te sluiten), dan nemen we enkel de OUDSTE dag; de andere dagen
+  // blijven open en worden daarna elk apart afgesloten (eigen nummer en datum).
+  private splitsOudsteDag<T extends { datum: Date }>(verkopen: T[]) {
+    if (!verkopen.length) return { boekdatum: kassadag(new Date()), dagVerkopen: verkopen, resterendeDagen: [] as string[] };
+    const boekdatum = kassadag(verkopen[0].datum);
+    const dagVerkopen = verkopen.filter((v) => kassadag(v.datum) === boekdatum);
+    const resterendeDagen = [...new Set(verkopen.filter((v) => kassadag(v.datum) !== boekdatum).map((v) => kassadag(v.datum)))].sort();
+    return { boekdatum, dagVerkopen, resterendeDagen };
   }
 
   // BTW per lijn: eenheidsprijs is incl. BTW; btwBedrag is de BTW van de lijn.
@@ -205,8 +217,10 @@ export class DagafsluitingService {
   // Voorbeeld van het dagontvangsten-rapport (nog niet afgesloten).
   async overzicht() {
     const [locatie, onderneming] = await Promise.all([this.winkelLocatie(), this.winkelOnderneming()]);
-    const verkopen = await this.openVerkopen(locatie.id);
-    const rekeningBetalingen = await this.openRekeningBetalingen();
+    const alle = await this.openVerkopen(locatie.id);
+    const { boekdatum, dagVerkopen: verkopen, resterendeDagen } = this.splitsOudsteDag(alle);
+    // Rekeningbetalingen tot en met deze dag gaan mee; latere wachten op hun eigen dag.
+    const rekeningBetalingen = (await this.openRekeningBetalingen()).filter((b) => kassadag(b.datum) <= boekdatum);
     const vandaagTotaal = verkopen.filter((v) => v.betaalwijze !== 'EIGEN_REKENING').reduce((s, v) => s + Number(v.totaal), 0);
     const rapport = this.bouwRapport(verkopen, {
       rekeningBetalingen,
@@ -217,7 +231,8 @@ export class DagafsluitingService {
       onderneming: onderneming ? { naam: onderneming.naam, ondernemingsnummer: onderneming.ondernemingsnummer, btwNummer: onderneming.btwNummer, adres: onderneming.adres } : null,
       locatie: locatie.naam,
     });
-    return { ...rapport, maandtotaal: await this.maandtotaal(rapport.boekdatum, r2(vandaagTotaal)) };
+    // openDagen: latere dagen die nog open staan (elk apart af te sluiten ná deze).
+    return { ...rapport, boekdatum, maandtotaal: await this.maandtotaal(boekdatum, r2(vandaagTotaal)), openDagen: resterendeDagen };
   }
 
   // Sluit de dag af: bewaart het rapport onwijzigbaar (met volgnummer) en
@@ -229,21 +244,16 @@ export class DagafsluitingService {
       : null;
 
     return this.prisma.$transaction(async (tx) => {
-      const verkopen = (await tx.verkoop.findMany({
-        where: { locatieId: locatie.id, kanaal: 'KASSA', afgesloten: false, geannuleerd: false },
-        include: LIJN_INCLUDE,
-        orderBy: { datum: 'asc' },
-      })) as VerkoopVol[];
+      const alle = (await this.openVerkopen(locatie.id, tx)) as VerkoopVol[];
+      // Enkel de oudste open dag; latere dagen blijven open voor hun eigen afsluiting.
+      const { boekdatum, dagVerkopen: verkopen, resterendeDagen } = this.splitsOudsteDag(alle);
 
       const nu = new Date();
       const vanaf = verkopen[0]?.datum ?? nu;
       const volgnummer = (await tx.dagafsluiting.count()) + 1;
-      // Boekdatum = de gestarte kassadag: de dag van de eerste verkoop sinds de vorige
-      // afsluiting (zonder verkopen: vandaag). Afsluiten na middernacht boekt dus nog op die dag.
-      const boekdatum = kassadag(vanaf);
 
-      // Betalingen van openstaande rekeningen die in deze afsluiting meegaan.
-      const rekeningBetalingen = await this.openRekeningBetalingen(tx);
+      // Betalingen van openstaande rekeningen tot en met deze dag gaan mee.
+      const rekeningBetalingen = (await this.openRekeningBetalingen(tx)).filter((b) => kassadag(b.datum) <= boekdatum);
       const rapport = this.bouwRapport(verkopen, {
         rekeningBetalingen,
         volgnummer,
@@ -289,7 +299,7 @@ export class DagafsluitingService {
         });
       }
 
-      return { id: afsluiting.id, ...rapport, boekdatum, maandtotaal: await this.maandtotaal(boekdatum, 0, tx) };
+      return { id: afsluiting.id, ...rapport, boekdatum, maandtotaal: await this.maandtotaal(boekdatum, 0, tx), resterendeDagen };
     });
   }
 
@@ -414,13 +424,23 @@ export class DagafsluitingService {
       await this.prisma.dagafsluitingAanvraag.update({ where: { id: a.id }, data: { status: 'VERLOPEN' } });
       throw new BadRequestException('Deze aanvraag is verlopen. Vraag aan de kassa een nieuwe aan.');
     }
-    const rapport = await this.afsluiten(beheerderId ?? a.aangevraagdDoorId ?? undefined);
+    const door = beheerderId ?? a.aangevraagdDoorId ?? undefined;
+    const rapport = await this.afsluiten(door);
+    // Vergeten dagen: elke open dag wordt apart afgesloten (eigen nummer en datum),
+    // in één bevestiging van de beheerder.
+    const extraAfsluitingen: { id: string; boekdatum: string; volgnummer: number | null; totaal: number }[] = [];
+    let rest = rapport.resterendeDagen;
+    for (let i = 0; rest.length && i < 31; i++) {
+      const r = await this.afsluiten(door);
+      extraAfsluitingen.push({ id: r.id, boekdatum: r.boekdatum, volgnummer: r.volgnummer, totaal: r.dagontvangsten.totaalIncl });
+      rest = r.resterendeDagen;
+    }
     const bij = await this.prisma.dagafsluitingAanvraag.update({
       where: { id: a.id },
       data: { status: 'BEVESTIGD', bevestigdOp: new Date(), bevestigdDoorId: beheerderId ?? null, dagafsluitingId: rapport.id },
       include: { aangevraagdDoor: { select: { naam: true } } },
     });
-    return { ...this.aanvraagInfo(bij), rapport };
+    return { ...this.aanvraagInfo(bij), rapport: { ...rapport, extraAfsluitingen } };
   }
 
   async weiger(token: string) {

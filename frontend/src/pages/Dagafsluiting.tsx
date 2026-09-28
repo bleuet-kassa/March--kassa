@@ -7,6 +7,8 @@ import {
 import { getVerkoper } from '../auth';
 
 const euro = (n: number | string) => '€ ' + Number(n).toFixed(2);
+// "2026-09-26" -> "26/09/2026"
+const datumNl = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('nl-BE');
 // "2026-09" -> "september 2026"
 const maandNaam = (m: string) => new Date(m + '-15T12:00:00').toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
 
@@ -73,13 +75,19 @@ export function Dagafsluiting() {
       // Rechtstreeks afgesloten door de beheerder: ook hier vragen (nooit automatisch)
       // of de dag meteen naar het Scrada-dagontvangstenboek mag.
       const id = (r as { id?: string }).id;
-      if (id && window.confirm('Dag afgesloten en geregistreerd.\n\nOok meteen naar Scrada (dagontvangstenboek) sturen?')) {
+      const dagNl = r.boekdatum ? datumNl(r.boekdatum) : 'Dag';
+      if (id && window.confirm(`${dagNl} afgesloten en geregistreerd (nr ${r.volgnummer ?? '?'}).\n\nOok meteen naar Scrada (dagontvangstenboek) sturen?`)) {
         try {
           const s = await scradaVerstuurDag(id);
           window.alert(s.verstuurd ? `Verstuurd naar Scrada${s.ref ? ` (ref ${s.ref})` : ''}.` : s.modus === 'test' ? 'Scrada is nog niet gekoppeld (dry-run): niets verstuurd.' : `Niet verstuurd: ${s.fout ?? s.melding ?? 'fout'}`);
         } catch (e) { window.alert(e instanceof Error ? e.message : 'Versturen naar Scrada mislukt'); }
       }
       setRegister(await getAfsluitingen());
+      // Vergeten dagen: de volgende open dag staat meteen klaar om apart af te sluiten.
+      if (r.resterendeDagen && r.resterendeDagen.length > 0) {
+        window.alert(`Er staan nog ${r.resterendeDagen.length} dag(en) open: ${r.resterendeDagen.map(datumNl).join(', ')}.\n\nDe volgende dag (${datumNl(r.resterendeDagen[0])}) staat nu klaar — klik opnieuw op "Dag afsluiten".`);
+        setRapport(await getDagoverzicht()); setAfgesloten(false);
+      }
     } catch {
       setFout('Afsluiten mislukt.');
     } finally { setBezig(false); }
@@ -111,10 +119,15 @@ export function Dagafsluiting() {
           </div>
         </details>
 
+        {!afgesloten && rapport.openDagen && rapport.openDagen.length > 0 && (
+          <div style={{ marginBottom: 8, padding: '8px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 14 }}>
+            ⚠ Er staan meerdere dagen open. Dit ticket = <strong>{rapport.boekdatum ? datumNl(rapport.boekdatum) : 'oudste dag'}</strong>. Daarna nog apart af te sluiten: {rapport.openDagen.map(datumNl).join(', ')}. Elke dag krijgt zijn eigen nummer en datum.
+          </div>
+        )}
         {!afgesloten && (
           <button onClick={afsluiten} disabled={leeg || bezig}
             style={{ ...btnGroen, width: '100%', background: leeg || bezig ? '#9ca3af' : '#16a34a' }}>
-            {bezig ? 'Bezig…' : 'Dag afsluiten'}
+            {bezig ? 'Bezig…' : rapport.boekdatum ? `Dag ${datumNl(rapport.boekdatum)} afsluiten` : 'Dag afsluiten'}
           </button>
         )}
         {afgesloten && (

@@ -87,9 +87,23 @@ export function BevestigAfsluiting() {
             <div style={rij}><span>Status</span><strong style={{ color: open ? '#b45309' : status === 'BEVESTIGD' ? '#166534' : '#6b7280' }}>{statusTekst(status ?? '')}</strong></div>
             <div style={rij}><span>Aangevraagd door</span><span>{data.aangevraagdDoor ?? 'de kassa'}</span></div>
             <div style={rij}><span>Om</span><span>{new Date(data.aangevraagdOp).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })}</span></div>
+            {rapport?.boekdatum && (
+              <div style={rij}><span>Dag</span><strong>{new Date(rapport.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE')}</strong></div>
+            )}
             <div style={{ ...rij, borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 10, fontSize: 20 }}>
               <span>Dagtotaal</span><strong>{euro(rapport ? rapport.algemeenTotaalIncl : data.totaal)}</strong>
             </div>
+            {/* Vergeten dagen: elke open dag wordt bij de bevestiging apart afgesloten. */}
+            {open && rapport?.openDagen && rapport.openDagen.length > 0 && (
+              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 13 }}>
+                ⚠ Ook nog open: {rapport.openDagen.map((d) => new Date(d + 'T12:00:00').toLocaleDateString('nl-BE')).join(', ')}. Bij bevestiging wordt elke dag <strong>apart</strong> afgesloten (eigen nummer en datum).
+              </div>
+            )}
+            {rapport?.extraAfsluitingen && rapport.extraAfsluitingen.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 13, color: '#166534' }}>
+                Ook apart afgesloten: {rapport.extraAfsluitingen.map((e) => `${new Date(e.boekdatum + 'T12:00:00').toLocaleDateString('nl-BE')} (nr ${e.volgnummer ?? '?'}, ${euro(e.totaal)})`).join(' · ')}
+              </div>
+            )}
             <div style={{ ...rij, color: '#6b7280', fontSize: 13 }}>
               <span>Verkopen</span><span>{rapport ? rapport.dagontvangsten.aantal + rapport.facturen.length : data.aantalVerkopen}</span>
             </div>
