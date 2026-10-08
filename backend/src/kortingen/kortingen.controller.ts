@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { KortingenService } from './kortingen.service';
-import { Rollen } from '../auth/auth.guard';
+import { Recht } from '../auth/auth.guard';
 
-@Rollen('BEHEER', 'BEHEERDER')
+@Recht('kortingen')
 @Controller('kortingen')
 export class KortingenController {
   constructor(private readonly kortingen: KortingenService) {}

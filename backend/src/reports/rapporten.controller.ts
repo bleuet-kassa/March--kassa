@@ -1,9 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { RapportenService } from './rapporten.service';
-import { Rollen } from '../auth/auth.guard';
+import { Recht } from '../auth/auth.guard';
 
-// Managementrapporten — enkel beheerders (server-side afgedwongen).
-@Rollen('BEHEER', 'BEHEERDER')
+// Managementrapporten — enkel wie de toegang "rapporten" heeft (server-side afgedwongen).
+@Recht('rapporten')
 @Controller('rapporten')
 export class RapportenController {
   constructor(private readonly rapporten: RapportenService) {}

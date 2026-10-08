@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { RekeningenService } from './rekeningen.service';
 import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
+import { Recht } from '../auth/auth.guard';
 
-// Lopende rekeningen ("op rekening"). Zowel het overzicht als het beheer
-// (bedrijven/personeel toevoegen en aanpassen, factureren) is toegankelijk voor
-// elke ingelogde medewerker — de kassa draait op een KASSA-account.
+// Lopende rekeningen ("op rekening"). De kassa-lijst (bedrijven + leden) is voor
+// elke medewerker; het beheer (Klant factuur) vereist de toegang "rekeningen".
 @Controller('rekeningen')
 export class RekeningenController {
   constructor(private readonly rekeningen: RekeningenService, private readonly facturen: VerkoopfacturenService) {}
@@ -16,31 +16,37 @@ export class RekeningenController {
   }
 
   // Overzicht van de lopende rekeningen (openstaand per bedrijf + per persoon).
+  @Recht('rekeningen')
   @Get('overzicht')
   overzicht() {
     return this.rekeningen.overzicht();
   }
 
+  @Recht('rekeningen')
   @Get('bedrijven')
   bedrijven() {
     return this.rekeningen.bedrijven();
   }
 
+  @Recht('rekeningen')
   @Post('bedrijven')
   nieuwBedrijf(@Body() body: { naam: string; btwNummer?: string; adres?: string; email?: string }) {
     return this.rekeningen.nieuwBedrijf(body);
   }
 
+  @Recht('rekeningen')
   @Patch('bedrijven/:id')
   updateBedrijf(@Param('id') id: string, @Body() body: any) {
     return this.rekeningen.updateBedrijf(id, body);
   }
 
+  @Recht('rekeningen')
   @Post('leden')
   nieuwLid(@Body() body: { bedrijfId: string; naam: string; budget?: number }) {
     return this.rekeningen.nieuwLid(body);
   }
 
+  @Recht('rekeningen')
   @Patch('leden/:id')
   updateLid(@Param('id') id: string, @Body() body: any) {
     return this.rekeningen.updateLid(id, body);
@@ -49,6 +55,7 @@ export class RekeningenController {
   // Detail van de verkopen op een bedrijf. Standaard enkel de openstaande;
   // ?alle=1 toont ook het verleden (gefactureerd), optioneel binnen een periode
   // (?van=YYYY-MM-DD&tot=YYYY-MM-DD) en per personeelslid (?lidId=...).
+  @Recht('rekeningen')
   @Get('bedrijven/:id/verkopen')
   verkopen(
     @Param('id') id: string,
@@ -71,6 +78,7 @@ export class RekeningenController {
   // Maandfactuur: alle openstaande "op rekening"-tickets van het bedrijf worden
   // één verkoopfactuur (klaar voor Scrada als concept); de tickets worden
   // gemarkeerd als gefactureerd.
+  @Recht('rekeningen')
   @Post('bedrijven/:id/factureer')
   async factureer(@Param('id') id: string) {
     const r = await this.facturen.maakMaandfactuur(id);
@@ -78,6 +86,7 @@ export class RekeningenController {
   }
 
   // Een verkoop verschuiven naar een andere rekening (bedrijf + lid).
+  @Recht('rekeningen')
   @Patch('verkopen/:id/verplaats')
   verplaatsVerkoop(@Param('id') id: string, @Body() body: { bedrijfId: string; lidId: string }) {
     return this.rekeningen.verplaatsVerkoop(id, body.bedrijfId, body.lidId);

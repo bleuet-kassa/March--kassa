@@ -1,8 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { WebshopService, type BestellingInput } from './webshop.service';
-import { Publiek, Rollen } from '../auth/auth.guard';
-
-const ADMIN = ['BEHEER', 'BEHEERDER'];
+import { Publiek, Recht } from '../auth/auth.guard';
 
 // Publieke (niet-ingelogde) webshop-endpoints + beheer van bestellingen.
 @Controller('webshop')
@@ -36,13 +34,13 @@ export class WebshopController {
   }
 
   // Beheer: bestellingen bekijken en de status bijwerken (enkel beheerders).
-  @Rollen(...ADMIN)
+  @Recht('webshop')
   @Get('bestellingen')
   bestellingen() {
     return this.webshop.bestellingen();
   }
 
-  @Rollen(...ADMIN)
+  @Recht('webshop')
   @Patch('bestellingen/:id/status')
   updateStatus(@Param('id') id: string, @Body() body: { status: string }) {
     return this.webshop.updateStatus(id, body.status);

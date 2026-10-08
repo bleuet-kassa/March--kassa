@@ -8,7 +8,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FacturenService, VerwerkRegel } from './facturen.service';
+import { Recht } from '../auth/auth.guard';
 
+// Aankoopfacturen inlezen -> toegang "facturen".
+@Recht('facturen')
 @Controller('facturen')
 export class FacturenController {
   constructor(private readonly facturen: FacturenService) {}

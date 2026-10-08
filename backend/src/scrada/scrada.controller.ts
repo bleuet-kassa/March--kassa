@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { ScradaService } from './scrada.service';
 import { ScradaDagboekService, type DagboekInstellingen } from './scrada.dagboek.service';
-import { Rollen } from '../auth/auth.guard';
+import { Recht } from '../auth/auth.guard';
 
 @Controller('scrada')
 export class ScradaController {
@@ -15,7 +15,7 @@ export class ScradaController {
 
   // GET /scrada/verbinding  -> test de API-sleutel/wachtwoord/bedrijf bij Scrada (enkel beheerder)
   @Get('verbinding')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verbinding() {
     return this.scrada.verbinding();
   }
@@ -23,7 +23,7 @@ export class ScradaController {
   // PUT /scrada/instellingen { vanaf: "JJJJ-MM-DD" }  -> startdatum: enkel verkopen
   // vanaf die dag gaan naar Scrada (het verleden zit al in de boekhouding).
   @Put('instellingen')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   instellingen(@Body() body: { vanaf: string }) {
     return this.scrada.zetVanaf(body?.vanaf);
   }
@@ -32,7 +32,7 @@ export class ScradaController {
   // "niet verstuurd" (na testen in de testomgeving, vóór live). Zowel de
   // dagafsluitingen (dagontvangstenboek) als de losse tickets.
   @Post('reset-status')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   async resetStatus() {
     const dagen = await this.dagboek.resetStatus();
     const tickets = await this.scrada.resetStatus();
@@ -49,24 +49,24 @@ export class ScradaController {
 
   // PUT /scrada/dagboek/instellingen  -> koppeling bewaren (enkel beheerder)
   @Put('dagboek/instellingen')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   zetDagboekInstellingen(@Body() body: Partial<DagboekInstellingen>) {
     return this.dagboek.zetInstellingen(body ?? {});
   }
 
   // Lijsten uit Scrada om de koppeling te kiezen (enkel beheerder).
   @Get('dagboek/dagboeken')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   dagboeken() {
     return this.dagboek.dagboeken();
   }
   @Get('dagboek/dagboeken/:id/categorieen')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   categorieen(@Param('id') id: string) {
     return this.dagboek.categorieen(id);
   }
   @Get('dagboek/dagboeken/:id/betaalmethoden')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   betaalmethoden(@Param('id') id: string) {
     return this.dagboek.betaalmethoden(id);
   }
@@ -85,14 +85,14 @@ export class ScradaController {
 
   // POST /scrada/dagboek/dagen/:id/verstuur  -> één dag versturen (enkel beheerder)
   @Post('dagboek/dagen/:id/verstuur')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verstuurDag(@Param('id') id: string) {
     return this.dagboek.verstuurDag(id);
   }
 
   // POST /scrada/dagboek/verstuur  -> alle openstaande dagen vanaf de startdatum (enkel beheerder)
   @Post('dagboek/verstuur')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verstuurDagen() {
     return this.dagboek.verstuurOpenstaandeDagen();
   }

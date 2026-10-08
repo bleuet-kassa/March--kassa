@@ -20,7 +20,12 @@ export function getToken(): string | null {
 // Slaat de sessie op na het inloggen (verkoper + token).
 export function setSessie(g: Gebruiker & { token: string }) {
   localStorage.setItem(TOKEN_KEY, g.token);
-  localStorage.setItem(KEY, JSON.stringify({ id: g.id, naam: g.naam, rol: g.rol }));
+  localStorage.setItem(KEY, JSON.stringify({ id: g.id, naam: g.naam, rol: g.rol, rechten: g.rechten ?? [] }));
+}
+
+// Toegangen verversen zonder opnieuw in te loggen (na een wijziging op Personeel).
+export function zetVerkoper(g: Gebruiker) {
+  localStorage.setItem(KEY, JSON.stringify({ id: g.id, naam: g.naam, rol: g.rol, rechten: g.rechten ?? [] }));
 }
 
 export function logout() {

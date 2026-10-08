@@ -2,9 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Res, UploadedFi
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { SiteService } from './site.service';
-import { Publiek, Rollen } from '../auth/auth.guard';
-
-const ADMIN = ['BEHEER', 'BEHEERDER'];
+import { Publiek, Recht } from '../auth/auth.guard';
 
 @Controller('site')
 export class SiteController {
@@ -18,38 +16,38 @@ export class SiteController {
   }
 
   // Beheer (enkel beheerders): teksten, openingsuren en partners.
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Put('teksten')
   zetTeksten(@Body() body: Record<string, string>) {
     return this.site.zetTeksten(body);
   }
 
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Put('openingsuren')
   zetOpeningsuren(@Body() body: { openingsuren: { dag: number; gesloten: boolean; van?: string | null; tot?: string | null }[] }) {
     return this.site.zetOpeningsuren(body.openingsuren);
   }
 
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Post('partners')
   nieuwePartner(@Body() body: { naam: string; website?: string | null; volgorde?: number }) {
     return this.site.nieuwePartner(body);
   }
 
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Patch('partners/:id')
   updatePartner(@Param('id') id: string, @Body() body: { naam?: string; website?: string | null; logoUrl?: string | null; volgorde?: number }) {
     return this.site.updatePartner(id, body);
   }
 
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Delete('partners/:id')
   verwijderPartner(@Param('id') id: string) {
     return this.site.verwijderPartner(id);
   }
 
   // Afbeelding uploaden -> { id, url } (enkel beheerders)
-  @Rollen(...ADMIN)
+  @Recht('website')
   @Post('afbeelding')
   @UseInterceptors(FileInterceptor('bestand'))
   upload(@UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined) {

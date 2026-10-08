@@ -35,6 +35,7 @@ import {
   enqueue,
   isNetwerkfout,
 } from '../offline';
+import { heeftRecht } from '../rechten';
 
 type Lijn = {
   key: string; // stabiele identiteit (weegproducten kunnen dezelfde productId hebben)
@@ -205,7 +206,8 @@ export function Kassa() {
   const scanRef = useRef<(code: string) => void>(() => {});
   const scanTimer = useRef<number | undefined>(undefined);
   const verkoper = getVerkoper();
-  const isAdmin = ADMIN_ROLLEN.includes((verkoper?.rol ?? '').toUpperCase());
+  // Kortingsregelingen (personeel/F&F) toepassen: toegang "kortingen" (beheerder heeft alles).
+  const isAdmin = ADMIN_ROLLEN.includes((verkoper?.rol ?? '').toUpperCase()) || heeftRecht('kortingen');
 
   // Het actieve ticket + afgeleide waarden. Wrapper-setters schrijven telkens
   // naar het actieve ticket, zodat de bestaande code (lijnen, betaalwijze, …)

@@ -295,6 +295,9 @@ model Gebruiker {
   wachtwoordHash String
   rol          GebruikerRol @default(KASSA)
   actief       Boolean      @default(true)
+  // Toegangen per functionaliteit (lijst van sleutels, zie common/rechten.ts).
+  // null = standaardtoegangen van de kassa; beheerders hebben altijd alles.
+  rechten      Json?
   createdAt    DateTime     @default(now())
 
   verkopen       Verkoop[]

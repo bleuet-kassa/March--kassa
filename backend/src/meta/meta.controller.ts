@@ -1,8 +1,6 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { MetaService } from './meta.service';
-import { Rollen } from '../auth/auth.guard';
-
-const ADMIN = ['BEHEER', 'BEHEERDER'];
+import { Recht } from '../auth/auth.guard';
 
 @Controller('meta')
 export class MetaController {
@@ -36,21 +34,21 @@ export class MetaController {
   }
 
   // POST /meta/onderneming -> winkel-onderneming bijwerken (naam, BTW-nr, adres)
-  @Rollen(...ADMIN)
+  @Recht('instellingen')
   @Post('onderneming')
   onderneming(@Body() body: { naam?: string; btwNummer?: string; adres?: string }) {
     return this.meta.updateOnderneming(body);
   }
 
   // GET /meta/ondernemingen -> alle ondernemingen (voor instellingen)
-  @Rollen(...ADMIN)
+  @Recht('instellingen')
   @Get('ondernemingen')
   ondernemingen() {
     return this.meta.ondernemingen();
   }
 
   // POST /meta/onderneming/:id -> één onderneming bijwerken
-  @Rollen(...ADMIN)
+  @Recht('instellingen')
   @Post('onderneming/:id')
   updateOnderneming(
     @Param('id') id: string,

@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Req } from '@nestjs/common';
 import { VerkoopfacturenService, type FactuurInstellingen } from './verkoopfacturen.service';
-import { Rollen } from '../auth/auth.guard';
+import { Recht } from '../auth/auth.guard';
 
 // Verkoopfacturen uit de kassa (per ticket / maandfactuur per bedrijf) -> Scrada concept.
 @Controller('verkoopfacturen')
@@ -52,14 +52,14 @@ export class VerkoopfacturenController {
 
   // POST /verkoopfacturen/mail-rekeningen -> alle nog niet gemailde rekeningen (particulieren) versturen
   @Post('mail-rekeningen')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   mailRekeningen() {
     return this.facturen.mailOpenRekeningen();
   }
 
   // POST /verkoopfacturen/:id/mail { naar? } -> deze rekening per e-mail naar de klant
   @Post(':id/mail')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   mailRekening(@Param('id') id: string, @Body() body: { naar?: string }) {
     return this.facturen.mailRekening(id, body?.naar);
   }
@@ -72,7 +72,7 @@ export class VerkoopfacturenController {
 
   // POST /verkoopfacturen/factureer { sleutel } -> alle open aankopen van die klant/bedrijf in één factuur
   @Post('factureer')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   async factureer(@Body() body: { sleutel: string }) {
     const r = await this.facturen.maakBundelVoorSleutel(String(body?.sleutel ?? ''));
     return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer } };
@@ -80,7 +80,7 @@ export class VerkoopfacturenController {
 
   // POST /verkoopfacturen/factureer-alles -> maandafsluiting: elke open rekening één factuur
   @Post('factureer-alles')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   factureerAlles() {
     return this.facturen.factureerAlles();
   }
@@ -91,7 +91,7 @@ export class VerkoopfacturenController {
     return this.facturen.instellingen();
   }
   @Put('instellingen')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   zetInstellingen(@Body() body: Partial<FactuurInstellingen> & { volgendeVolgnummer?: number }) {
     return this.facturen.zetInstellingen(body ?? {});
   }
@@ -104,35 +104,35 @@ export class VerkoopfacturenController {
 
   // POST /verkoopfacturen/ticket/:verkoopId -> factuur maken voor één ticket
   @Post('ticket/:verkoopId')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   ticket(@Param('verkoopId') verkoopId: string) {
     return this.facturen.maakVoorVerkoop(verkoopId);
   }
 
   // PUT /verkoopfacturen/:id/weergave { samenvatten, omschrijving } -> enkel totalen per BTW-tarief (vóór verzending)
   @Put(':id/weergave')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   weergave(@Param('id') id: string, @Body() body: { samenvatten?: boolean; omschrijving?: string | null }) {
     return this.facturen.zetWeergave(id, body ?? {});
   }
 
   // DELETE /verkoopfacturen/:id -> factuur verwijderen (bv. testfacturen); tickets worden losgemaakt
   @Delete(':id')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verwijder(@Param('id') id: string) {
     return this.facturen.verwijder(id);
   }
 
   // POST /verkoopfacturen/:id/verstuur -> deze factuur (als concept) naar Scrada + dagboekcorrectie
   @Post(':id/verstuur')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verstuur(@Param('id') id: string) {
     return this.facturen.verstuurNaarScrada(id);
   }
 
   // POST /verkoopfacturen/verstuur -> alles wat klaarstaat (na de dagen), op vraag van de beheerder
   @Post('verstuur')
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('boekhouding')
   verstuurAlles() {
     return this.facturen.verstuurOpenstaande();
   }

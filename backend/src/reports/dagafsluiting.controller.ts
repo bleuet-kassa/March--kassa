@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Header, Param, Post, Req } from '@nestjs/common';
 import { DagafsluitingService } from './dagafsluiting.service';
-import { Publiek, Rollen } from '../auth/auth.guard';
+import { Publiek, Recht } from '../auth/auth.guard';
 import { authSecret, verifyToken } from '../common/token';
 
 @Controller('dagafsluiting')
@@ -33,10 +33,10 @@ export class DagafsluitingController {
     return this.dag.csv(id);
   }
 
-  // POST /dagafsluiting -> sluit de dag rechtstreeks af (enkel een ingelogde beheerder).
+  // POST /dagafsluiting -> sluit de dag rechtstreeks af (toegang "dagafsluiting").
   // Andere medewerkers gaan via een aanvraag die de beheerder bevestigt.
   @Post()
-  @Rollen('BEHEER', 'BEHEERDER')
+  @Recht('dagafsluiting')
   afsluiten(@Body() body: { gebruikerId?: string }) {
     return this.dag.afsluiten(body?.gebruikerId);
   }

@@ -23,7 +23,9 @@ import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
 import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
 import { Login } from './pages/Login';
-import { getVerkoper, logout } from './auth';
+import { getVerkoper, logout, zetVerkoper } from './auth';
+import { heeftRecht, isAdminRol } from './rechten';
+import { getIk } from './api/client';
 import { syncQueue, queueCount } from './offline';
 
 // Toont online/offline-status en het aantal nog te synchroniseren verkopen,
@@ -119,40 +121,52 @@ function StaffApp() {
     return () => document.removeEventListener('click', buiten);
   }, []);
 
+  // Toegangen verversen bij het openen van de app, zodat een wijziging op het
+  // Personeel-scherm meteen geldt zonder opnieuw in te loggen.
+  useEffect(() => {
+    if (!verkoper) return;
+    getIk().then((ik) => { zetVerkoper(ik); setVerkoperState(getVerkoper()); }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verkoper?.id]);
+
   if (!verkoper) {
     return <Login onIngelogd={() => setVerkoperState(getVerkoper())} />;
   }
-  const isAdmin = verkoper.rol === 'BEHEERDER' || verkoper.rol === 'BEHEER';
+  const isAdmin = isAdminRol(verkoper.rol);
+  // Wat deze persoon mag zien: per functionaliteit (beheerder = alles).
+  const mag = (key: string) => heeftRecht(key);
+  const geenToegang = <div style={{ padding: 24, color: '#6b7280' }}>Je hebt geen toegang tot dit onderdeel. Vraag de beheerder om je toegangen aan te passen (Beheerder → Personeel).</div>;
+  const menuItems = ([
+    ['/kassa/dagafsluiting', 'Dagafsluiting', 'dagafsluiting'],
+    ['/kassa/facturen', 'Facturen inlezen', 'facturen'],
+    ['/kassa/boekhouding', 'Boekhouding', 'boekhouding'],
+    ['/kassa/rapporten', 'Rapporten', 'rapporten'],
+    ['/kassa/rekeningen', 'Klant factuur', 'rekeningen'],
+    ['/kassa/personeel', 'Personeel', 'personeel'],
+    ['/kassa/instellingen', 'Instellingen', 'instellingen'],
+  ] as [string, string, string][]).filter(([, , key]) => mag(key));
 
   return (
     <>
       <nav style={{ padding: 12, borderBottom: '1px solid #ddd', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         <strong>Kassa & Stock</strong>
-        <Link to="/kassa">Kassa</Link>
-        <Link to="/kassa/verkopen">Verkopen</Link>
-        <Link to="/kassa/beheer">Beheer</Link>
-        <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>
-        <Link to="/kassa/open-rekeningen">Open rekeningen</Link>
-        {isAdmin && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
-        {isAdmin && <Link to="/kassa/bestellingen">Bestellingen</Link>}
-        {isAdmin && <Link to="/kassa/kortingen">Kortingen</Link>}
-        {isAdmin && <Link to="/kassa/website">Website</Link>}
-        {isAdmin && (
-          /* Beheerder-menu: alles wat andere medewerkers niet hoeven te zien, in één dropdown. */
+        {mag('kassa') && <Link to="/kassa">Kassa</Link>}
+        {mag('verkopen') && <Link to="/kassa/verkopen">Verkopen</Link>}
+        {mag('beheer') && <Link to="/kassa/beheer">Beheer</Link>}
+        {mag('cadeaubonnen') && <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>}
+        {mag('open_rekeningen') && <Link to="/kassa/open-rekeningen">Open rekeningen</Link>}
+        {mag('webshop') && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
+        {mag('webshop') && <Link to="/kassa/bestellingen">Bestellingen</Link>}
+        {mag('kortingen') && <Link to="/kassa/kortingen">Kortingen</Link>}
+        {mag('website') && <Link to="/kassa/website">Website</Link>}
+        {menuItems.length > 0 && (
+          /* Beheer-menu: enkel de onderdelen waartoe deze persoon toegang heeft. */
           <details ref={menuRef} style={{ position: 'relative' }}>
             <summary style={{ cursor: 'pointer', listStyle: 'none', fontWeight: 700, color: '#0d4589', userSelect: 'none', padding: '4px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }}>
-              Beheerder ▾
+              {isAdmin ? 'Beheerder' : 'Meer'} ▾
             </summary>
             <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 6, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: 6, display: 'flex', flexDirection: 'column', minWidth: 200 }}>
-              {([
-                ['/kassa/dagafsluiting', 'Dagafsluiting'],
-                ['/kassa/facturen', 'Facturen inlezen'],
-                ['/kassa/boekhouding', 'Boekhouding'],
-                ['/kassa/rapporten', 'Rapporten'],
-                ['/kassa/rekeningen', 'Klant factuur'],
-                ['/kassa/personeel', 'Personeel'],
-                ['/kassa/instellingen', 'Instellingen'],
-              ] as [string, string][]).map(([pad, naam]) => (
+              {menuItems.map(([pad, naam]) => (
                 <Link key={pad} to={pad} onClick={sluitMenu} style={{ padding: '10px 12px', borderRadius: 6, textDecoration: 'none', color: '#111827', fontSize: 15 }}>{naam}</Link>
               ))}
             </div>
@@ -171,23 +185,23 @@ function StaffApp() {
       </nav>
       <main style={{ padding: 16 }}>
         <Routes>
-          <Route index element={<Kassa />} />
-          <Route path="verkopen" element={<Verkopen />} />
-          {/* Beheerder-menu: enkel voor beheerders (ook als iemand de URL rechtstreeks intikt) */}
-          <Route path="dagafsluiting" element={isAdmin ? <Dagafsluiting /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="beheer" element={<Beheer />} />
-          <Route path="cadeaubonnen" element={<Cadeaubonnen />} />
-          <Route path="open-rekeningen" element={<OpenRekeningen />} />
-          <Route path="facturen" element={isAdmin ? <Facturen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="boekhouding" element={isAdmin ? <Boekhouding /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="rapporten" element={isAdmin ? <Rapporten /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="kortingen" element={isAdmin ? <Kortingen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="webshop-assortiment" element={isAdmin ? <WebshopAssortiment /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="bestellingen" element={isAdmin ? <Bestellingen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="rekeningen" element={isAdmin ? <Rekeningen /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="personeel" element={isAdmin ? <Personeel /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="website" element={isAdmin ? <Website /> : <div>Enkel voor beheerders.</div>} />
-          <Route path="instellingen" element={isAdmin ? <Instellingen /> : <div>Enkel voor beheerders.</div>} />
+          {/* Elke route is afgeschermd per toegang (ook als iemand de URL rechtstreeks intikt); de server dwingt het ook af. */}
+          <Route index element={mag('kassa') ? <Kassa /> : (mag('open_rekeningen') ? <OpenRekeningen /> : geenToegang)} />
+          <Route path="verkopen" element={mag('verkopen') ? <Verkopen /> : geenToegang} />
+          <Route path="dagafsluiting" element={mag('dagafsluiting') ? <Dagafsluiting /> : geenToegang} />
+          <Route path="beheer" element={mag('beheer') ? <Beheer /> : geenToegang} />
+          <Route path="cadeaubonnen" element={mag('cadeaubonnen') ? <Cadeaubonnen /> : geenToegang} />
+          <Route path="open-rekeningen" element={mag('open_rekeningen') ? <OpenRekeningen /> : geenToegang} />
+          <Route path="facturen" element={mag('facturen') ? <Facturen /> : geenToegang} />
+          <Route path="boekhouding" element={mag('boekhouding') ? <Boekhouding /> : geenToegang} />
+          <Route path="rapporten" element={mag('rapporten') ? <Rapporten /> : geenToegang} />
+          <Route path="kortingen" element={mag('kortingen') ? <Kortingen /> : geenToegang} />
+          <Route path="webshop-assortiment" element={mag('webshop') ? <WebshopAssortiment /> : geenToegang} />
+          <Route path="bestellingen" element={mag('webshop') ? <Bestellingen /> : geenToegang} />
+          <Route path="rekeningen" element={mag('rekeningen') ? <Rekeningen /> : geenToegang} />
+          <Route path="personeel" element={mag('personeel') ? <Personeel /> : geenToegang} />
+          <Route path="website" element={mag('website') ? <Website /> : geenToegang} />
+          <Route path="instellingen" element={mag('instellingen') ? <Instellingen /> : geenToegang} />
         </Routes>
       </main>
     </>

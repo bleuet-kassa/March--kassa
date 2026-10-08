@@ -21,7 +21,11 @@ export async function getSpeciaalProducten(): Promise<SpeciaalProduct[]> {
   return (await fetch(`${BASE}/producten/speciaal`)).json();
 }
 
-export type Gebruiker = { id: string; naam: string; rol: string };
+// rechten = toegangen per functionaliteit (zie src/rechten.ts); beheerders hebben alles.
+export type Gebruiker = { id: string; naam: string; rol: string; rechten?: string[] };
+export async function getIk(): Promise<Gebruiker> {
+  return jsonOrThrow(await fetch(`${BASE}/auth/ik`));
+}
 
 export type Ticket = {
   id: string;
@@ -124,7 +128,8 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 }
 
 // --- Auth (verkoper) ---
-export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean };
+// rechten = effectieve toegangen; rechtenIngesteld = false zolang de standaard geldt.
+export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean };
 
 // Actieve verkopers (voor de verkoper-keuze per ticket aan de kassa).
 export async function getGebruikers(): Promise<Gebruiker[]> {
@@ -134,14 +139,14 @@ export async function getGebruikers(): Promise<Gebruiker[]> {
 export async function getPersoneel(): Promise<Personeelslid[]> {
   return (await fetch(`${BASE}/auth/personeel`)).json();
 }
-export async function nieuwPersoneelslid(input: { naam: string; email: string; wachtwoord: string; rol?: string }): Promise<Personeelslid> {
+export async function nieuwPersoneelslid(input: { naam: string; email: string; wachtwoord: string; rol?: string; rechten?: string[] }): Promise<Personeelslid> {
   return jsonOrThrow(
     await fetch(`${BASE}/auth/personeel`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     }),
   );
 }
-export async function updatePersoneelslid(id: string, input: { naam?: string; rol?: string; actief?: boolean; wachtwoord?: string }): Promise<Personeelslid> {
+export async function updatePersoneelslid(id: string, input: { naam?: string; rol?: string; actief?: boolean; wachtwoord?: string; rechten?: string[] | null }): Promise<Personeelslid> {
   return jsonOrThrow(
     await fetch(`${BASE}/auth/personeel/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
