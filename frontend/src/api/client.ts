@@ -21,6 +21,36 @@ export async function getSpeciaalProducten(): Promise<SpeciaalProduct[]> {
   return (await fetch(`${BASE}/producten/speciaal`)).json();
 }
 
+// --- Agenda van de zaak (manuele bestellingen/agendapunten + webshopbestellingen) ---
+export type AgendaItem = {
+  id: string; dag: string; tijd: string | null; soort: string; bron: string; titel: string; omschrijving: string | null;
+  klantNaam: string | null; klantTelefoon: string | null; klantEmail: string | null; bedrag: number | null;
+  locatie: string | null; status: string; verkoopId: string | null; aangemaaktDoor: string | null; createdAt: string; updatedAt: string;
+};
+export type AgendaInput = { dag: string; tijd?: string | null; soort?: string; titel: string; omschrijving?: string | null; klantNaam?: string | null; klantTelefoon?: string | null; klantEmail?: string | null; bedrag?: number | null; locatie?: string | null; status?: string };
+export async function getAgenda(van: string, tot: string): Promise<AgendaItem[]> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda?van=${van}&tot=${tot}`));
+}
+export async function maakAgendaItem(input: AgendaInput): Promise<AgendaItem> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function wijzigAgendaItem(id: string, input: Partial<AgendaInput>): Promise<AgendaItem> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function verwijderAgendaItem(id: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/${id}`, { method: 'DELETE' }));
+}
+// Excel-export: haalt het bestand op (met token) en start de download in de browser.
+export async function downloadAgendaExcel(van: string, tot: string): Promise<void> {
+  const res = await fetch(`${BASE}/agenda/export.xlsx?van=${van}&tot=${tot}`);
+  if (!res.ok) { const body = await res.json().catch(() => null); throw new Error(body?.message ?? 'Export mislukt'); }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `agenda-${van}-tot-${tot}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 // --- Spreuk van de dag (startscherm kassa) ---
 export type Spreuk = { id: string; tekst: string; auteur: string | null; emoji: string | null; bron: string; actief: boolean; createdAt: string };
 export async function getSpreukVanDaag(): Promise<{ vandaag: Spreuk | null; carrousel: Spreuk[]; datum: string }> {

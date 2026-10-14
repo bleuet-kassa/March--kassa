@@ -8,6 +8,7 @@ export const RECHTEN: { key: string; naam: string; uitleg: string; groep: string
   { key: 'open_rekeningen', naam: 'Open rekeningen', uitleg: 'Betalingen van klanten ontvangen', groep: 'Dagelijks' },
   { key: 'beheer', naam: 'Beheer producten', uitleg: 'Producten, categorieën, voorraad ontvangen', groep: 'Dagelijks' },
   { key: 'cadeaubonnen', naam: 'Cadeaubons', uitleg: 'Register, aanmaken, inwisselen', groep: 'Dagelijks' },
+  { key: 'agenda', naam: 'Agenda', uitleg: 'Bestellingen en agendapunten (manueel + webshop), Excel-export', groep: 'Dagelijks' },
   { key: 'dagafsluiting', naam: 'Dagafsluiting', uitleg: 'Zelf afsluiten en register bekijken (zonder: enkel aanvragen)', groep: 'Beheer' },
   { key: 'rekeningen', naam: 'Klant factuur', uitleg: 'Bedrijven op rekening, maandbudget, factureren', groep: 'Beheer' },
   { key: 'facturen', naam: 'Facturen inlezen', uitleg: 'Aankoopfacturen inlezen naar de voorraad', groep: 'Beheer' },
@@ -19,7 +20,7 @@ export const RECHTEN: { key: string; naam: string; uitleg: string; groep: string
   { key: 'boekhouding', naam: 'Boekhouding', uitleg: 'Scrada, verkoopfacturen, rekeningen mailen', groep: 'Cijfers' },
   { key: 'instellingen', naam: 'Instellingen', uitleg: 'Onderneming, meldingen', groep: 'Cijfers' },
 ];
-export const STANDAARD_RECHTEN = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen'];
+export const STANDAARD_RECHTEN = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen', 'agenda'];
 
 export const isAdminRol = (rol?: string | null) => rol === 'BEHEER' || rol === 'BEHEERDER';
 

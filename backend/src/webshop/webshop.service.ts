@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SalesService } from '../sales/sales.service';
+import { AgendaService } from '../agenda/agenda.service';
 
 // Publieke webshop-catalogus. Toont ENKEL producten die actief zijn én
 // als "toon in webshop" gemarkeerd staan. Een product offline zetten aan de
@@ -16,7 +17,7 @@ export type BestellingInput = {
 
 @Injectable()
 export class WebshopService {
-  constructor(private prisma: PrismaService, private sales: SalesService) {}
+  constructor(private prisma: PrismaService, private sales: SalesService, private agenda: AgendaService) {}
 
   producten(afdelingId?: string) {
     return this.prisma.product.findMany({
@@ -96,6 +97,9 @@ export class WebshopService {
       }
     }
 
+    // Elke webshopbestelling komt automatisch in de agenda van de zaak.
+    try { await this.agenda.vanWebshop(ticket.id); } catch { /* agenda mag de bestelling niet blokkeren */ }
+
     return {
       ...ticket, leverwijze: input.leverwijze, status: 'NIEUW',
       klant: { naam: klant.naam, email: klant.email },
@@ -134,6 +138,8 @@ export class WebshopService {
   }
 
   async updateStatus(id: string, status: string) {
-    return this.prisma.verkoop.update({ where: { id }, data: { status } });
+    const v = await this.prisma.verkoop.update({ where: { id }, data: { status } });
+    await this.agenda.syncWebshopStatus(id, status).catch(() => undefined);
+    return v;
   }
 }

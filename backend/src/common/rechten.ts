@@ -9,6 +9,7 @@ export const RECHTEN = [
   'open_rekeningen', // Open rekeningen: betalingen van klanten ontvangen
   'beheer',          // Beheer: producten, categorieën, voorraad ontvangen
   'cadeaubonnen',    // Cadeaubons: register, aanmaken, inwisselen
+  'agenda',          // Agenda: bestellingen en agendapunten (manueel + webshop), Excel-export
   'dagafsluiting',   // Dagafsluiting: zelf afsluiten en register bekijken (zonder: enkel aanvragen)
   'rekeningen',      // Klant factuur: bedrijven op rekening, maandbudget, factureren
   'facturen',        // Facturen inlezen (aankoopfacturen → voorraad)
@@ -23,7 +24,7 @@ export const RECHTEN = [
 export type Recht = (typeof RECHTEN)[number];
 
 // Wat een gewoon kassa-account mag zolang er niets specifieks is ingesteld.
-export const STANDAARD_RECHTEN: Recht[] = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen'];
+export const STANDAARD_RECHTEN: Recht[] = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen', 'agenda'];
 
 export const ADMIN_ROLLEN = ['BEHEER', 'BEHEERDER'];
 export const isAdminRol = (rol?: string | null) => ADMIN_ROLLEN.includes(String(rol ?? ''));

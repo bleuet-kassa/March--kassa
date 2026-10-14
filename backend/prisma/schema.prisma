@@ -659,3 +659,27 @@ model Spreuk {
   actief    Boolean  @default(true)
   createdAt DateTime @default(now())
 }
+
+// Agenda van de zaak: manuele bestellingen en agendapunten + automatisch de
+// webshopbestellingen. Voor alle medewerkers; exporteerbaar naar Excel.
+model AgendaItem {
+  id            String    @id @default(cuid())
+  dag           String    // YYYY-MM-DD
+  tijd          String?   // HH:MM (optioneel)
+  soort         String    @default("AFSPRAAK") // BESTELLING | AFSPRAAK | NOTITIE | LEVERING
+  bron          String    @default("MANUEEL")  // MANUEEL | WEBSHOP
+  titel         String
+  omschrijving  String?
+  klantNaam     String?
+  klantTelefoon String?
+  klantEmail    String?
+  bedrag        Decimal?  @db.Decimal(10, 2)
+  locatie       String?   // WINKEL | RESTAURANT | CATERING
+  status        String    @default("OPEN") // OPEN | KLAAR | GEANNULEERD
+  verkoopId     String?   @unique // webshopbestelling waaruit dit item komt
+  aangemaaktDoor String?  // naam van wie het inzette
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  @@index([dag])
+}

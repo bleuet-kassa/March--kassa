@@ -19,6 +19,7 @@ import { Bestellingen } from './pages/Bestellingen';
 import { Rekeningen } from './pages/Rekeningen';
 import { Personeel } from './pages/Personeel';
 import { Website } from './pages/Website';
+import { Agenda } from './pages/Agenda';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
 import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
@@ -155,6 +156,7 @@ function StaffApp() {
         {mag('beheer') && <Link to="/kassa/beheer">Beheer</Link>}
         {mag('cadeaubonnen') && <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>}
         {mag('open_rekeningen') && <Link to="/kassa/open-rekeningen">Open rekeningen</Link>}
+        {mag('agenda') && <Link to="/kassa/agenda">Agenda</Link>}
         {mag('webshop') && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
         {mag('webshop') && <Link to="/kassa/bestellingen">Bestellingen</Link>}
         {mag('kortingen') && <Link to="/kassa/kortingen">Kortingen</Link>}
@@ -192,6 +194,7 @@ function StaffApp() {
           <Route path="beheer" element={mag('beheer') ? <Beheer /> : geenToegang} />
           <Route path="cadeaubonnen" element={mag('cadeaubonnen') ? <Cadeaubonnen /> : geenToegang} />
           <Route path="open-rekeningen" element={mag('open_rekeningen') ? <OpenRekeningen /> : geenToegang} />
+          <Route path="agenda" element={mag('agenda') ? <Agenda /> : geenToegang} />
           <Route path="facturen" element={mag('facturen') ? <Facturen /> : geenToegang} />
           <Route path="boekhouding" element={mag('boekhouding') ? <Boekhouding /> : geenToegang} />
           <Route path="rapporten" element={mag('rapporten') ? <Rapporten /> : geenToegang} />
