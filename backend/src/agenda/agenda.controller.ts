@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { AgendaService, type AgendaInput } from './agenda.service';
+import { AgendaService, type AgendaInput, type HerhalingInput } from './agenda.service';
 import { Recht } from '../auth/auth.guard';
 
 // Agenda: voor iedereen met de toegang "agenda" (standaard aan).
@@ -23,6 +23,24 @@ export class AgendaController {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="agenda${categorie ? '-' + categorie.toLowerCase() : ''}-${van}-tot-${tot}.xlsx"`);
     res.send(buf);
+  }
+
+  // Terugkerende activiteiten (statische paden vóór de :id-routes).
+  @Get('herhalingen')
+  herhalingen() {
+    return this.agenda.herhalingen();
+  }
+  @Post('herhalingen')
+  maakHerhaling(@Body() body: HerhalingInput) {
+    return this.agenda.maakHerhaling(body);
+  }
+  @Patch('herhalingen/:id')
+  wijzigHerhaling(@Param('id') id: string, @Body() body: Partial<HerhalingInput>) {
+    return this.agenda.wijzigHerhaling(id, body ?? {});
+  }
+  @Delete('herhalingen/:id')
+  verwijderHerhaling(@Param('id') id: string) {
+    return this.agenda.verwijderHerhaling(id);
   }
 
   @Post()

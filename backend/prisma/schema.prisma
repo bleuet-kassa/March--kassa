@@ -685,8 +685,34 @@ model AgendaItem {
   afhaalDag     String?   // gewenste afhaal-/leverdatum (YYYY-MM-DD)
   afhaalTijd    String?   // gewenst uur (HH:MM)
   aangemaaktDoor String?  // naam van wie het inzette
+  // Komt uit een terugkerende activiteit (één agendapunt per dag van de herhaling).
+  herhaling     AgendaHerhaling? @relation(fields: [herhalingId], references: [id], onDelete: SetNull)
+  herhalingId   String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @default(now()) @updatedAt
 
   @@index([dag])
+  @@unique([herhalingId, dag])
+}
+
+// Terugkerende activiteit in de agenda (bv. wekelijkse bestelling, afvalophaling om
+// de twee weken). De afzonderlijke dagen worden als gewone AgendaItems aangemaakt
+// zodra die periode bekeken wordt (één per dag, zie AgendaItem.herhalingId).
+model AgendaHerhaling {
+  id            String    @id @default(cuid())
+  titel         String
+  soort         String    @default("AFSPRAAK")
+  categorie     String?
+  locatie       String?
+  tijd          String?
+  omschrijving  String?
+  klantNaam     String?
+  frequentie    String    // WEKELIJKS | TWEEWEKELIJKS | MAANDELIJKS
+  weekdagen     Int[]     @default([]) // 1=ma … 7=zo (wekelijks/tweewekelijks)
+  dagVanMaand   Int?      // 1..31 (maandelijks)
+  start         String    // YYYY-MM-DD (eerste dag waarop het geldt)
+  einde         String?   // YYYY-MM-DD (laatste dag), leeg = blijft doorlopen
+  actief        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  items         AgendaItem[]
 }

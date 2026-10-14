@@ -11,6 +11,10 @@ export const LOCATIES = ['WINKEL', 'RESTAURANT', 'CATERING'] as const;
 export const CATEGORIEEN = ['BROOD', 'CATERING', 'BOODSCHAPPEN'] as const;
 const CATEGORIE_NAAM: Record<string, string> = { BROOD: 'Brood', CATERING: 'Catering', BOODSCHAPPEN: 'Boodschappen' };
 
+export type HerhalingInput = {
+  titel: string; soort?: string; categorie?: string | null; locatie?: string | null; tijd?: string | null; omschrijving?: string | null; klantNaam?: string | null;
+  frequentie: 'WEKELIJKS' | 'TWEEWEKELIJKS' | 'MAANDELIJKS'; weekdagen?: number[]; dagVanMaand?: number | null; start: string; einde?: string | null; actief?: boolean;
+};
 export type AgendaInput = {
   dag: string; tijd?: string | null; soort?: string; titel: string; omschrijving?: string | null;
   klantNaam?: string | null; klantTelefoon?: string | null; klantEmail?: string | null;
@@ -36,7 +40,7 @@ export class AgendaService implements OnModuleInit {
     } catch (e) { this.log.warn(`Agenda-backfill: ${e instanceof Error ? e.message : e}`); }
   }
 
-  private naarBuiten(a: { id: string; dag: string; tijd: string | null; soort: string; bron: string; titel: string; omschrijving: string | null; klantNaam: string | null; klantTelefoon: string | null; klantEmail: string | null; bedrag: Prisma.Decimal | null; locatie: string | null; categorie: string | null; status: string; verkoopId: string | null; gelezen: boolean; afhaalDag: string | null; afhaalTijd: string | null; aangemaaktDoor: string | null; createdAt: Date; updatedAt: Date }) {
+  private naarBuiten(a: { id: string; dag: string; tijd: string | null; soort: string; bron: string; titel: string; omschrijving: string | null; klantNaam: string | null; klantTelefoon: string | null; klantEmail: string | null; bedrag: Prisma.Decimal | null; locatie: string | null; categorie: string | null; status: string; verkoopId: string | null; gelezen: boolean; afhaalDag: string | null; afhaalTijd: string | null; herhalingId: string | null; aangemaaktDoor: string | null; createdAt: Date; updatedAt: Date }) {
     return { ...a, bedrag: a.bedrag != null ? Number(a.bedrag) : null };
   }
 
@@ -92,8 +96,108 @@ export class AgendaService implements OnModuleInit {
   // --- lezen ------------------------------------------------------------------
   async lijst(van: string, tot: string) {
     if (!DAG.test(van) || !DAG.test(tot)) throw new BadRequestException('Geef een geldige periode.');
+    await this.materialiseer(van, tot);
     const rows = await this.prisma.agendaItem.findMany({ where: { dag: { gte: van, lte: tot } }, orderBy: [{ dag: 'asc' }, { tijd: 'asc' }, { createdAt: 'asc' }] });
     return rows.map((a) => this.naarBuiten(a));
+  }
+
+  // --- terugkerende activiteiten ------------------------------------------------------
+  // Een herhaling (bv. "Bestelling bakker" elke ma/do, "Afvalophaling" om de 2 weken op
+  // vrijdag, "Huur" op de 1e van de maand) wordt per dag een gewoon agendapunt zodra die
+  // periode bekeken wordt; elk punt kan apart op Klaar gezet of aangepast worden.
+  private dagenTussen(van: string, tot: string): string[] {
+    const uit: string[] = [];
+    const d = new Date(van + 'T12:00:00Z');
+    const eind = new Date(tot + 'T12:00:00Z');
+    for (let i = 0; d <= eind && i < 400; i++) { uit.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+    return uit;
+  }
+  private valtOp(h: { frequentie: string; weekdagen: number[]; dagVanMaand: number | null; start: string; einde: string | null }, dag: string): boolean {
+    if (dag < h.start || (h.einde && dag > h.einde)) return false;
+    const d = new Date(dag + 'T12:00:00Z');
+    const iso = ((d.getUTCDay() + 6) % 7) + 1; // 1=ma … 7=zo
+    if (h.frequentie === 'MAANDELIJKS') {
+      const laatste = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      const doel = Math.min(h.dagVanMaand ?? 1, laatste); // 31 -> laatste dag van kortere maanden
+      return d.getUTCDate() === doel;
+    }
+    if (!h.weekdagen.includes(iso)) return false;
+    if (h.frequentie === 'TWEEWEKELIJKS') {
+      // Even/oneven week t.o.v. de week van de startdatum.
+      const s = new Date(h.start + 'T12:00:00Z');
+      const maandagStart = new Date(s); maandagStart.setUTCDate(s.getUTCDate() - ((s.getUTCDay() + 6) % 7));
+      const weken = Math.floor((d.getTime() - maandagStart.getTime()) / (7 * 86_400_000));
+      return weken % 2 === 0;
+    }
+    return true; // WEKELIJKS
+  }
+  private async materialiseer(van: string, tot: string) {
+    const herhalingen = await this.prisma.agendaHerhaling.findMany({ where: { actief: true, start: { lte: tot }, OR: [{ einde: null }, { einde: { gte: van } }] } });
+    if (!herhalingen.length) return;
+    const dagen = this.dagenTussen(van, tot);
+    const data: Prisma.AgendaItemCreateManyInput[] = [];
+    for (const h of herhalingen) {
+      for (const dag of dagen) {
+        if (!this.valtOp(h, dag)) continue;
+        data.push({ dag, tijd: h.tijd, soort: h.soort, bron: 'MANUEEL', titel: h.titel, omschrijving: h.omschrijving, klantNaam: h.klantNaam, locatie: h.locatie, categorie: h.categorie, status: 'OPEN', gelezen: true, herhalingId: h.id, aangemaaktDoor: 'herhaling' });
+      }
+    }
+    if (data.length) await this.prisma.agendaItem.createMany({ data, skipDuplicates: true });
+  }
+  herhalingen() {
+    return this.prisma.agendaHerhaling.findMany({ orderBy: [{ actief: 'desc' }, { titel: 'asc' }] });
+  }
+  private valideerHerhaling(input: Partial<HerhalingInput>, volledig: boolean) {
+    const data: Prisma.AgendaHerhalingUncheckedUpdateInput = {};
+    if (volledig || input.titel !== undefined) { const t = String(input.titel ?? '').trim(); if (!t) throw new BadRequestException('Geef een titel.'); data.titel = t; }
+    if (volledig || input.frequentie !== undefined) {
+      if (!['WEKELIJKS', 'TWEEWEKELIJKS', 'MAANDELIJKS'].includes(String(input.frequentie))) throw new BadRequestException('Kies een frequentie.');
+      data.frequentie = input.frequentie;
+    }
+    const freq = (data.frequentie ?? input.frequentie) as string | undefined;
+    if (input.weekdagen !== undefined || volledig) {
+      const wd = [...new Set((input.weekdagen ?? []).map(Number).filter((n) => n >= 1 && n <= 7))].sort();
+      if (freq && freq !== 'MAANDELIJKS' && !wd.length) throw new BadRequestException('Kies minstens één weekdag.');
+      data.weekdagen = wd;
+    }
+    if (input.dagVanMaand !== undefined || volledig) {
+      const dm = input.dagVanMaand == null ? null : Math.round(Number(input.dagVanMaand));
+      if (freq === 'MAANDELIJKS' && (!dm || dm < 1 || dm > 31)) throw new BadRequestException('Geef een dag van de maand (1-31).');
+      data.dagVanMaand = dm;
+    }
+    if (volledig || input.start !== undefined) { if (!input.start || !DAG.test(input.start)) throw new BadRequestException('Geef een startdatum.'); data.start = input.start; }
+    if (input.einde !== undefined) { const e = (input.einde ?? '').trim(); if (e && !DAG.test(e)) throw new BadRequestException('Geef een geldige einddatum.'); data.einde = e || null; }
+    if (input.soort !== undefined) { if (!(SOORTEN as readonly string[]).includes(String(input.soort))) throw new BadRequestException('Onbekende soort.'); data.soort = input.soort; }
+    if (input.categorie !== undefined) { const c = (input.categorie ?? '').trim(); if (c && !(CATEGORIEEN as readonly string[]).includes(c)) throw new BadRequestException('Onbekende categorie.'); data.categorie = c || null; }
+    if (input.locatie !== undefined) { const l = (input.locatie ?? '').trim(); if (l && !(LOCATIES as readonly string[]).includes(l)) throw new BadRequestException('Onbekende locatie.'); data.locatie = l || null; }
+    if (input.tijd !== undefined) { const t = (input.tijd ?? '').trim(); if (t && !TIJD.test(t)) throw new BadRequestException('Geef een geldig uur.'); data.tijd = t || null; }
+    if (input.omschrijving !== undefined) data.omschrijving = input.omschrijving?.trim() || null;
+    if (input.klantNaam !== undefined) data.klantNaam = input.klantNaam?.trim() || null;
+    if (input.actief !== undefined) data.actief = !!input.actief;
+    return data;
+  }
+  async maakHerhaling(input: HerhalingInput) {
+    const data = this.valideerHerhaling(input, true) as Prisma.AgendaHerhalingUncheckedCreateInput;
+    return this.prisma.agendaHerhaling.create({ data: { ...data, titel: String(data.titel), frequentie: String(data.frequentie), start: String(data.start) } });
+  }
+  // Wijzigen: toekomstige, nog open dagen van deze herhaling worden opnieuw opgebouwd.
+  async wijzigHerhaling(id: string, input: Partial<HerhalingInput>) {
+    const bestaand = await this.prisma.agendaHerhaling.findUnique({ where: { id } });
+    if (!bestaand) throw new NotFoundException('Herhaling niet gevonden.');
+    const data = this.valideerHerhaling({ ...input, frequentie: input.frequentie ?? (bestaand.frequentie as HerhalingInput['frequentie']) }, false);
+    const h = await this.prisma.agendaHerhaling.update({ where: { id }, data });
+    const vandaag = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels' }).format(new Date());
+    await this.prisma.agendaItem.deleteMany({ where: { herhalingId: id, status: 'OPEN', dag: { gte: vandaag } } });
+    return h;
+  }
+  // Verwijderen: het verleden blijft staan (los), toekomstige open dagen verdwijnen.
+  async verwijderHerhaling(id: string) {
+    const bestaand = await this.prisma.agendaHerhaling.findUnique({ where: { id } });
+    if (!bestaand) throw new NotFoundException('Herhaling niet gevonden.');
+    const vandaag = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels' }).format(new Date());
+    await this.prisma.agendaItem.deleteMany({ where: { herhalingId: id, status: 'OPEN', dag: { gte: vandaag } } });
+    await this.prisma.agendaHerhaling.delete({ where: { id } });
+    return { ok: true };
   }
 
   // --- schrijven ------------------------------------------------------------------

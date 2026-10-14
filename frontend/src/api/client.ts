@@ -28,7 +28,26 @@ export type AgendaItem = {
   locatie: string | null; categorie: string | null; status: string; verkoopId: string | null; aangemaaktDoor: string | null; createdAt: string; updatedAt: string;
   // webshopbestelling: ongelezen tot iemand op "Gelezen" klikt; dan verhuist ze naar afhaalDag/afhaalTijd
   gelezen: boolean; afhaalDag: string | null; afhaalTijd: string | null;
+  herhalingId?: string | null; // komt uit een terugkerende activiteit
 };
+// Terugkerende activiteiten (wekelijks / om de 2 weken / maandelijks); elke dag wordt een gewoon agendapunt.
+export type AgendaHerhaling = {
+  id: string; titel: string; soort: string; categorie: string | null; locatie: string | null; tijd: string | null; omschrijving: string | null; klantNaam: string | null;
+  frequentie: 'WEKELIJKS' | 'TWEEWEKELIJKS' | 'MAANDELIJKS'; weekdagen: number[]; dagVanMaand: number | null; start: string; einde: string | null; actief: boolean;
+};
+export type HerhalingInput = Omit<AgendaHerhaling, 'id'>;
+export async function getAgendaHerhalingen(): Promise<AgendaHerhaling[]> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/herhalingen`));
+}
+export async function maakAgendaHerhaling(input: HerhalingInput): Promise<AgendaHerhaling> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/herhalingen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function wijzigAgendaHerhaling(id: string, input: Partial<HerhalingInput>): Promise<AgendaHerhaling> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/herhalingen/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function verwijderAgendaHerhaling(id: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/herhalingen/${id}`, { method: 'DELETE' }));
+}
 export async function markeerAgendaGelezen(id: string): Promise<AgendaItem> {
   return jsonOrThrow(await fetch(`${BASE}/agenda/${id}/gelezen`, { method: 'POST' }));
 }

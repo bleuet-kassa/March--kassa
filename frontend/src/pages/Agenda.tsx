@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { getAgenda, maakAgendaItem, wijzigAgendaItem, verwijderAgendaItem, downloadAgendaExcel, markeerAgendaGelezen, type AgendaItem, type AgendaInput } from '../api/client';
+import { getAgenda, maakAgendaItem, wijzigAgendaItem, verwijderAgendaItem, downloadAgendaExcel, markeerAgendaGelezen, getAgendaHerhalingen, maakAgendaHerhaling, wijzigAgendaHerhaling, verwijderAgendaHerhaling, type AgendaItem, type AgendaInput, type AgendaHerhaling, type HerhalingInput } from '../api/client';
 
 // Agenda van de zaak: weekoverzicht met manuele bestellingen en agendapunten,
 // plus de webshopbestellingen (komen er automatisch in). Iedereen kan er aan;
@@ -19,6 +19,14 @@ const euro = (n: number) => '€ ' + n.toFixed(2);
 const datumNl = (s: string, opt: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }) => vanIso(s).toLocaleDateString('nl-BE', opt);
 
 type Formulier = AgendaInput & { id?: string };
+const WEEKDAGEN: [number, string][] = [[1, 'ma'], [2, 'di'], [3, 'wo'], [4, 'do'], [5, 'vr'], [6, 'za'], [7, 'zo']];
+const FREQUENTIES: [HerhalingInput['frequentie'], string][] = [['WEKELIJKS', 'Elke week'], ['TWEEWEKELIJKS', 'Om de twee weken'], ['MAANDELIJKS', 'Elke maand']];
+const legeHerhaling = (start: string): HerhalingInput => ({ titel: '', soort: 'BESTELLING', categorie: '', locatie: 'WINKEL', tijd: '', omschrijving: '', klantNaam: '', frequentie: 'WEKELIJKS', weekdagen: [], dagVanMaand: null, start, einde: '', actief: true });
+// Leesbare samenvatting van een herhaling, bv. "elke week op ma, do · 08:00".
+function herhalingTekst(h: AgendaHerhaling) {
+  const f = h.frequentie === 'MAANDELIJKS' ? `elke maand op dag ${h.dagVanMaand ?? '?'}` : `${h.frequentie === 'WEKELIJKS' ? 'elke week' : 'om de 2 weken'} op ${h.weekdagen.map((d) => WEEKDAGEN.find(([n]) => n === d)?.[1] ?? d).join(', ')}`;
+  return `${f}${h.tijd ? ' · ' + h.tijd : ''} · vanaf ${datumNl(h.start)}${h.einde ? ' tot ' + datumNl(h.einde) : ''}`;
+}
 const leeg = (dag: string): Formulier => ({ dag, tijd: '', soort: 'BESTELLING', titel: '', omschrijving: '', klantNaam: '', klantTelefoon: '', klantEmail: '', bedrag: null, locatie: 'WINKEL', categorie: 'BOODSCHAPPEN', status: 'OPEN' });
 
 export function Agenda() {
@@ -31,6 +39,36 @@ export function Agenda() {
   const [form, setForm] = useState<Formulier | null>(null);
   const [toonKlaar, setToonKlaar] = useState(true);
   const [catFilter, setCatFilter] = useState(''); // '' = alle categorieën
+  // Terugkerende activiteiten (wekelijks / om de 2 weken / maandelijks).
+  const [herhalingen, setHerhalingen] = useState<AgendaHerhaling[]>([]);
+  const [toonHerhalingen, setToonHerhalingen] = useState(false);
+  const [hForm, setHForm] = useState<(HerhalingInput & { id?: string }) | null>(null);
+  async function laadHerhalingen() { try { setHerhalingen(await getAgendaHerhalingen()); } catch { /* geen toegang */ } }
+  useEffect(() => { laadHerhalingen(); }, []);
+  async function bewaarHerhaling() {
+    if (!hForm) return;
+    setBezig(true); setFout(''); setMelding('');
+    try {
+      const data: HerhalingInput = { ...hForm, dagVanMaand: hForm.frequentie === 'MAANDELIJKS' ? Number(hForm.dagVanMaand) || null : null, weekdagen: hForm.frequentie === 'MAANDELIJKS' ? [] : hForm.weekdagen };
+      if (hForm.id) await wijzigAgendaHerhaling(hForm.id, data); else await maakAgendaHerhaling(data);
+      setMelding(hForm.id ? 'Terugkerende activiteit aangepast; de komende dagen zijn opnieuw ingepland.' : 'Terugkerende activiteit ingepland.');
+      setHForm(null); await laadHerhalingen(); await laad();
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function verwijderHerhaling(h: AgendaHerhaling) {
+    if (!window.confirm(`"${h.titel}" niet meer herhalen?\n\nDe komende, nog open dagen verdwijnen uit de agenda; wat al voorbij is blijft staan.`)) return;
+    setBezig(true); setFout('');
+    try { await verwijderAgendaHerhaling(h.id); await laadHerhalingen(); await laad(); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
+    finally { setBezig(false); }
+  }
+  async function zetHerhalingActief(h: AgendaHerhaling, actief: boolean) {
+    setBezig(true); setFout('');
+    try { await wijzigAgendaHerhaling(h.id, { actief }); await laadHerhalingen(); await laad(); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Aanpassen mislukt'); }
+    finally { setBezig(false); }
+  }
   const [exportCat, setExportCat] = useState(''); // '' = alles, tabblad per categorie
   const [exportVan, setExportVan] = useState(vandaag.slice(0, 8) + '01');
   const [exportTot, setExportTot] = useState(iso(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)));
@@ -116,8 +154,65 @@ export function Agenda() {
             <button key={k} onClick={() => setCatFilter(k)} style={{ ...btnMini, fontWeight: catFilter === k ? 700 : 400, background: catFilter === k ? '#111827' : '#fff', color: catFilter === k ? '#fff' : '#111827', borderColor: catFilter === k ? '#111827' : '#cbd5e1' }}>{n}</button>
           ))}
         </div>
-        <button onClick={() => setForm(leeg(vandaag))} style={{ ...btnGroen, marginLeft: 'auto' }}>+ Toevoegen</button>
+        <button onClick={() => { setToonHerhalingen(!toonHerhalingen); setHForm(null); }} style={{ ...btnGrijs, marginLeft: 'auto', fontWeight: toonHerhalingen ? 700 : 400 }}>↻ Terugkerend{herhalingen.filter((h) => h.actief).length ? ` (${herhalingen.filter((h) => h.actief).length})` : ''}</button>
+        <button onClick={() => setForm(leeg(vandaag))} style={btnGroen}>+ Toevoegen</button>
       </div>
+
+      {toonHerhalingen && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14, margin: '12px 0', background: '#f8fafc' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <strong>↻ Terugkerende activiteiten</strong>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>bv. bestelling bij de bakker elke ma en do, afvalophaling om de twee weken op vrijdag. Elke dag wordt een gewoon agendapunt dat je op Klaar zet.</span>
+            {!hForm && <button onClick={() => setHForm(legeHerhaling(vandaag))} style={{ ...btnGroen, marginLeft: 'auto' }}>+ Nieuwe herhaling</button>}
+          </div>
+          {hForm && (
+            <div style={{ marginTop: 10, padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
+                <label style={{ ...lab, gridColumn: '1 / -1' }}>Titel *<input value={hForm.titel} onChange={(e) => setHForm({ ...hForm, titel: e.target.value })} placeholder="bv. Bestelling bakker / Afvalophaling" style={inp} autoFocus /></label>
+                <label style={lab}>Hoe vaak<select value={hForm.frequentie} onChange={(e) => setHForm({ ...hForm, frequentie: e.target.value as HerhalingInput['frequentie'] })} style={inp}>{FREQUENTIES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+                {hForm.frequentie === 'MAANDELIJKS'
+                  ? <label style={lab}>Dag van de maand<input type="number" min={1} max={31} value={hForm.dagVanMaand ?? ''} onChange={(e) => setHForm({ ...hForm, dagVanMaand: Number(e.target.value) || null })} style={inp} /></label>
+                  : (
+                    <div style={lab}>Op welke dagen
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {WEEKDAGEN.map(([n, naam]) => {
+                          const aan = hForm.weekdagen.includes(n);
+                          return <button key={n} type="button" onClick={() => setHForm({ ...hForm, weekdagen: aan ? hForm.weekdagen.filter((x) => x !== n) : [...hForm.weekdagen, n].sort() })} style={{ ...btnMini, padding: '6px 10px', fontWeight: aan ? 700 : 400, background: aan ? '#111827' : '#fff', color: aan ? '#fff' : '#111827', borderColor: aan ? '#111827' : '#cbd5e1' }}>{naam}</button>;
+                        })}
+                      </div>
+                    </div>
+                  )}
+                <label style={lab}>Uur<input type="time" value={hForm.tijd ?? ''} onChange={(e) => setHForm({ ...hForm, tijd: e.target.value })} style={inp} /></label>
+                <label style={lab}>Vanaf<input type="date" value={hForm.start} onChange={(e) => setHForm({ ...hForm, start: e.target.value })} style={inp} /></label>
+                <label style={lab}>Tot (leeg = blijft lopen)<input type="date" value={hForm.einde ?? ''} onChange={(e) => setHForm({ ...hForm, einde: e.target.value })} style={inp} /></label>
+                <label style={lab}>Soort<select value={hForm.soort} onChange={(e) => setHForm({ ...hForm, soort: e.target.value })} style={inp}>{SOORTEN.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+                <label style={lab}>Categorie<select value={hForm.categorie ?? ''} onChange={(e) => setHForm({ ...hForm, categorie: e.target.value })} style={inp}><option value="">—</option>{CATEGORIEEN.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+                <label style={lab}>Locatie<select value={hForm.locatie ?? ''} onChange={(e) => setHForm({ ...hForm, locatie: e.target.value })} style={inp}>{LOCATIES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+                <label style={lab}>Leverancier / klant<input value={hForm.klantNaam ?? ''} onChange={(e) => setHForm({ ...hForm, klantNaam: e.target.value })} style={inp} /></label>
+                <label style={{ ...lab, gridColumn: '1 / -1' }}>Omschrijving<textarea value={hForm.omschrijving ?? ''} onChange={(e) => setHForm({ ...hForm, omschrijving: e.target.value })} rows={2} style={{ ...inp, resize: 'vertical' }} /></label>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button onClick={bewaarHerhaling} disabled={bezig || !hForm.titel.trim()} style={btnGroen}>{bezig ? 'Bezig…' : hForm.id ? 'Opslaan' : 'Inplannen'}</button>
+                <button onClick={() => setHForm(null)} disabled={bezig} style={btnGrijs}>Annuleren</button>
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {herhalingen.length === 0 && !hForm && <span style={{ color: '#6b7280', fontSize: 13 }}>Nog geen terugkerende activiteiten.</span>}
+            {herhalingen.map((h) => (
+              <div key={h.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '6px 10px', opacity: h.actief ? 1 : .55 }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 600 }}>{h.titel}{h.categorie ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · {catNaam(h.categorie)}</span> : ''}{!h.actief && <span style={{ color: '#b45309', fontWeight: 400 }}> · gepauzeerd</span>}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>{herhalingTekst(h)}{h.klantNaam ? ` · ${h.klantNaam}` : ''}</div>
+                </div>
+                <button onClick={() => setHForm({ ...h, categorie: h.categorie ?? '', locatie: h.locatie ?? '', tijd: h.tijd ?? '', omschrijving: h.omschrijving ?? '', klantNaam: h.klantNaam ?? '', einde: h.einde ?? '' })} disabled={bezig} style={btnMini}>Aanpassen</button>
+                <button onClick={() => zetHerhalingActief(h, !h.actief)} disabled={bezig} style={btnMini}>{h.actief ? 'Pauzeren' : 'Hervatten'}</button>
+                <button onClick={() => verwijderHerhaling(h)} disabled={bezig} style={{ ...btnMini, color: 'crimson' }}>Verwijderen</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <p style={{ color: '#6b7280', fontSize: 14, margin: '6px 0 12px' }}>Bestellingen en agendapunten van de zaak. Een webshopbestelling verschijnt eerst op de dag van de bestelling (rood, "nieuw"); klik op <strong>Gelezen</strong> en ze verhuist naar de afhaal- of leverdag die de klant koos. Klik op een item om het aan te passen.</p>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
       {melding && <p style={{ color: '#166534', fontWeight: 600 }}>{melding}</p>}
@@ -165,7 +260,7 @@ export function Agenda() {
                     <div key={it.id} onClick={() => setForm({ id: it.id, dag: it.dag, tijd: it.tijd ?? '', soort: it.soort, titel: it.titel, omschrijving: it.omschrijving ?? '', klantNaam: it.klantNaam ?? '', klantTelefoon: it.klantTelefoon ?? '', klantEmail: it.klantEmail ?? '', bedrag: it.bedrag, locatie: it.locatie ?? '', categorie: it.categorie ?? '', status: it.status })}
                       style={{ background: nieuw ? '#fef2f2' : '#fff', border: nieuw ? '1px solid #fca5a5' : '1px solid #e5e7eb', borderLeftWidth: 4, borderLeftColor: nieuw ? '#dc2626' : kleur, borderRadius: 8, padding: '6px 8px', cursor: 'pointer', opacity: klaar ? .55 : 1, textDecoration: it.status === 'GEANNULEERD' ? 'line-through' : 'none' }}>
                       <div style={{ fontSize: 11, color: nieuw ? '#dc2626' : kleur, fontWeight: 700, display: 'flex', gap: 6, justifyContent: 'space-between' }}>
-                        <span>{nieuw ? 'NIEUW · ' : ''}{it.tijd ? it.tijd + ' · ' : ''}{naam}{it.categorie ? ' · ' + catNaam(it.categorie) : ''}{it.bron === 'WEBSHOP' ? ' · webshop' : ''}</span>
+                        <span>{nieuw ? 'NIEUW · ' : ''}{it.herhalingId ? '↻ ' : ''}{it.tijd ? it.tijd + ' · ' : ''}{naam}{it.categorie ? ' · ' + catNaam(it.categorie) : ''}{it.bron === 'WEBSHOP' ? ' · webshop' : ''}</span>
                         {it.status === 'KLAAR' && <span style={{ color: '#166534' }}>✔</span>}
                       </div>
                       {nieuw && it.afhaalDag && <div style={{ fontSize: 12, color: '#991b1b' }}>{it.soort === 'LEVERING' ? 'Leveren' : 'Afhalen'} op {datumNl(it.afhaalDag, { weekday: 'short', day: 'numeric', month: 'short' })}{it.afhaalTijd ? ' ' + it.afhaalTijd : ''}</div>}
