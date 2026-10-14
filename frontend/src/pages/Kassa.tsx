@@ -840,8 +840,21 @@ export function Kassa() {
   const QR_ACTIEF = true;
   const betaalwijzen: Betaalwijze[] = ['BANCONTACT', 'KAART', 'CASH', 'OVERSCHRIJVING', ...(QR_ACTIEF ? ['QR' as Betaalwijze] : []), 'EIGEN_REKENING'];
 
+  const aantalArtikels = lijnen.reduce((s, l) => s + (l.vastAantal ? 1 : Math.abs(l.aantal)), 0);
+
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', maxWidth: 940 }}>
+      {/* Totaal altijd in beeld: blijft bovenaan kleven bij het scrollen (ook op smartphone,
+          waar het betaalpaneel onder de artikellijst komt). */}
+      <div style={{ flexBasis: '100%', position: 'sticky', top: 0, zIndex: 40, background: '#fff', padding: '8px 4px', borderBottom: '2px solid #e5e7eb', boxShadow: '0 2px 8px rgba(0,0,0,.06)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, color: '#666' }}>
+          {isTerugbetaling ? 'Terug te geven' : 'Te betalen'}
+          <div style={{ fontSize: 12, color: '#999' }}>{aantalArtikels} artikel{aantalArtikels === 1 ? '' : 's'}{retourModus ? ' · RETOUR-modus' : ''}</div>
+        </div>
+        <div style={{ fontSize: 30, fontWeight: 700, color: isTerugbetaling ? '#b91c1c' : '#111', fontVariantNumeric: 'tabular-nums', marginLeft: 'auto' }}>
+          € {Math.abs(totaal).toFixed(2)}
+        </div>
+      </div>
       {/* Meerdere tickets tegelijk — kies per ticket wie bedient */}
       <div style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {bonnen.map((b, i) => {
