@@ -13,7 +13,10 @@ export type BestellingInput = {
   klant: { naam: string; email: string; telefoon?: string; adres?: string };
   leverwijze: 'AFHALEN' | 'LEVEREN';
   betaalwijze?: 'ACHTERAF' | 'ONLINE'; // ONLINE = Axepta (nu in testmodus)
+  gewensteDag?: string;  // gewenste afhaal-/leverdatum (YYYY-MM-DD), verplicht
+  gewensteTijd?: string; // gewenst uur (HH:MM), optioneel
 };
+const brusselVandaag = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 @Injectable()
 export class WebshopService {
@@ -55,6 +58,12 @@ export class WebshopService {
     if (!input.lijnen?.length) throw new BadRequestException('Je winkelmandje is leeg.');
     if (!input.klant?.naam?.trim() || !input.klant?.email?.trim()) throw new BadRequestException('Naam en e-mail zijn vereist.');
     if (input.leverwijze === 'LEVEREN' && !input.klant.adres?.trim()) throw new BadRequestException('Geef een leveradres op.');
+    // Gewenste afhaal-/leverdatum: verplicht, vandaag of later.
+    const gewensteDag = String(input.gewensteDag ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(gewensteDag)) throw new BadRequestException(`Kies een ${input.leverwijze === 'LEVEREN' ? 'lever' : 'afhaal'}datum.`);
+    if (gewensteDag < brusselVandaag()) throw new BadRequestException('De gekozen datum ligt in het verleden.');
+    const gewensteTijd = String(input.gewensteTijd ?? '').trim();
+    if (gewensteTijd && !/^([01]\d|2[0-3]):[0-5]\d$/.test(gewensteTijd)) throw new BadRequestException('Geef een geldig uur (bv. 14:00).');
 
     const email = input.klant.email.trim().toLowerCase();
     let klant = await this.prisma.klant.findFirst({ where: { email } });
@@ -97,11 +106,13 @@ export class WebshopService {
       }
     }
 
-    // Elke webshopbestelling komt automatisch in de agenda van de zaak.
+    // Gewenste datum/uur bewaren; de bestelling komt automatisch in de agenda van de zaak
+    // (eerst op de besteldag; na "Gelezen" op de afhaal-/leverdag).
+    await this.prisma.verkoop.update({ where: { id: ticket.id }, data: { gewensteDag, gewensteTijd: gewensteTijd || null } });
     try { await this.agenda.vanWebshop(ticket.id); } catch { /* agenda mag de bestelling niet blokkeren */ }
 
     return {
-      ...ticket, leverwijze: input.leverwijze, status: 'NIEUW',
+      ...ticket, leverwijze: input.leverwijze, status: 'NIEUW', gewensteDag, gewensteTijd: gewensteTijd || null,
       klant: { naam: klant.naam, email: klant.email },
       online, betaalModus: this.betaalModus(), betaalUrl, betaald: false,
     };

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { getAgenda, maakAgendaItem, wijzigAgendaItem, verwijderAgendaItem, downloadAgendaExcel, type AgendaItem, type AgendaInput } from '../api/client';
+import { getAgenda, maakAgendaItem, wijzigAgendaItem, verwijderAgendaItem, downloadAgendaExcel, markeerAgendaGelezen, type AgendaItem, type AgendaInput } from '../api/client';
 
 // Agenda van de zaak: weekoverzicht met manuele bestellingen en agendapunten,
 // plus de webshopbestellingen (komen er automatisch in). Iedereen kan er aan;
 // export naar Excel voor een gekozen periode.
 const SOORTEN: [string, string, string][] = [['BESTELLING', 'Bestelling', '#b45309'], ['LEVERING', 'Levering', '#1d4ed8'], ['AFSPRAAK', 'Afspraak', '#6d28d9'], ['NOTITIE', 'Notitie', '#374151']];
 const LOCATIES: [string, string][] = [['', '—'], ['WINKEL', 'Winkel'], ['RESTAURANT', 'Restaurant'], ['CATERING', 'Catering']];
+// Categorieën voor de gesplitste Excel-export (en als filter in het overzicht).
+const CATEGORIEEN: [string, string][] = [['BROOD', 'Brood'], ['CATERING', 'Catering'], ['BOODSCHAPPEN', 'Boodschappen']];
+const catNaam = (c: string | null) => CATEGORIEEN.find(([k]) => k === c)?.[1] ?? '';
 const DAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -16,7 +19,7 @@ const euro = (n: number) => '€ ' + n.toFixed(2);
 const datumNl = (s: string, opt: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }) => vanIso(s).toLocaleDateString('nl-BE', opt);
 
 type Formulier = AgendaInput & { id?: string };
-const leeg = (dag: string): Formulier => ({ dag, tijd: '', soort: 'BESTELLING', titel: '', omschrijving: '', klantNaam: '', klantTelefoon: '', klantEmail: '', bedrag: null, locatie: 'WINKEL', status: 'OPEN' });
+const leeg = (dag: string): Formulier => ({ dag, tijd: '', soort: 'BESTELLING', titel: '', omschrijving: '', klantNaam: '', klantTelefoon: '', klantEmail: '', bedrag: null, locatie: 'WINKEL', categorie: 'BOODSCHAPPEN', status: 'OPEN' });
 
 export function Agenda() {
   const vandaag = iso(new Date());
@@ -27,6 +30,8 @@ export function Agenda() {
   const [bezig, setBezig] = useState(false);
   const [form, setForm] = useState<Formulier | null>(null);
   const [toonKlaar, setToonKlaar] = useState(true);
+  const [catFilter, setCatFilter] = useState(''); // '' = alle categorieën
+  const [exportCat, setExportCat] = useState(''); // '' = alles, tabblad per categorie
   const [exportVan, setExportVan] = useState(vandaag.slice(0, 8) + '01');
   const [exportTot, setExportTot] = useState(iso(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)));
   const eind = plusDagen(start, 6);
@@ -41,9 +46,13 @@ export function Agenda() {
   const perDag = useMemo(() => {
     const m = new Map<string, AgendaItem[]>();
     for (let i = 0; i < 7; i++) m.set(plusDagen(start, i), []);
-    for (const it of items) { if (!toonKlaar && it.status !== 'OPEN') continue; m.get(it.dag)?.push(it); }
+    for (const it of items) {
+      if (!toonKlaar && it.status !== 'OPEN') continue;
+      if (catFilter && it.categorie !== catFilter) continue;
+      m.get(it.dag)?.push(it);
+    }
     return m;
-  }, [items, start, toonKlaar]);
+  }, [items, start, toonKlaar, catFilter]);
 
   async function bewaar() {
     if (!form) return;
@@ -63,6 +72,16 @@ export function Agenda() {
     catch (e) { setFout(e instanceof Error ? e.message : 'Aanpassen mislukt'); }
     finally { setBezig(false); }
   }
+  // Webshopbestelling gelezen: ze verhuist van de besteldag naar de afhaal-/leverdag.
+  async function gelezen(it: AgendaItem) {
+    setBezig(true); setFout(''); setMelding('');
+    try {
+      const r = await markeerAgendaGelezen(it.id);
+      setMelding(r.afhaalDag ? `Bestelling van ${it.klantNaam ?? 'klant'} staat nu op ${datumNl(r.dag, { weekday: 'long', day: 'numeric', month: 'long' })}${r.tijd ? ' om ' + r.tijd : ''}.` : 'Gemarkeerd als gelezen.');
+      await laad();
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Markeren mislukt'); }
+    finally { setBezig(false); }
+  }
   async function verwijder(it: AgendaItem) {
     if (!window.confirm(`"${it.titel}" verwijderen uit de agenda?`)) return;
     setBezig(true); setFout('');
@@ -72,13 +91,14 @@ export function Agenda() {
   }
   async function exporteer() {
     setBezig(true); setFout(''); setMelding('');
-    try { await downloadAgendaExcel(exportVan, exportTot); setMelding('Excel-bestand gedownload.'); }
+    try { await downloadAgendaExcel(exportVan, exportTot, exportCat); setMelding(exportCat ? `Excel-bestand (${catNaam(exportCat)}) gedownload.` : 'Excel-bestand gedownload: een tabblad per categorie plus "Alles".'); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Export mislukt'); }
     finally { setBezig(false); }
   }
 
   const soortInfo = (s: string) => SOORTEN.find(([k]) => k === s) ?? ['', s, '#374151'];
   const weekTotaal = items.filter((i) => i.status === 'OPEN').length;
+  const ongelezen = items.filter((i) => i.bron === 'WEBSHOP' && !i.gelezen && i.status === 'OPEN').length;
 
   return (
     <div style={{ maxWidth: 1200 }}>
@@ -89,10 +109,16 @@ export function Agenda() {
         <button onClick={() => setStart(plusDagen(start, 7))} style={btnGrijs}>volgende week ›</button>
         <strong style={{ fontSize: 16 }}>{datumNl(start)} – {datumNl(eind, { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
         <span style={{ color: '#6b7280', fontSize: 13 }}>{weekTotaal} open</span>
+        {ongelezen > 0 && <span style={{ background: '#dc2626', color: '#fff', borderRadius: 999, padding: '2px 10px', fontSize: 13, fontWeight: 700 }}>{ongelezen} nieuwe webshopbestelling{ongelezen === 1 ? '' : 'en'}</span>}
         <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={toonKlaar} onChange={(e) => setToonKlaar(e.target.checked)} /> ook klaar/geannuleerd tonen</label>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[['', 'Alles'], ...CATEGORIEEN].map(([k, n]) => (
+            <button key={k} onClick={() => setCatFilter(k)} style={{ ...btnMini, fontWeight: catFilter === k ? 700 : 400, background: catFilter === k ? '#111827' : '#fff', color: catFilter === k ? '#fff' : '#111827', borderColor: catFilter === k ? '#111827' : '#cbd5e1' }}>{n}</button>
+          ))}
+        </div>
         <button onClick={() => setForm(leeg(vandaag))} style={{ ...btnGroen, marginLeft: 'auto' }}>+ Toevoegen</button>
       </div>
-      <p style={{ color: '#6b7280', fontSize: 14, margin: '6px 0 12px' }}>Bestellingen en agendapunten van de zaak. Webshopbestellingen verschijnen hier automatisch op de dag van de bestelling. Klik op een item om het aan te passen.</p>
+      <p style={{ color: '#6b7280', fontSize: 14, margin: '6px 0 12px' }}>Bestellingen en agendapunten van de zaak. Een webshopbestelling verschijnt eerst op de dag van de bestelling (rood, "nieuw"); klik op <strong>Gelezen</strong> en ze verhuist naar de afhaal- of leverdag die de klant koos. Klik op een item om het aan te passen.</p>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
       {melding && <p style={{ color: '#166534', fontWeight: 600 }}>{melding}</p>}
 
@@ -103,6 +129,7 @@ export function Agenda() {
             <label style={lab}>Datum<input type="date" value={form.dag} onChange={(e) => setForm({ ...form, dag: e.target.value })} style={inp} /></label>
             <label style={lab}>Uur<input type="time" value={form.tijd ?? ''} onChange={(e) => setForm({ ...form, tijd: e.target.value })} style={inp} /></label>
             <label style={lab}>Soort<select value={form.soort} onChange={(e) => setForm({ ...form, soort: e.target.value })} style={inp} disabled={!!form.id && items.find((i) => i.id === form.id)?.bron === 'WEBSHOP'}>{SOORTEN.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+            <label style={lab}>Categorie<select value={form.categorie ?? ''} onChange={(e) => setForm({ ...form, categorie: e.target.value })} style={inp}><option value="">—</option>{CATEGORIEEN.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
             <label style={lab}>Locatie<select value={form.locatie ?? ''} onChange={(e) => setForm({ ...form, locatie: e.target.value })} style={inp}>{LOCATIES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
             <label style={{ ...lab, gridColumn: '1 / -1' }}>Titel *<input value={form.titel} onChange={(e) => setForm({ ...form, titel: e.target.value })} placeholder="bv. Bestelling kaasschotel 12 pers." style={inp} autoFocus /></label>
             <label style={lab}>Klant<input value={form.klantNaam ?? ''} onChange={(e) => setForm({ ...form, klantNaam: e.target.value })} style={inp} /></label>
@@ -133,20 +160,23 @@ export function Agenda() {
                 {lijst.map((it) => {
                   const [, naam, kleur] = soortInfo(it.soort);
                   const klaar = it.status !== 'OPEN';
+                  const nieuw = it.bron === 'WEBSHOP' && !it.gelezen && it.status === 'OPEN';
                   return (
-                    <div key={it.id} onClick={() => setForm({ id: it.id, dag: it.dag, tijd: it.tijd ?? '', soort: it.soort, titel: it.titel, omschrijving: it.omschrijving ?? '', klantNaam: it.klantNaam ?? '', klantTelefoon: it.klantTelefoon ?? '', klantEmail: it.klantEmail ?? '', bedrag: it.bedrag, locatie: it.locatie ?? '', status: it.status })}
-                      style={{ borderLeft: `4px solid ${kleur}`, background: '#fff', border: '1px solid #e5e7eb', borderLeftWidth: 4, borderLeftColor: kleur, borderRadius: 8, padding: '6px 8px', cursor: 'pointer', opacity: klaar ? .55 : 1, textDecoration: it.status === 'GEANNULEERD' ? 'line-through' : 'none' }}>
-                      <div style={{ fontSize: 11, color: kleur, fontWeight: 700, display: 'flex', gap: 6, justifyContent: 'space-between' }}>
-                        <span>{it.tijd ? it.tijd + ' · ' : ''}{naam}{it.bron === 'WEBSHOP' ? ' · webshop' : ''}</span>
+                    <div key={it.id} onClick={() => setForm({ id: it.id, dag: it.dag, tijd: it.tijd ?? '', soort: it.soort, titel: it.titel, omschrijving: it.omschrijving ?? '', klantNaam: it.klantNaam ?? '', klantTelefoon: it.klantTelefoon ?? '', klantEmail: it.klantEmail ?? '', bedrag: it.bedrag, locatie: it.locatie ?? '', categorie: it.categorie ?? '', status: it.status })}
+                      style={{ background: nieuw ? '#fef2f2' : '#fff', border: nieuw ? '1px solid #fca5a5' : '1px solid #e5e7eb', borderLeftWidth: 4, borderLeftColor: nieuw ? '#dc2626' : kleur, borderRadius: 8, padding: '6px 8px', cursor: 'pointer', opacity: klaar ? .55 : 1, textDecoration: it.status === 'GEANNULEERD' ? 'line-through' : 'none' }}>
+                      <div style={{ fontSize: 11, color: nieuw ? '#dc2626' : kleur, fontWeight: 700, display: 'flex', gap: 6, justifyContent: 'space-between' }}>
+                        <span>{nieuw ? 'NIEUW · ' : ''}{it.tijd ? it.tijd + ' · ' : ''}{naam}{it.categorie ? ' · ' + catNaam(it.categorie) : ''}{it.bron === 'WEBSHOP' ? ' · webshop' : ''}</span>
                         {it.status === 'KLAAR' && <span style={{ color: '#166534' }}>✔</span>}
                       </div>
+                      {nieuw && it.afhaalDag && <div style={{ fontSize: 12, color: '#991b1b' }}>{it.soort === 'LEVERING' ? 'Leveren' : 'Afhalen'} op {datumNl(it.afhaalDag, { weekday: 'short', day: 'numeric', month: 'short' })}{it.afhaalTijd ? ' ' + it.afhaalTijd : ''}</div>}
                       <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.25 }}>{it.titel}</div>
                       {(it.klantNaam || it.bedrag != null) && <div style={{ fontSize: 12, color: '#6b7280' }}>{it.klantNaam}{it.klantNaam && it.bedrag != null ? ' · ' : ''}{it.bedrag != null ? euro(it.bedrag) : ''}</div>}
                       {it.klantTelefoon && <div style={{ fontSize: 12, color: '#6b7280' }}>☎ {it.klantTelefoon}</div>}
                       {it.omschrijving && <div style={{ fontSize: 12, color: '#374151', marginTop: 2, whiteSpace: 'pre-wrap' }}>{it.omschrijving}</div>}
                       {it.status === 'OPEN' && (
-                        <div style={{ display: 'flex', gap: 4, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => zetStatus(it, 'KLAAR')} disabled={bezig} style={{ ...btnMini, color: '#166534' }}>Klaar</button>
+                        <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                          {nieuw && <button onClick={() => gelezen(it)} disabled={bezig} style={{ ...btnMini, background: '#dc2626', color: '#fff', borderColor: '#dc2626', fontWeight: 700 }}>Gelezen{it.afhaalDag ? ' → ' + datumNl(it.afhaalDag) : ''}</button>}
+                          {!nieuw && <button onClick={() => zetStatus(it, 'KLAAR')} disabled={bezig} style={{ ...btnMini, color: '#166534' }}>Klaar</button>}
                           {it.bron !== 'WEBSHOP' && <button onClick={() => verwijder(it)} disabled={bezig} style={{ ...btnMini, color: 'crimson' }}>×</button>}
                         </div>
                       )}
@@ -163,8 +193,12 @@ export function Agenda() {
         <strong>Exporteren naar Excel</strong>
         <label style={{ fontSize: 13 }}>van <input type="date" value={exportVan} onChange={(e) => setExportVan(e.target.value)} style={{ ...inp, width: 'auto' }} /></label>
         <label style={{ fontSize: 13 }}>tot <input type="date" value={exportTot} onChange={(e) => setExportTot(e.target.value)} style={{ ...inp, width: 'auto' }} /></label>
+        <select value={exportCat} onChange={(e) => setExportCat(e.target.value)} style={{ ...inp, width: 'auto' }}>
+          <option value="">Alle categorieën (tabblad per categorie)</option>
+          {CATEGORIEEN.map(([k, n]) => <option key={k} value={k}>Enkel {n.toLowerCase()}</option>)}
+        </select>
         <button onClick={exporteer} disabled={bezig || !exportVan || !exportTot} style={btnGrijs}>⬇ Excel downloaden</button>
-        <span style={{ fontSize: 12, color: '#6b7280' }}>Eén rij per agendapunt: datum, uur, soort, titel, klant, bedrag, locatie, status, bron, omschrijving.</span>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>Eén rij per agendapunt, met totaal per tabblad: brood, catering, boodschappen.</span>
       </div>
     </div>
   );

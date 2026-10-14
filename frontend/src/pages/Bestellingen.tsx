@@ -47,6 +47,7 @@ export function Bestellingen() {
             </div>
             <span style={{ padding: '4px 10px', borderRadius: 8, background: '#f3f4f6', fontSize: 13 }}>
               {o.leverwijze === 'LEVEREN' ? '🚚 Leveren' : '🏬 Afhalen'}
+              {o.gewensteDag ? ` · ${new Date(o.gewensteDag + 'T12:00:00').toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short' })}${o.gewensteTijd ? ' ' + o.gewensteTijd : ''}` : ''}
             </span>
             <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600, background: o.betaald ? '#dcfce7' : '#fef3c7', color: o.betaald ? '#166534' : '#b45309' }}>
               {o.betaald ? '✓ Betaald' : 'Nog te betalen'}

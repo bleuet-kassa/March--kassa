@@ -18,6 +18,10 @@ export function WebshopPubliek() {
   const [scherm, setScherm] = useState<'catalogus' | 'afrekenen' | 'betalen' | 'klaar'>('catalogus');
   const [klant, setKlant] = useState({ naam: '', email: '', telefoon: '', adres: '' });
   const [leverwijze, setLeverwijze] = useState<'AFHALEN' | 'LEVEREN'>('AFHALEN');
+  // Gewenste afhaal-/leverdatum (verplicht) en uur (optioneel); komt in de agenda van de winkel.
+  const vandaagIso = new Date().toLocaleDateString('sv-SE');
+  const [gewensteDag, setGewensteDag] = useState('');
+  const [gewensteTijd, setGewensteTijd] = useState('');
   const [betaalwijze, setBetaalwijze] = useState<'ACHTERAF' | 'ONLINE'>('ACHTERAF');
   const [betaald, setBetaald] = useState(false);
   const [leeftijdOk, setLeeftijdOk] = useState(false);
@@ -66,6 +70,8 @@ export function WebshopPubliek() {
     if (!lijnen.length) { setFout('Je winkelmandje is leeg.'); return; }
     if (!klant.naam.trim() || !klant.email.trim()) { setFout('Vul je naam en e-mail in.'); return; }
     if (leverwijze === 'LEVEREN' && !klant.adres.trim()) { setFout('Vul een leveradres in.'); return; }
+    if (!gewensteDag) { setFout(`Kies een ${leverwijze === 'LEVEREN' ? 'lever' : 'afhaal'}datum.`); return; }
+    if (gewensteDag < vandaagIso) { setFout('De gekozen datum ligt in het verleden.'); return; }
     if (heeftAlcohol && !leeftijdOk) { setFout('Bevestig dat je oud genoeg bent voor alcohol.'); return; }
     if (!akkoord) { setFout('Bevestig dat je akkoord gaat met de voorwaarden.'); return; }
     setBezig(true);
@@ -73,7 +79,7 @@ export function WebshopPubliek() {
       const b = await plaatsBestelling({
         lijnen: lijnen.map((l) => ({ productId: l.p.id, aantal: l.aantal })),
         klant: { naam: klant.naam.trim(), email: klant.email.trim(), telefoon: klant.telefoon.trim() || undefined, adres: klant.adres.trim() || undefined },
-        leverwijze, betaalwijze,
+        leverwijze, betaalwijze, gewensteDag, gewensteTijd: gewensteTijd || undefined,
       });
       setBevestiging(b);
       setMandje({});
@@ -137,7 +143,10 @@ export function WebshopPubliek() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 18 }}>
                   <span>Totaal</span><span>{euro(bevestiging.totaal)}</span>
                 </div>
-                <div style={{ color: 'var(--muted)', marginTop: 6 }}>{bevestiging.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'} · {bevestiging.lijnen.length} artikel(s)</div>
+                <div style={{ color: 'var(--muted)', marginTop: 6 }}>
+                  {bevestiging.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'}
+                  {bevestiging.gewensteDag ? ` op ${new Date(bevestiging.gewensteDag + 'T12:00:00').toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })}${bevestiging.gewensteTijd ? ` om ${bevestiging.gewensteTijd}` : ''}` : ''} · {bevestiging.lijnen.length} artikel(s)
+                </div>
                 {bevestiging.kortingReden && <div style={{ color: 'var(--brand)', marginTop: 6 }}>Korting toegepast: {bevestiging.kortingReden}</div>}
               </div>
               <div className="actions" style={{ marginTop: 24 }}>
@@ -188,6 +197,10 @@ export function WebshopPubliek() {
                 {leverwijze === 'LEVEREN' && (
                   <div className="form-veld"><label>Leveradres</label><input value={klant.adres} onChange={(e) => setKlant({ ...klant, adres: e.target.value })} placeholder="straat, nr, postcode, gemeente" /></div>
                 )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="form-veld"><label>{leverwijze === 'LEVEREN' ? 'Gewenste leverdatum' : 'Wanneer kom je afhalen?'}</label><input type="date" min={vandaagIso} value={gewensteDag} onChange={(e) => setGewensteDag(e.target.value)} /></div>
+                  <div className="form-veld"><label>Uur (optioneel)</label><input type="time" step={900} value={gewensteTijd} onChange={(e) => setGewensteTijd(e.target.value)} /></div>
+                </div>
 
                 <h2 style={{ margin: '20px 0 12px' }}>Betaling</h2>
                 <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>

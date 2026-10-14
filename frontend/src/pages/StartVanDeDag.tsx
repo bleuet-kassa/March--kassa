@@ -2,16 +2,11 @@ import { useEffect, useState } from 'react';
 import { getSpreukVanDaag, type Spreuk } from '../api/client';
 import { getVerkoper } from '../auth';
 
-const KEY = 'kassa.spreukDag'; // datum waarop het startscherm al getoond is (per toestel)
-
-// Toont het startscherm één keer per dag per toestel; de kassa zelf beslist of
-// de overlay nodig is via `moetTonen()`.
+// Het startscherm komt telkens op wanneer de kassapagina geopend wordt (klantwens).
 export function moetStartschermTonen(): boolean {
-  try { return localStorage.getItem(KEY) !== new Date().toISOString().slice(0, 10); } catch { return false; }
+  return true;
 }
-function markeerGetoond() {
-  try { localStorage.setItem(KEY, new Date().toISOString().slice(0, 10)); } catch { /* geen opslag */ }
-}
+function markeerGetoond() { /* niets te onthouden: het scherm komt bij elke opening terug */ }
 
 function groet(naam?: string | null, rol?: string | null) {
   const u = new Date().getHours();

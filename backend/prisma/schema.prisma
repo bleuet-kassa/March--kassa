@@ -406,6 +406,8 @@ model Verkoop {
   // webshop-specifiek
   leverwijze    String?       // AFHALEN | LEVEREN
   status        String?       // NIEUW | BETAALD | KLAAR | AFGEHAALD ...
+  gewensteDag   String?       // door de klant gekozen afhaal-/leverdatum (YYYY-MM-DD)
+  gewensteTijd  String?       // gekozen uur (HH:MM), optioneel
   // online betaling (webshop, bv. Axepta)
   betaald       Boolean       @default(false)
   betaalRef     String?
@@ -675,8 +677,13 @@ model AgendaItem {
   klantEmail    String?
   bedrag        Decimal?  @db.Decimal(10, 2)
   locatie       String?   // WINKEL | RESTAURANT | CATERING
+  categorie     String?   // BROOD | CATERING | BOODSCHAPPEN (voor de gesplitste Excel-export)
   status        String    @default("OPEN") // OPEN | KLAAR | GEANNULEERD
   verkoopId     String?   @unique // webshopbestelling waaruit dit item komt
+  // Webshopbestelling: staat eerst op de besteldag; na "Gelezen" verhuist ze naar de afhaal-/leverdag.
+  gelezen       Boolean   @default(false)
+  afhaalDag     String?   // gewenste afhaal-/leverdatum (YYYY-MM-DD)
+  afhaalTijd    String?   // gewenst uur (HH:MM)
   aangemaaktDoor String?  // naam van wie het inzette
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @default(now()) @updatedAt

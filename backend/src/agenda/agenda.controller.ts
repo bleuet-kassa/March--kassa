@@ -15,18 +15,25 @@ export class AgendaController {
     return this.agenda.lijst(van, tot);
   }
 
-  // GET /agenda/export.xlsx?van&tot -> Excel-bestand
+  // GET /agenda/export.xlsx?van&tot[&categorie=BROOD|CATERING|BOODSCHAPPEN] -> Excel-bestand
+  // (zonder categorie: tabblad per categorie + "Alles")
   @Get('export.xlsx')
-  async excel(@Query('van') van: string, @Query('tot') tot: string, @Res() res: Response) {
-    const buf = await this.agenda.excel(van, tot);
+  async excel(@Query('van') van: string, @Query('tot') tot: string, @Query('categorie') categorie: string | undefined, @Res() res: Response) {
+    const buf = await this.agenda.excel(van, tot, categorie || undefined);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="agenda-${van}-tot-${tot}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="agenda${categorie ? '-' + categorie.toLowerCase() : ''}-${van}-tot-${tot}.xlsx"`);
     res.send(buf);
   }
 
   @Post()
   maak(@Req() req: any, @Body() body: AgendaInput) {
     return this.agenda.maak(body, req.user?.naam ?? null);
+  }
+
+  // POST /agenda/:id/gelezen -> webshopbestelling gezien; verhuist naar de afhaal-/leverdag
+  @Post(':id/gelezen')
+  gelezen(@Param('id') id: string) {
+    return this.agenda.gelezen(id);
   }
 
   @Patch(':id')

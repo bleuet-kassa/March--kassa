@@ -25,9 +25,14 @@ export async function getSpeciaalProducten(): Promise<SpeciaalProduct[]> {
 export type AgendaItem = {
   id: string; dag: string; tijd: string | null; soort: string; bron: string; titel: string; omschrijving: string | null;
   klantNaam: string | null; klantTelefoon: string | null; klantEmail: string | null; bedrag: number | null;
-  locatie: string | null; status: string; verkoopId: string | null; aangemaaktDoor: string | null; createdAt: string; updatedAt: string;
+  locatie: string | null; categorie: string | null; status: string; verkoopId: string | null; aangemaaktDoor: string | null; createdAt: string; updatedAt: string;
+  // webshopbestelling: ongelezen tot iemand op "Gelezen" klikt; dan verhuist ze naar afhaalDag/afhaalTijd
+  gelezen: boolean; afhaalDag: string | null; afhaalTijd: string | null;
 };
-export type AgendaInput = { dag: string; tijd?: string | null; soort?: string; titel: string; omschrijving?: string | null; klantNaam?: string | null; klantTelefoon?: string | null; klantEmail?: string | null; bedrag?: number | null; locatie?: string | null; status?: string };
+export async function markeerAgendaGelezen(id: string): Promise<AgendaItem> {
+  return jsonOrThrow(await fetch(`${BASE}/agenda/${id}/gelezen`, { method: 'POST' }));
+}
+export type AgendaInput = { dag: string; tijd?: string | null; soort?: string; titel: string; omschrijving?: string | null; klantNaam?: string | null; klantTelefoon?: string | null; klantEmail?: string | null; bedrag?: number | null; locatie?: string | null; categorie?: string | null; status?: string };
 export async function getAgenda(van: string, tot: string): Promise<AgendaItem[]> {
   return jsonOrThrow(await fetch(`${BASE}/agenda?van=${van}&tot=${tot}`));
 }
@@ -41,13 +46,14 @@ export async function verwijderAgendaItem(id: string): Promise<{ ok: true }> {
   return jsonOrThrow(await fetch(`${BASE}/agenda/${id}`, { method: 'DELETE' }));
 }
 // Excel-export: haalt het bestand op (met token) en start de download in de browser.
-export async function downloadAgendaExcel(van: string, tot: string): Promise<void> {
-  const res = await fetch(`${BASE}/agenda/export.xlsx?van=${van}&tot=${tot}`);
+// categorie leeg = alles (tabblad per categorie); anders enkel die categorie.
+export async function downloadAgendaExcel(van: string, tot: string, categorie = ''): Promise<void> {
+  const res = await fetch(`${BASE}/agenda/export.xlsx?van=${van}&tot=${tot}${categorie ? `&categorie=${categorie}` : ''}`);
   if (!res.ok) { const body = await res.json().catch(() => null); throw new Error(body?.message ?? 'Export mislukt'); }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `agenda-${van}-tot-${tot}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+  a.href = url; a.download = `agenda${categorie ? '-' + categorie.toLowerCase() : ''}-${van}-tot-${tot}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
@@ -503,11 +509,12 @@ export async function getWebshopAfdelingen(): Promise<WebshopAfdeling[]> {
 export type BestellingKlant = { naam: string; email: string; telefoon?: string; adres?: string };
 export type BestellingBevestiging = {
   id: string; totaal: number; leverwijze: string; status: string; kortingReden?: string | null;
+  gewensteDag?: string; gewensteTijd?: string | null;
   lijnen: { naam: string; aantal: number; eenheidsprijs: number; totaal: number }[];
   klant?: { naam: string; email: string };
   online: boolean; betaalModus: 'TEST' | 'LIVE'; betaalUrl: string | null; betaald: boolean;
 };
-export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; betaalwijze: 'ACHTERAF' | 'ONLINE' }): Promise<BestellingBevestiging> {
+export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; betaalwijze: 'ACHTERAF' | 'ONLINE'; gewensteDag: string; gewensteTijd?: string }): Promise<BestellingBevestiging> {
   return jsonOrThrow(await fetch(`${BASE}/webshop/bestelling`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }));
@@ -522,7 +529,7 @@ export async function betalingAfronden(id: string, gelukt: boolean): Promise<{ b
 // Beheer van webshop-bestellingen.
 export type WebshopOrder = {
   id: string; datum: string; totaal: string; leverwijze: string | null; status: string | null; kortingReden: string | null;
-  betaald: boolean; betaalRef: string | null;
+  betaald: boolean; betaalRef: string | null; gewensteDag?: string | null; gewensteTijd?: string | null;
   klant: { naam: string; email: string | null; adres: string | null } | null;
   lijnen: { aantal: string; eenheidsprijs: string; product: { naam: string } }[];
 };
