@@ -647,3 +647,15 @@ model RekeningBetaling {
   @@index([factuurId])
   @@index([afgesloten])
 }
+
+// Spreuk van de dag op het startscherm van de kassa. De lijst wordt wekelijks
+// automatisch aangevuld (Claude) en kan op Instellingen beheerd worden.
+model Spreuk {
+  id        String   @id @default(cuid())
+  tekst     String   @unique
+  auteur    String?
+  emoji     String?
+  bron      String   @default("MANUEEL") // SEED | AI | MANUEEL
+  actief    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { getOndernemingen, updateOndernemingById, getPushStatus, stuurPushTest, type Onderneming } from '../api/client';
+import { getOndernemingen, updateOndernemingById, getPushStatus, stuurPushTest, type Onderneming, getSpreuken, voegSpreukToe, zetSpreukActief, verwijderSpreuk, vulSpreukenAan, type Spreuk } from '../api/client';
 import { pushOndersteund, staatOpBeginscherm, huidigAbonnement, schakelMeldingenIn, schakelMeldingenUit } from '../push';
 
 // Instellingen: ondernemingsgegevens die op de documenten (dagontvangsten-ticket,
@@ -23,6 +23,67 @@ export function Instellingen() {
         <OndernemingKaart key={o.id} onderneming={o} onOpgeslagen={() => { setMelding('Opgeslagen.'); setTimeout(() => setMelding(''), 2000); laad(); }} />
       ))}
       {lijst.length === 0 && <p style={{ color: '#999' }}>Laden…</p>}
+      <SpreukenBeheer />
+    </div>
+  );
+}
+
+// Spreuk van de dag op het startscherm van de kassa: lijst beheren; wekelijks
+// automatisch aangevuld door Claude (zelfde sleutel als "Facturen inlezen").
+function SpreukenBeheer() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof getSpreuken>> | null>(null);
+  const [tekst, setTekst] = useState('');
+  const [auteur, setAuteur] = useState('Marché');
+  const [emoji, setEmoji] = useState('');
+  const [melding, setMelding] = useState('');
+  const [bezig, setBezig] = useState(false);
+  const [toonAlle, setToonAlle] = useState(false);
+
+  async function laad() { try { setData(await getSpreuken()); } catch { /* geen toegang */ } }
+  useEffect(() => { laad(); }, []);
+
+  async function doe(actie: () => Promise<unknown>, tekstOk?: string) {
+    setBezig(true); setMelding('');
+    try { await actie(); if (tekstOk) setMelding(tekstOk); await laad(); }
+    catch (e) { setMelding(e instanceof Error ? e.message : 'Mislukt'); }
+    finally { setBezig(false); }
+  }
+  if (!data) return null;
+  const actief = data.spreuken.filter((s) => s.actief).length;
+  const zichtbaar = toonAlle ? data.spreuken : data.spreuken.slice(0, 15);
+
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginTop: 20 }}>
+      <h2 style={{ marginTop: 0 }}>Spreuk van de dag</h2>
+      <p style={{ color: '#6b7280', fontSize: 14, marginTop: 4 }}>
+        Het startscherm van de kassa toont elke dag een andere spreuk ({actief} actief, {data.spreuken.length} in totaal).
+        {data.aiBeschikbaar
+          ? <> De lijst wordt automatisch aangevuld: {data.planning}.{data.laatsteAanvulling ? ` Laatste keer: ${new Date(data.laatsteAanvulling.datum + 'T12:00:00').toLocaleDateString('nl-BE')} (${data.laatsteAanvulling.toegevoegd} nieuwe, ${data.laatsteAanvulling.door}).` : ' Nog geen automatische aanvulling gebeurd.'}</>
+          : <span style={{ color: '#b45309' }}> Automatisch aanvullen staat uit: er is geen ANTHROPIC_API_KEY ingesteld op Render.</span>}
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+        <input value={tekst} onChange={(e) => setTekst(e.target.value)} placeholder="Nieuwe spreuk…" style={{ ...inp, flex: '1 1 260px', marginBottom: 0 }} />
+        <input value={auteur} onChange={(e) => setAuteur(e.target.value)} placeholder="Auteur" style={{ ...inp, width: 140, marginBottom: 0 }} />
+        <input value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="Emoji" style={{ ...inp, width: 70, marginBottom: 0, textAlign: 'center' }} />
+        <button onClick={() => doe(async () => { await voegSpreukToe({ tekst, auteur, emoji }); setTekst(''); setEmoji(''); }, 'Spreuk toegevoegd.')} disabled={bezig || tekst.trim().length < 5} style={btn}>Toevoegen</button>
+        <button onClick={() => doe(async () => { const r = await vulSpreukenAan(7); setMelding(`${r.toegevoegd} nieuwe spreuken toegevoegd.`); })} disabled={bezig || !data.aiBeschikbaar} title="Laat Claude nu 7 nieuwe spreuken schrijven" style={{ ...btn, background: '#0d4589' }}>{bezig ? 'Bezig…' : '✨ Nu 7 nieuwe laten maken'}</button>
+      </div>
+      {melding && <p style={{ fontWeight: 600, margin: '0 0 8px' }}>{melding}</p>}
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+        <tbody>
+          {zichtbaar.map((s: Spreuk) => (
+            <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0', opacity: s.actief ? 1 : .5 }}>
+              <td style={{ padding: '6px 4px', width: 30, fontSize: 18 }}>{s.emoji ?? ''}</td>
+              <td style={{ padding: '6px 4px' }}>{s.tekst}<span style={{ color: '#6b7280', fontSize: 12 }}> — {s.auteur ?? 'Marché'} · {s.bron === 'AI' ? 'automatisch' : s.bron === 'SEED' ? 'startreeks' : 'manueel'}</span></td>
+              <td style={{ padding: '6px 4px', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                <button onClick={() => doe(() => zetSpreukActief(s.id, !s.actief))} disabled={bezig} style={pushKnopSec}>{s.actief ? 'Uitzetten' : 'Aanzetten'}</button>{' '}
+                <button onClick={() => { if (window.confirm('Deze spreuk verwijderen?')) doe(() => verwijderSpreuk(s.id)); }} disabled={bezig} style={{ ...pushKnopSec, color: 'crimson' }}>×</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.spreuken.length > 15 && <button onClick={() => setToonAlle(!toonAlle)} style={{ ...pushKnopSec, marginTop: 8 }}>{toonAlle ? 'Minder tonen' : `Alle ${data.spreuken.length} tonen`}</button>}
     </div>
   );
 }

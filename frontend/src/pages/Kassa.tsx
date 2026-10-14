@@ -36,6 +36,7 @@ import {
   isNetwerkfout,
 } from '../offline';
 import { heeftRecht } from '../rechten';
+import { StartVanDeDag, moetStartschermTonen } from './StartVanDeDag';
 
 type Lijn = {
   key: string; // stabiele identiteit (weegproducten kunnen dezelfde productId hebben)
@@ -202,6 +203,8 @@ export function Kassa() {
   // Meerdere tickets tegelijk open; elk een eigen mandje + verkoper.
   const [bonnen, setBonnen] = useState<Bon[]>(() => [maakBon()]);
   const [actiefId, setActiefId] = useState<string>('');
+  // Startscherm met de spreuk van de dag: één keer per dag per toestel.
+  const [startscherm, setStartscherm] = useState<boolean>(() => moetStartschermTonen());
   const inputRef = useRef<HTMLInputElement>(null);
   const scanRef = useRef<(code: string) => void>(() => {});
   const scanTimer = useRef<number | undefined>(undefined);
@@ -844,6 +847,7 @@ export function Kassa() {
 
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', maxWidth: 940 }}>
+      {startscherm && <StartVanDeDag onKlaar={() => setStartscherm(false)} />}
       {/* Totaal altijd in beeld: blijft bovenaan kleven bij het scrollen (ook op smartphone,
           waar het betaalpaneel onder de artikellijst komt). */}
       <div style={{ flexBasis: '100%', position: 'sticky', top: 0, zIndex: 40, background: '#fff', padding: '8px 4px', borderBottom: '2px solid #e5e7eb', boxShadow: '0 2px 8px rgba(0,0,0,.06)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

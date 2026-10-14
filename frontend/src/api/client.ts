@@ -21,6 +21,27 @@ export async function getSpeciaalProducten(): Promise<SpeciaalProduct[]> {
   return (await fetch(`${BASE}/producten/speciaal`)).json();
 }
 
+// --- Spreuk van de dag (startscherm kassa) ---
+export type Spreuk = { id: string; tekst: string; auteur: string | null; emoji: string | null; bron: string; actief: boolean; createdAt: string };
+export async function getSpreukVanDaag(): Promise<{ vandaag: Spreuk | null; carrousel: Spreuk[]; datum: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken/vandaag`));
+}
+export async function getSpreuken(): Promise<{ spreuken: Spreuk[]; aiBeschikbaar: boolean; laatsteAanvulling: { datum: string; door: string; toegevoegd: number } | null; planning: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken`));
+}
+export async function voegSpreukToe(input: { tekst: string; auteur?: string; emoji?: string }): Promise<Spreuk> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function zetSpreukActief(id: string, actief: boolean): Promise<Spreuk> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actief }) }));
+}
+export async function verwijderSpreuk(id: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken/${id}`, { method: 'DELETE' }));
+}
+export async function vulSpreukenAan(aantal = 7): Promise<{ toegevoegd: number; spreuken: { tekst: string; auteur: string }[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/spreuken/aanvullen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aantal }) }));
+}
+
 // rechten = toegangen per functionaliteit (zie src/rechten.ts); beheerders hebben alles.
 export type Gebruiker = { id: string; naam: string; rol: string; rechten?: string[] };
 export async function getIk(): Promise<Gebruiker> {
