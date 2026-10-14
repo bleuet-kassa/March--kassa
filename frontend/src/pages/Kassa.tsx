@@ -1129,6 +1129,24 @@ export function Kassa() {
           <h3 style={{ margin: '0 0 8px' }}>Te betalen</h3>
           <div style={{ fontSize: 32, fontWeight: 700 }}>€ {totaal.toFixed(2)}</div>
 
+          {/* Overzicht van de gekochte artikelen, in één oogopslag (bewerken gebeurt links). */}
+          {lijnen.length > 0 && (
+            <div style={{ marginTop: 10, borderTop: '1px solid #e5e7eb', paddingTop: 8, maxHeight: '38vh', overflowY: 'auto' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{aantalArtikels} artikel{aantalArtikels === 1 ? '' : 's'} op dit ticket</div>
+              {lijnen.map((l) => (
+                <div key={l.key} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 14, padding: '3px 0', borderBottom: '1px dashed #f0f0f0', color: l.retour ? '#b91c1c' : '#111827' }}>
+                  <span style={{ minWidth: 44, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: l.retour ? '#b91c1c' : '#374151' }}>
+                    {l.retour ? '−' : ''}{isWeegLijn(l) ? `${l.aantal.toFixed(3)} kg` : `${l.aantal}×`}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.naam}{l.kortingPct ? <span style={{ color: '#6d28d9', fontSize: 12 }}> −{l.kortingPct}%</span> : ''}
+                  </span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 600 }}>€ {lijnBedrag(l).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {btwOverzicht.length > 0 && (
             <table style={{ width: '100%', marginTop: 12, fontSize: 13, color: '#555' }}>
               <tbody>
