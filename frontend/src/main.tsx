@@ -174,6 +174,8 @@ function StaffApp() {
             </div>
           </details>
         )}
+        {/* De publieke webshop openen vanuit de kassa (nieuw tabblad), bv. om samen met een klant te bestellen. */}
+        <a href="/webshop" target="_blank" rel="noopener" title="Opent de online winkel in een nieuw tabblad" style={{ padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: 6, textDecoration: 'none', color: '#0d4589', fontWeight: 600 }}>🛒 Online winkel ↗</a>
         <span style={{ marginLeft: 'auto' }}><VerbindingStatus /></span>
         <span style={{ color: '#666' }}>
           {verkoper.naam} ({verkoper.rol})
