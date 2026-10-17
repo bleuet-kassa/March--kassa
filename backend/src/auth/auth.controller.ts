@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { GebruikerRol } from '@prisma/client';
 import { AuthService } from './auth.service';
-import { Publiek, Recht } from './auth.guard';
+import { Publiek, Recht, Rollen } from './auth.guard';
 import { RECHTEN } from '../common/rechten';
 
 @Controller('auth')
@@ -48,7 +48,14 @@ export class AuthController {
 
   @Recht('personeel')
   @Patch('personeel/:id')
-  updateGebruiker(@Req() req: any, @Param('id') id: string, @Body() body: { naam?: string; rol?: GebruikerRol; actief?: boolean; wachtwoord?: string; rechten?: string[] | null }) {
+  updateGebruiker(@Req() req: any, @Param('id') id: string, @Body() body: { naam?: string; rol?: GebruikerRol; actief?: boolean; wachtwoord?: string; rechten?: string[] | null; tankkaart?: boolean; tankkaartNummer?: string | null; tankkaartCode?: string | null }) {
     return this.auth.updateGebruiker(id, body, req.user);
+  }
+
+  // GET /auth/personeel/:id/tankkaart-code -> de pincode van de tankkaart (enkel beheerders)
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Get('personeel/:id/tankkaart-code')
+  tankkaartCode(@Param('id') id: string) {
+    return this.auth.tankkaartCode(id);
   }
 }

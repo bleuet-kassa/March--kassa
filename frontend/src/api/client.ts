@@ -205,7 +205,11 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 
 // --- Auth (verkoper) ---
 // rechten = effectieve toegangen; rechtenIngesteld = false zolang de standaard geldt.
-export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean };
+export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
+// Pincode van de tankkaart (enkel beheerders).
+export async function getTankkaartCode(id: string): Promise<{ code: string | null }> {
+  return jsonOrThrow(await fetch(`${BASE}/auth/personeel/${id}/tankkaart-code`));
+}
 
 // Actieve verkopers (voor de verkoper-keuze per ticket aan de kassa).
 export async function getGebruikers(): Promise<Gebruiker[]> {
@@ -222,7 +226,7 @@ export async function nieuwPersoneelslid(input: { naam: string; email: string; w
     }),
   );
 }
-export async function updatePersoneelslid(id: string, input: { naam?: string; rol?: string; actief?: boolean; wachtwoord?: string; rechten?: string[] | null }): Promise<Personeelslid> {
+export async function updatePersoneelslid(id: string, input: { naam?: string; rol?: string; actief?: boolean; wachtwoord?: string; rechten?: string[] | null; tankkaart?: boolean; tankkaartNummer?: string | null; tankkaartCode?: string | null }): Promise<Personeelslid> {
   return jsonOrThrow(
     await fetch(`${BASE}/auth/personeel/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),

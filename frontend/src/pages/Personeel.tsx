@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
-  getPersoneel, nieuwPersoneelslid, updatePersoneelslid,
+  getPersoneel, nieuwPersoneelslid, updatePersoneelslid, getTankkaartCode,
   type Personeelslid,
 } from '../api/client';
 import { getVerkoper } from '../auth';
@@ -23,6 +23,33 @@ export function Personeel() {
   const [melding, setMelding] = useState('');
   const [bezig, setBezig] = useState(false);
   const [open, setOpen] = useState<string | null>(null); // account waarvan de toegangen open staan
+  // Tankkaart bewerken (per persoon): nummer + pincode (wordt versleuteld bewaard).
+  const [tankOpen, setTankOpen] = useState<string | null>(null);
+  const [tankNummer, setTankNummer] = useState('');
+  const [tankCode, setTankCode] = useState('');
+  const [getoondeCode, setGetoondeCode] = useState<{ id: string; code: string | null } | null>(null);
+  function openTank(p: Personeelslid) {
+    setTankOpen(tankOpen === p.id ? null : p.id); setTankNummer(p.tankkaartNummer ?? ''); setTankCode(''); setGetoondeCode(null);
+  }
+  async function bewaarTank(p: Personeelslid, heeft: boolean) {
+    const input: Parameters<typeof updatePersoneelslid>[1] = heeft
+      ? { tankkaart: true, tankkaartNummer: tankNummer.trim() || null, ...(tankCode.trim() ? { tankkaartCode: tankCode.trim() } : {}) }
+      : { tankkaart: false };
+    if (!heeft && p.tankkaart && !window.confirm(`Tankkaart van ${p.naam} verwijderen? Het nummer en de code worden gewist.`)) return;
+    await wijzig(p, input, heeft ? `Tankkaart van ${p.naam} bewaard.` : `${p.naam} heeft geen tankkaart meer.`);
+    setTankCode(''); setGetoondeCode(null);
+    if (!heeft) setTankOpen(null);
+  }
+  async function wisCode(p: Personeelslid) {
+    if (!window.confirm(`De pincode van de tankkaart van ${p.naam} wissen?`)) return;
+    await wijzig(p, { tankkaartCode: null }, 'Pincode gewist.');
+    setGetoondeCode(null);
+  }
+  async function toonCode(p: Personeelslid) {
+    setFout('');
+    try { setGetoondeCode({ id: p.id, ...(await getTankkaartCode(p.id)) }); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Code ophalen mislukt'); }
+  }
   const ik = getVerkoper();
   const magToekennen = isAdminRol(ik?.rol);
 
@@ -127,6 +154,7 @@ export function Personeel() {
             <th style={{ padding: 6 }}>E-mail</th>
             <th style={{ padding: 6 }}>Rol</th>
             <th style={{ padding: 6 }}>Toegangen</th>
+            <th style={{ padding: 6 }}>Tankkaart</th>
             <th style={{ padding: 6 }}>Status</th>
             <th />
           </tr>
@@ -154,6 +182,11 @@ export function Personeel() {
                         </button>
                       )}
                   </td>
+                  <td style={{ padding: 6 }}>
+                    <button onClick={() => openTank(p)} style={{ ...btnMini, color: p.tankkaart ? '#0d4589' : '#6b7280' }} title="Tankkaart van deze persoon">
+                      {p.tankkaart ? `⛽ ${p.tankkaartNummer ? '…' + p.tankkaartNummer.slice(-4) : 'ja'}` : 'geen'} {tankOpen === p.id ? '▴' : '▾'}
+                    </button>
+                  </td>
                   <td style={{ padding: 6 }}>{p.actief ? <span style={{ color: '#166534' }}>actief</span> : <span style={{ color: '#6b7280' }}>uit dienst</span>}</td>
                   <td style={{ padding: 6, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button onClick={() => resetWachtwoord(p)} style={btnMini}>Wachtwoord…</button>{' '}
@@ -162,9 +195,43 @@ export function Personeel() {
                       : <button onClick={() => zetActief(p, true)} style={{ ...btnMini, color: '#166534' }}>Heractiveren</button>}
                   </td>
                 </tr>
+                {tankOpen === p.id && (
+                  <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td colSpan={7} style={{ padding: '4px 6px 14px' }}>
+                      <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, background: '#f8fafc' }}>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+                          <strong>⛽ Tankkaart van {p.naam}</strong>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={p.tankkaart} onChange={(e) => bewaarTank(p, e.target.checked)} />
+                            heeft een tankkaart
+                          </label>
+                        </div>
+                        {p.tankkaart && (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                              <div><div style={muted}>Kaartnummer</div><input value={tankNummer} onChange={(e) => setTankNummer(e.target.value)} placeholder="bv. 7077 1234 5678 9012" style={{ ...inp, marginBottom: 0, width: 220 }} /></div>
+                              <div><div style={muted}>{p.tankkaartHeeftCode ? 'Nieuwe pincode (leeg = ongewijzigd)' : 'Pincode'}</div><input value={tankCode} onChange={(e) => setTankCode(e.target.value)} type="password" inputMode="numeric" autoComplete="off" placeholder="••••" style={{ ...inp, marginBottom: 0, width: 140 }} /></div>
+                              <button onClick={() => bewaarTank(p, true)} style={btnBlauw}>Bewaren</button>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
+                              <span style={{ color: '#6b7280' }}>Pincode: {p.tankkaartHeeftCode ? 'bewaard (versleuteld)' : 'nog niet ingevuld'}</span>
+                              {p.tankkaartHeeftCode && magToekennen && (
+                                getoondeCode?.id === p.id
+                                  ? <><strong style={{ fontFamily: 'monospace', fontSize: 16, letterSpacing: 2 }}>{getoondeCode.code ?? '—'}</strong><button onClick={() => setGetoondeCode(null)} style={btnMini}>Verbergen</button></>
+                                  : <button onClick={() => toonCode(p)} style={btnMini}>Code tonen</button>
+                              )}
+                              {p.tankkaartHeeftCode && <button onClick={() => wisCode(p)} style={{ ...btnMini, color: 'crimson' }}>Code wissen</button>}
+                              {!magToekennen && p.tankkaartHeeftCode && <span style={{ color: '#6b7280' }}>· enkel een beheerder kan de code zien</span>}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {isOpen && !admin && (
                   <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td colSpan={6} style={{ padding: '4px 6px 14px' }}>
+                    <td colSpan={7} style={{ padding: '4px 6px 14px' }}>
                       <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, background: '#fafafa' }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
                           <strong>Toegangen van {p.naam}</strong>
@@ -185,7 +252,7 @@ export function Personeel() {
               </FragmentRij>
             );
           })}
-          {lijst.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: '#999' }}>Nog geen accounts.</td></tr>}
+          {lijst.length === 0 && <tr><td colSpan={7} style={{ padding: 16, color: '#999' }}>Nog geen accounts.</td></tr>}
         </tbody>
       </table>
       </div>

@@ -298,6 +298,11 @@ model Gebruiker {
   // Toegangen per functionaliteit (lijst van sleutels, zie common/rechten.ts).
   // null = standaardtoegangen van de kassa; beheerders hebben altijd alles.
   rechten      Json?
+  // Tankkaart (bedrijfswagen): heeft deze persoon er een, het kaartnummer, en de
+  // pincode VERSLEUTELD (AES-256-GCM, zie common/geheim.ts); enkel beheerders zien de code.
+  tankkaart              Boolean  @default(false)
+  tankkaartNummer        String?
+  tankkaartCodeGeheim    String?
   createdAt    DateTime     @default(now())
 
   verkopen       Verkoop[]

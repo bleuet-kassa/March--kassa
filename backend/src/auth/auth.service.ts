@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { authSecret, signToken } from '../common/token';
 import { effectieveRechten, isAdminRol, normaliseerRechten } from '../common/rechten';
+import { versleutel, ontsleutel } from '../common/geheim';
 
 @Injectable()
 export class AuthService {
@@ -36,12 +37,16 @@ export class AuthService {
   }
 
   // --- Personeelsbeheer (accounts per gérante/medewerker) ---
-  private naarPersoneelslid(u: { id: string; naam: string; email: string; rol: GebruikerRol; actief: boolean; rechten: unknown }) {
-    return { id: u.id, naam: u.naam, email: u.email, rol: u.rol, actief: u.actief, rechten: effectieveRechten(u.rol, u.rechten), rechtenIngesteld: Array.isArray(u.rechten) };
+  private naarPersoneelslid(u: { id: string; naam: string; email: string; rol: GebruikerRol; actief: boolean; rechten: unknown; tankkaart?: boolean; tankkaartNummer?: string | null; tankkaartCodeGeheim?: string | null }) {
+    return {
+      id: u.id, naam: u.naam, email: u.email, rol: u.rol, actief: u.actief, rechten: effectieveRechten(u.rol, u.rechten), rechtenIngesteld: Array.isArray(u.rechten),
+      // Tankkaart: de pincode zelf gaat nooit mee in de lijst (enkel of er een is).
+      tankkaart: !!u.tankkaart, tankkaartNummer: u.tankkaartNummer ?? null, tankkaartHeeftCode: !!u.tankkaartCodeGeheim,
+    };
   }
   async personeel() {
     const rows = await this.prisma.gebruiker.findMany({
-      select: { id: true, naam: true, email: true, rol: true, actief: true, rechten: true },
+      select: { id: true, naam: true, email: true, rol: true, actief: true, rechten: true, tankkaart: true, tankkaartNummer: true, tankkaartCodeGeheim: true },
       orderBy: [{ actief: 'desc' }, { naam: 'asc' }],
     });
     return rows.map((u) => this.naarPersoneelslid(u));
@@ -70,7 +75,16 @@ export class AuthService {
     }
   }
 
-  async updateGebruiker(id: string, input: { naam?: string; rol?: GebruikerRol; actief?: boolean; wachtwoord?: string; rechten?: string[] | null }, door?: { sub?: string; rol: string }) {
+  // Pincode van de tankkaart tonen: enkel voor een beheerder (route afgeschermd).
+  async tankkaartCode(id: string) {
+    const u = await this.prisma.gebruiker.findUnique({ where: { id }, select: { naam: true, tankkaartCodeGeheim: true } });
+    if (!u) throw new NotFoundException('Account niet gevonden.');
+    if (!u.tankkaartCodeGeheim) return { code: null };
+    try { return { code: ontsleutel(u.tankkaartCodeGeheim) }; }
+    catch { throw new BadRequestException('De code kon niet ontsleuteld worden (sleutel gewijzigd?). Vul ze opnieuw in.'); }
+  }
+
+  async updateGebruiker(id: string, input: { naam?: string; rol?: GebruikerRol; actief?: boolean; wachtwoord?: string; rechten?: string[] | null; tankkaart?: boolean; tankkaartNummer?: string | null; tankkaartCode?: string | null }, door?: { sub?: string; rol: string }) {
     const bestaand = await this.prisma.gebruiker.findUnique({ where: { id } });
     if (!bestaand) throw new NotFoundException('Account niet gevonden.');
     const admin = isAdminRol(door?.rol);
@@ -89,6 +103,17 @@ export class AuthService {
     if (input.rol !== undefined) data.rol = input.rol;
     if (input.actief !== undefined) data.actief = input.actief;
     if (input.rechten !== undefined) data.rechten = input.rechten === null ? Prisma.JsonNull : (normaliseerRechten(input.rechten) as unknown as Prisma.InputJsonValue);
+    // Tankkaart: aan/uit, nummer, en de pincode (wordt versleuteld bewaard; leeg = wissen).
+    if (input.tankkaart !== undefined) {
+      data.tankkaart = !!input.tankkaart;
+      if (!input.tankkaart) { data.tankkaartNummer = null; data.tankkaartCodeGeheim = null; }
+    }
+    if (input.tankkaartNummer !== undefined && input.tankkaart !== false) data.tankkaartNummer = input.tankkaartNummer?.trim() || null;
+    if (input.tankkaartCode !== undefined && input.tankkaart !== false) {
+      const code = (input.tankkaartCode ?? '').trim();
+      if (code && !/^[0-9A-Za-z]{3,12}$/.test(code)) throw new BadRequestException('De code mag enkel cijfers/letters bevatten (3 tot 12 tekens).');
+      data.tankkaartCodeGeheim = code ? versleutel(code) : null;
+    }
     if (input.wachtwoord) {
       if (input.wachtwoord.length < 4) throw new BadRequestException('Kies een wachtwoord van minstens 4 tekens.');
       data.wachtwoordHash = await bcrypt.hash(input.wachtwoord, 10);
