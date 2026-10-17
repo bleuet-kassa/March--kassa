@@ -158,7 +158,7 @@ function StaffApp() {
         {mag('open_rekeningen') && <Link to="/kassa/open-rekeningen">Open rekeningen</Link>}
         {mag('agenda') && <Link to="/kassa/agenda">Agenda</Link>}
         {mag('webshop') && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
-        {mag('webshop') && <Link to="/kassa/bestellingen">Bestellingen</Link>}
+        {(mag('bestellingen') || mag('webshop')) && <Link to="/kassa/bestellingen">Bestellingen</Link>}
         {mag('kortingen') && <Link to="/kassa/kortingen">Kortingen</Link>}
         {mag('website') && <Link to="/kassa/website">Website</Link>}
         {menuItems.length > 0 && (
@@ -202,7 +202,7 @@ function StaffApp() {
           <Route path="rapporten" element={mag('rapporten') ? <Rapporten /> : geenToegang} />
           <Route path="kortingen" element={mag('kortingen') ? <Kortingen /> : geenToegang} />
           <Route path="webshop-assortiment" element={mag('webshop') ? <WebshopAssortiment /> : geenToegang} />
-          <Route path="bestellingen" element={mag('webshop') ? <Bestellingen /> : geenToegang} />
+          <Route path="bestellingen" element={mag('bestellingen') || mag('webshop') ? <Bestellingen /> : geenToegang} />
           <Route path="rekeningen" element={mag('rekeningen') ? <Rekeningen /> : geenToegang} />
           <Route path="personeel" element={mag('personeel') ? <Personeel /> : geenToegang} />
           <Route path="website" element={mag('website') ? <Website /> : geenToegang} />

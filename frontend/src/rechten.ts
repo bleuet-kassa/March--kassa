@@ -9,18 +9,19 @@ export const RECHTEN: { key: string; naam: string; uitleg: string; groep: string
   { key: 'beheer', naam: 'Beheer producten', uitleg: 'Producten, categorieën, voorraad ontvangen', groep: 'Dagelijks' },
   { key: 'cadeaubonnen', naam: 'Cadeaubons', uitleg: 'Register, aanmaken, inwisselen', groep: 'Dagelijks' },
   { key: 'agenda', naam: 'Agenda', uitleg: 'Bestellingen en agendapunten (manueel + webshop), Excel-export', groep: 'Dagelijks' },
+  { key: 'bestellingen', naam: 'Bestellingen', uitleg: 'Webshopbestellingen bekijken en de status opvolgen', groep: 'Dagelijks' },
   { key: 'dagafsluiting', naam: 'Dagafsluiting', uitleg: 'Zelf afsluiten en register bekijken (zonder: enkel aanvragen)', groep: 'Beheer' },
   { key: 'rekeningen', naam: 'Klant factuur', uitleg: 'Bedrijven op rekening, maandbudget, factureren', groep: 'Beheer' },
   { key: 'facturen', naam: 'Facturen inlezen', uitleg: 'Aankoopfacturen inlezen naar de voorraad', groep: 'Beheer' },
   { key: 'kortingen', naam: 'Kortingen', uitleg: 'Regelingen beheren en toepassen aan de kassa', groep: 'Beheer' },
-  { key: 'webshop', naam: 'Webshop', uitleg: 'Assortiment en bestellingen', groep: 'Beheer' },
+  { key: 'webshop', naam: 'Webshop-assortiment', uitleg: 'Welke producten online staan', groep: 'Beheer' },
   { key: 'website', naam: 'Website', uitleg: 'Teksten, openingsuren, partners', groep: 'Beheer' },
   { key: 'personeel', naam: 'Personeel', uitleg: 'Accounts beheren (rol en toegangen wijzigen blijft beheerder)', groep: 'Beheer' },
   { key: 'rapporten', naam: 'Rapporten', uitleg: 'Omzet, marges, dashboard', groep: 'Cijfers' },
   { key: 'boekhouding', naam: 'Boekhouding', uitleg: 'Scrada, verkoopfacturen, rekeningen mailen', groep: 'Cijfers' },
   { key: 'instellingen', naam: 'Instellingen', uitleg: 'Onderneming, meldingen', groep: 'Cijfers' },
 ];
-export const STANDAARD_RECHTEN = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen', 'agenda'];
+export const STANDAARD_RECHTEN = ['kassa', 'verkopen', 'open_rekeningen', 'beheer', 'cadeaubonnen', 'agenda', 'bestellingen'];
 
 export const isAdminRol = (rol?: string | null) => rol === 'BEHEER' || rol === 'BEHEERDER';
 

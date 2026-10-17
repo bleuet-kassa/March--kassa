@@ -33,14 +33,15 @@ export class WebshopController {
     return this.webshop.betalingAfronden(id, body.gelukt);
   }
 
-  // Beheer: bestellingen bekijken en de status bijwerken (enkel beheerders).
-  @Recht('webshop')
+  // Bestellingen bekijken en de status bijwerken: toegang "bestellingen" (standaard voor
+  // alle kassamedewerkers) of "webshop".
+  @Recht('bestellingen', 'webshop')
   @Get('bestellingen')
   bestellingen() {
     return this.webshop.bestellingen();
   }
 
-  @Recht('webshop')
+  @Recht('bestellingen', 'webshop')
   @Patch('bestellingen/:id/status')
   updateStatus(@Param('id') id: string, @Body() body: { status: string }) {
     return this.webshop.updateStatus(id, body.status);
