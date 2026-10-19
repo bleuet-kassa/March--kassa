@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import {
   getPersoneel, nieuwPersoneelslid, updatePersoneelslid, getTankkaartCode,
   type Personeelslid,
@@ -166,7 +167,11 @@ export function Personeel() {
             return (
               <FragmentRij key={p.id}>
                 <tr style={{ borderBottom: isOpen ? 'none' : '1px solid #f0f0f0', opacity: p.actief ? 1 : 0.5 }}>
-                  <td style={{ padding: 6, fontWeight: 600 }}>{p.naam}{p.id === ik?.id && <span style={{ fontWeight: 400, color: '#6b7280' }}> (jij)</span>}</td>
+                  <td style={{ padding: 6, fontWeight: 600 }}>
+                    {/* Naam = link naar de individuele pagina (enkel beheerder). */}
+                    {magToekennen ? <Link to={`/kassa/personeel/${p.id}`} title="Personeelsdossier openen">{p.naam}</Link> : p.naam}
+                    {p.id === ik?.id && <span style={{ fontWeight: 400, color: '#6b7280' }}> (jij)</span>}
+                  </td>
                   <td style={{ padding: 6, fontFamily: 'monospace' }}>{p.email}</td>
                   <td style={{ padding: 6 }}>
                     {magToekennen

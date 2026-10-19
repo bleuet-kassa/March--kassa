@@ -206,6 +206,33 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 // --- Auth (verkoper) ---
 // rechten = effectieve toegangen; rechtenIngesteld = false zolang de standaard geldt.
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
+// --- Personeelsdossier per medewerker (enkel beheerders) ---
+export type PersoneelsProfiel = {
+  voornaam: string | null; achternaam: string | null; telefoon: string | null; privEmail: string | null; adres: string | null;
+  geboortedatum: string | null; noodcontactNaam: string | null; noodcontactTelefoon: string | null;
+  rijksregisterMasker: string | null; ibanMasker: string | null;
+  statuut: string | null; ondernemingId: string | null; functie: string | null; afdelingen: string[]; verantwoordelijkVoor: string[];
+  inDienst: string | null; uitDienst: string | null;
+  urenPerWeek: number | null; urenPerDag: number | null; maxUrenDag: number | null; maxUrenWeek: number | null; maxUrenMaand: number | null; jaarContingent: number | null;
+  verlofdagenJaar: number | null; verlofdagenSaldo: number | null; recupUrenSaldo: number | null;
+  notities: string | null; updatedAt: string | null;
+};
+export type PersoneelsDossier = {
+  account: { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; createdAt: string; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
+  profiel: PersoneelsProfiel;
+  omzet: { maand: { totaal: number; tickets: number }; jaar: { totaal: number; tickets: number }; laatsteVerkoop: string | null };
+};
+export type ProfielInput = Partial<Omit<PersoneelsProfiel, 'rijksregisterMasker' | 'ibanMasker' | 'updatedAt'>> & { rijksregister?: string | null; iban?: string | null };
+export async function getPersoneelsDossier(id: string): Promise<PersoneelsDossier> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/${id}`));
+}
+export async function zetPersoneelsDossier(id: string, input: ProfielInput): Promise<PersoneelsDossier> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function getPersoneelGevoelig(id: string): Promise<{ rijksregister: string | null; iban: string | null }> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/${id}/gevoelig`));
+}
+
 // Pincode van de tankkaart (enkel beheerders).
 export async function getTankkaartCode(id: string): Promise<{ code: string | null }> {
   return jsonOrThrow(await fetch(`${BASE}/auth/personeel/${id}/tankkaart-code`));

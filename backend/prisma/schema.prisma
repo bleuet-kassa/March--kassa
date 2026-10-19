@@ -303,6 +303,7 @@ model Gebruiker {
   tankkaart              Boolean  @default(false)
   tankkaartNummer        String?
   tankkaartCodeGeheim    String?
+  profiel      PersoneelsProfiel?
   createdAt    DateTime     @default(now())
 
   verkopen       Verkoop[]
@@ -720,4 +721,45 @@ model AgendaHerhaling {
   actief        Boolean   @default(true)
   createdAt     DateTime  @default(now())
   items         AgendaItem[]
+}
+
+// Personeelsdossier (1 per account): persoonsgegevens, contract, uurregime, verlof.
+// Voorlopig enkel zichtbaar/bewerkbaar door de beheerder. Rijksregisternummer en IBAN
+// worden versleuteld bewaard (common/geheim.ts).
+model PersoneelsProfiel {
+  id                 String    @id @default(cuid())
+  gebruiker          Gebruiker @relation(fields: [gebruikerId], references: [id], onDelete: Cascade)
+  gebruikerId        String    @unique
+  // persoonlijk
+  voornaam           String?
+  achternaam         String?
+  telefoon           String?
+  privEmail          String?
+  adres              String?
+  geboortedatum      String?   // YYYY-MM-DD
+  rijksregisterGeheim String?
+  ibanGeheim         String?
+  noodcontactNaam    String?
+  noodcontactTelefoon String?
+  // contract
+  statuut            String?   // VAST | FLEXI | STUDENT | ZELFSTANDIG
+  ondernemingId      String?   // juridische entiteit (winkel+restaurant / wijnimport)
+  functie            String?
+  afdelingen         String[]  @default([]) // WINKEL | RESTAURANT | CATERING
+  verantwoordelijkVoor String[] @default([]) // afdelingen waarvan deze persoon verantwoordelijke is
+  inDienst           String?   // YYYY-MM-DD
+  uitDienst          String?   // YYYY-MM-DD
+  // uurregime (normaal: daarboven = overuren) en plafonds (harde grens)
+  urenPerWeek        Decimal?  @db.Decimal(5, 2)
+  urenPerDag         Decimal?  @db.Decimal(4, 2)
+  maxUrenDag         Decimal?  @db.Decimal(4, 2) // standaard 11
+  maxUrenWeek        Decimal?  @db.Decimal(5, 2) // standaard 50
+  maxUrenMaand       Decimal?  @db.Decimal(6, 2)
+  jaarContingent     Decimal?  @db.Decimal(6, 2) // bv. studentenuren per jaar
+  // verlof
+  verlofdagenJaar    Decimal?  @db.Decimal(5, 2)
+  verlofdagenSaldo   Decimal?  @db.Decimal(5, 2)
+  recupUrenSaldo     Decimal?  @db.Decimal(6, 2)
+  notities           String?
+  updatedAt          DateTime  @default(now()) @updatedAt
 }

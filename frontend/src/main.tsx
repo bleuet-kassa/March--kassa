@@ -20,6 +20,7 @@ import { Rekeningen } from './pages/Rekeningen';
 import { Personeel } from './pages/Personeel';
 import { Website } from './pages/Website';
 import { Agenda } from './pages/Agenda';
+import { PersoneelDossier } from './pages/PersoneelDossier';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
 import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
@@ -205,6 +206,8 @@ function StaffApp() {
           <Route path="bestellingen" element={mag('bestellingen') || mag('webshop') ? <Bestellingen /> : geenToegang} />
           <Route path="rekeningen" element={mag('rekeningen') ? <Rekeningen /> : geenToegang} />
           <Route path="personeel" element={mag('personeel') ? <Personeel /> : geenToegang} />
+          {/* Individuele personeelspagina: voorlopig enkel voor beheerders. */}
+          <Route path="personeel/:id" element={isAdmin ? <PersoneelDossier /> : geenToegang} />
           <Route path="website" element={mag('website') ? <Website /> : geenToegang} />
           <Route path="instellingen" element={mag('instellingen') ? <Instellingen /> : geenToegang} />
         </Routes>
