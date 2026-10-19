@@ -23,6 +23,7 @@ import { VerkoopfacturenModule } from './verkoopfacturen/verkoopfacturen.module'
 import { SpreukenModule } from './spreuken/spreuken.module';
 import { AgendaModule } from './agenda/agenda.module';
 import { PersoneelModule } from './personeel/personeel.module';
+import { PlanningModule } from './planning/planning.module';
 
 // In productie serveert de backend de gebouwde website (Vite build in /public),
 // met een SPA-fallback naar index.html. De API-routes (/api/...) worden
@@ -63,6 +64,7 @@ const staticImports =
     SpreukenModule,
     AgendaModule,
     PersoneelModule,
+    PlanningModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

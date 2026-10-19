@@ -16,6 +16,7 @@ export type ProfielInput = {
   inDienst?: string | null; uitDienst?: string | null;
   urenPerWeek?: number | null; urenPerDag?: number | null; maxUrenDag?: number | null; maxUrenWeek?: number | null; maxUrenMaand?: number | null; jaarContingent?: number | null;
   verlofdagenJaar?: number | null; verlofdagenSaldo?: number | null; recupUrenSaldo?: number | null;
+  maatBovenstuk?: string | null; maatBroek?: string | null; maatJas?: string | null; maatSchort?: string | null; maatSchoenen?: string | null; kledijOpmerking?: string | null;
   notities?: string | null;
 };
 
@@ -77,6 +78,7 @@ export class PersoneelService {
         urenPerWeek: this.n(p?.urenPerWeek), urenPerDag: this.n(p?.urenPerDag),
         maxUrenDag: this.n(p?.maxUrenDag), maxUrenWeek: this.n(p?.maxUrenWeek), maxUrenMaand: this.n(p?.maxUrenMaand), jaarContingent: this.n(p?.jaarContingent),
         verlofdagenJaar: this.n(p?.verlofdagenJaar), verlofdagenSaldo: this.n(p?.verlofdagenSaldo), recupUrenSaldo: this.n(p?.recupUrenSaldo),
+        maatBovenstuk: p?.maatBovenstuk ?? null, maatBroek: p?.maatBroek ?? null, maatJas: p?.maatJas ?? null, maatSchort: p?.maatSchort ?? null, maatSchoenen: p?.maatSchoenen ?? null, kledijOpmerking: p?.kledijOpmerking ?? null,
         notities: p?.notities ?? null, updatedAt: p?.updatedAt ?? null,
       },
       omzet: {
@@ -106,7 +108,8 @@ export class PersoneelService {
     const zet = <K extends keyof ProfielInput>(k: K, f: (v: NonNullable<ProfielInput[K]> | null) => unknown) => {
       if (input[k] !== undefined) (d as Record<string, unknown>)[k as string] = f((input[k] ?? null) as NonNullable<ProfielInput[K]> | null);
     };
-    for (const k of ['voornaam', 'achternaam', 'telefoon', 'adres', 'functie', 'noodcontactNaam', 'noodcontactTelefoon', 'notities'] as const) zet(k, (v) => tekst(v as string | null));
+    for (const k of ['voornaam', 'achternaam', 'telefoon', 'adres', 'functie', 'noodcontactNaam', 'noodcontactTelefoon', 'notities',
+      'maatBovenstuk', 'maatBroek', 'maatJas', 'maatSchort', 'maatSchoenen', 'kledijOpmerking'] as const) zet(k, (v) => tekst(v as string | null));
     zet('privEmail', (v) => {
       const e = tekst(v as string | null);
       if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new BadRequestException('Geen geldig e-mailadres.');

@@ -16,6 +16,7 @@ export const RECHTEN: { key: string; naam: string; uitleg: string; groep: string
   { key: 'kortingen', naam: 'Kortingen', uitleg: 'Regelingen beheren en toepassen aan de kassa', groep: 'Beheer' },
   { key: 'webshop', naam: 'Webshop-assortiment', uitleg: 'Welke producten online staan', groep: 'Beheer' },
   { key: 'website', naam: 'Website', uitleg: 'Teksten, openingsuren, partners', groep: 'Beheer' },
+  { key: 'planning', naam: 'Planning', uitleg: 'Uurroosters maken voor alle medewerkers (eigen rooster zien kan iedereen)', groep: 'Beheer' },
   { key: 'personeel', naam: 'Personeel', uitleg: 'Accounts beheren (rol en toegangen wijzigen blijft beheerder)', groep: 'Beheer' },
   { key: 'rapporten', naam: 'Rapporten', uitleg: 'Omzet, marges, dashboard', groep: 'Cijfers' },
   { key: 'boekhouding', naam: 'Boekhouding', uitleg: 'Scrada, verkoopfacturen, rekeningen mailen', groep: 'Cijfers' },

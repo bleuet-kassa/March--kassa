@@ -21,6 +21,8 @@ import { Personeel } from './pages/Personeel';
 import { Website } from './pages/Website';
 import { Agenda } from './pages/Agenda';
 import { PersoneelDossier } from './pages/PersoneelDossier';
+import { Planning } from './pages/Planning';
+import { MijnRooster } from './pages/MijnRooster';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
 import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
@@ -158,6 +160,9 @@ function StaffApp() {
         {mag('cadeaubonnen') && <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>}
         {mag('open_rekeningen') && <Link to="/kassa/open-rekeningen">Open rekeningen</Link>}
         {mag('agenda') && <Link to="/kassa/agenda">Agenda</Link>}
+        {/* Eigen uurrooster: voor iedereen met een persoonlijk account. */}
+        <Link to="/kassa/mijn-rooster">Mijn rooster</Link>
+        {mag('planning') && <Link to="/kassa/planning">Planning</Link>}
         {mag('webshop') && <Link to="/kassa/webshop-assortiment">Webshop</Link>}
         {(mag('bestellingen') || mag('webshop')) && <Link to="/kassa/bestellingen">Bestellingen</Link>}
         {mag('kortingen') && <Link to="/kassa/kortingen">Kortingen</Link>}
@@ -198,6 +203,8 @@ function StaffApp() {
           <Route path="cadeaubonnen" element={mag('cadeaubonnen') ? <Cadeaubonnen /> : geenToegang} />
           <Route path="open-rekeningen" element={mag('open_rekeningen') ? <OpenRekeningen /> : geenToegang} />
           <Route path="agenda" element={mag('agenda') ? <Agenda /> : geenToegang} />
+          <Route path="mijn-rooster" element={<MijnRooster />} />
+          <Route path="planning" element={mag('planning') ? <Planning /> : geenToegang} />
           <Route path="facturen" element={mag('facturen') ? <Facturen /> : geenToegang} />
           <Route path="boekhouding" element={mag('boekhouding') ? <Boekhouding /> : geenToegang} />
           <Route path="rapporten" element={mag('rapporten') ? <Rapporten /> : geenToegang} />

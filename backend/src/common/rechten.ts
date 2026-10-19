@@ -20,6 +20,7 @@ export const RECHTEN = [
   'webshop',         // Webshop: assortiment (welke producten online staan)
   'website',         // Website: teksten, openingsuren, partners
   'personeel',       // Personeel: accounts (rol en toegangen wijzigen blijft beheerder)
+  'planning',        // Planning: uurroosters maken voor alle medewerkers (eigen rooster zien kan iedereen)
   'instellingen',    // Instellingen: onderneming, meldingen
 ] as const;
 export type Recht = (typeof RECHTEN)[number];

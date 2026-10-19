@@ -304,6 +304,7 @@ model Gebruiker {
   tankkaartNummer        String?
   tankkaartCodeGeheim    String?
   profiel      PersoneelsProfiel?
+  diensten     Dienst[]
   createdAt    DateTime     @default(now())
 
   verkopen       Verkoop[]
@@ -760,6 +761,32 @@ model PersoneelsProfiel {
   verlofdagenJaar    Decimal?  @db.Decimal(5, 2)
   verlofdagenSaldo   Decimal?  @db.Decimal(5, 2)
   recupUrenSaldo     Decimal?  @db.Decimal(6, 2)
+  // kledij (werkkledij bestellen/uitreiken)
+  maatBovenstuk      String?   // T-shirt/polo/hemd: XS..XXXL
+  maatBroek          String?   // bv. 40 of W32/L32
+  maatJas            String?
+  maatSchort         String?
+  maatSchoenen       String?   // bv. 42
+  kledijOpmerking    String?   // bv. uitgereikt: 2 polo's, 1 schort (05/10)
   notities           String?
   updatedAt          DateTime  @default(now()) @updatedAt
+}
+
+// Uurrooster: één geplande dienst van een medewerker. Gemaakt op het Planning-scherm
+// (toegang "planning"); elke medewerker ziet zijn eigen diensten bij "Mijn rooster".
+model Dienst {
+  id          String    @id @default(cuid())
+  gebruiker   Gebruiker @relation(fields: [gebruikerId], references: [id], onDelete: Cascade)
+  gebruikerId String
+  dag         String    // YYYY-MM-DD
+  start       String    // HH:MM
+  eind        String    // HH:MM (vóór start = loopt door na middernacht)
+  pauzeMin    Int       @default(0)
+  locatie     String?   // WINKEL | RESTAURANT | CATERING
+  opmerking   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+
+  @@index([dag])
+  @@index([gebruikerId, dag])
 }

@@ -25,9 +25,11 @@ function naarForm(d: PersoneelsDossier): Form {
     inDienst: s(p.inDienst), uitDienst: s(p.uitDienst),
     urenPerWeek: s(p.urenPerWeek), urenPerDag: s(p.urenPerDag), maxUrenDag: s(p.maxUrenDag ?? 11), maxUrenWeek: s(p.maxUrenWeek ?? 50), maxUrenMaand: s(p.maxUrenMaand), jaarContingent: s(p.jaarContingent),
     verlofdagenJaar: s(p.verlofdagenJaar), verlofdagenSaldo: s(p.verlofdagenSaldo), recupUrenSaldo: s(p.recupUrenSaldo),
+    maatBovenstuk: s(p.maatBovenstuk), maatBroek: s(p.maatBroek), maatJas: s(p.maatJas), maatSchort: s(p.maatSchort), maatSchoenen: s(p.maatSchoenen), kledijOpmerking: s(p.kledijOpmerking),
     notities: s(p.notities), rijksregister: '', iban: '',
   };
 }
+const MATEN = ['', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
 export function PersoneelDossier() {
   const { id = '' } = useParams();
@@ -67,6 +69,7 @@ export function PersoneelDossier() {
         inDienst: txt('inDienst'), uitDienst: txt('uitDienst'),
         urenPerWeek: num('urenPerWeek'), urenPerDag: num('urenPerDag'), maxUrenDag: num('maxUrenDag'), maxUrenWeek: num('maxUrenWeek'), maxUrenMaand: num('maxUrenMaand'), jaarContingent: num('jaarContingent'),
         verlofdagenJaar: num('verlofdagenJaar'), verlofdagenSaldo: num('verlofdagenSaldo'), recupUrenSaldo: num('recupUrenSaldo'),
+        maatBovenstuk: txt('maatBovenstuk'), maatBroek: txt('maatBroek'), maatJas: txt('maatJas'), maatSchort: txt('maatSchort'), maatSchoenen: txt('maatSchoenen'), kledijOpmerking: txt('kledijOpmerking'),
         notities: txt('notities'),
         // Gevoelig: enkel meesturen als er iets nieuws ingevuld is.
         ...(String(form.rijksregister ?? '').trim() ? { rijksregister: String(form.rijksregister) } : {}),
@@ -210,6 +213,23 @@ export function PersoneelDossier() {
             {getal('recupUrenSaldo', 'Recup-saldo', 'uur')}
           </div>
           <p style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 0' }}>Wordt later bijgewerkt door verlofaanvragen en goedgekeurde overuren; voorlopig manueel in te vullen.</p>
+        </Kader>
+
+        <Kader titel="Kledij">
+          <div style={raster}>
+            {(['maatBovenstuk', 'maatJas', 'maatSchort'] as const).map((k) => (
+              <label key={k} style={lab}>{k === 'maatBovenstuk' ? 'T-shirt / polo / hemd' : k === 'maatJas' ? 'Jas / fleece' : 'Schort'}
+                <select value={String(form[k] ?? '')} onChange={(e) => zet(k, e.target.value)} style={inp}>
+                  {[...new Set([...MATEN, String(form[k] ?? '')])].map((m) => <option key={m} value={m}>{m || '—'}</option>)}
+                </select>
+              </label>
+            ))}
+            {veld('maatBroek', 'Broek', { placeholder: 'bv. 40 of W32/L32' })}
+            {veld('maatSchoenen', 'Schoenen', { inputMode: 'numeric', placeholder: 'bv. 42' })}
+            <label style={{ ...lab, gridColumn: '1 / -1' }}>Uitgereikte kledij / opmerking
+              <input value={String(form.kledijOpmerking ?? '')} onChange={(e) => zet('kledijOpmerking', e.target.value)} placeholder="bv. 2 polo's en 1 schort meegegeven op 05/10" style={inp} />
+            </label>
+          </div>
         </Kader>
 
         <Kader titel="Omzet (enkel eigenaars)">

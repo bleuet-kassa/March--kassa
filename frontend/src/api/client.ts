@@ -206,6 +206,30 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 // --- Auth (verkoper) ---
 // rechten = effectieve toegangen; rechtenIngesteld = false zolang de standaard geldt.
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
+// --- Uurroosters (planning) ---
+export type Dienst = { id: string; gebruikerId: string; dag: string; start: string; eind: string; pauzeMin: number; locatie: string | null; opmerking: string | null; uren: number };
+export type DienstInput = { gebruikerId: string; dag: string; start: string; eind: string; pauzeMin?: number; locatie?: string | null; opmerking?: string | null };
+export type PlanningMedewerker = { id: string; naam: string; afdelingen: string[]; statuut: string | null; urenPerWeek: number | null; maxUrenDag: number; maxUrenWeek: number };
+export async function getPlanning(van: string, tot: string): Promise<{ diensten: Dienst[]; medewerkers: PlanningMedewerker[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/planning?van=${van}&tot=${tot}`));
+}
+export async function maakDienst(input: DienstInput): Promise<Dienst> {
+  return jsonOrThrow(await fetch(`${BASE}/planning`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function wijzigDienst(id: string, input: Partial<DienstInput>): Promise<Dienst> {
+  return jsonOrThrow(await fetch(`${BASE}/planning/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function verwijderDienst(id: string): Promise<{ ok: true }> {
+  return jsonOrThrow(await fetch(`${BASE}/planning/${id}`, { method: 'DELETE' }));
+}
+export async function kopieerPlanningWeek(van: string, naar: string): Promise<{ gekopieerd: number; overgeslagen: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/planning/kopieer-week`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ van, naar }) }));
+}
+// Eigen rooster voor de komende weken (elke ingelogde medewerker).
+export async function getMijnRooster(weken = 4): Promise<{ naam: string; van: string; tot: string; vandaag: string; urenPerWeek: number | null; diensten: Dienst[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/planning/mijn?weken=${weken}`));
+}
+
 // --- Personeelsdossier per medewerker (enkel beheerders) ---
 export type PersoneelsProfiel = {
   voornaam: string | null; achternaam: string | null; telefoon: string | null; privEmail: string | null; adres: string | null;
@@ -215,6 +239,7 @@ export type PersoneelsProfiel = {
   inDienst: string | null; uitDienst: string | null;
   urenPerWeek: number | null; urenPerDag: number | null; maxUrenDag: number | null; maxUrenWeek: number | null; maxUrenMaand: number | null; jaarContingent: number | null;
   verlofdagenJaar: number | null; verlofdagenSaldo: number | null; recupUrenSaldo: number | null;
+  maatBovenstuk: string | null; maatBroek: string | null; maatJas: string | null; maatSchort: string | null; maatSchoenen: string | null; kledijOpmerking: string | null;
   notities: string | null; updatedAt: string | null;
 };
 export type PersoneelsDossier = {
