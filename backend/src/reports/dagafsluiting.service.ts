@@ -10,10 +10,18 @@ import { kassadag, boekdatumVan } from '../common/kassadag';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
-  include: { lijnen: { include: { product: { include: { categorie: true } } } }; klant: true; betalingen: true };
+  include: { lijnen: { include: { product: { include: { categorie: true } } } }; klant: true; betalingen: true; rekeningBedrijf: { select: { naam: true; btwNummer: true } } };
 }>;
 
-const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: true } } } }, klant: true, betalingen: true } as const;
+const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: true } } } }, klant: true, betalingen: true, rekeningBedrijf: { select: { naam: true, btwNummer: true } } } as const;
+
+// Aankoop op rekening door een BEDRIJF (met BTW-nummer) dat op factuur betaalt: hoort
+// niet in de dagontvangsten maar op de (maand)factuur, die in Scrada in het
+// verkoopdagboek komt. Particulieren op rekening blijven wél in de dagontvangsten.
+function isBedrijfOpFactuur(v: VerkoopVol) {
+  const onbetaald = !v.betaalwijze && !(v.betalingen && v.betalingen.length);
+  return onbetaald && !!(v.rekeningBedrijf?.btwNummer || (v.klantId && v.klant?.btwNummer));
+}
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -114,6 +122,9 @@ export class DagafsluitingService {
     let ontvExcl = 0, ontvBtw = 0, ontvIncl = 0, ontvAantal = 0;
     // "Eigen rekening" (eigen gebruik): apart bijgehouden, telt NIET als ontvangst/omzet.
     let eigenAantal = 0, eigenIncl = 0;
+    // Bedrijven op factuur: apart vermeld, NIET in de dagontvangsten (komen op de factuur).
+    const bedrijven = new Map<string, number>();
+    let bedrijfAantal = 0, bedrijfIncl = 0;
 
     const facturen: { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[] = [];
     const facExcl = 0, facBtw = 0, facIncl = 0;
@@ -125,6 +136,12 @@ export class DagafsluitingService {
       // Eigen gebruik ("Eigen rekening"): apart, niet in de ontvangsten/omzet/BTW.
       if (v.betaalwijze === 'EIGEN_REKENING') {
         eigenAantal++; eigenIncl += incl;
+        continue;
+      }
+      if (isBedrijfOpFactuur(v)) {
+        bedrijfAantal++; bedrijfIncl += incl;
+        const naam = v.rekeningBedrijf?.naam ?? v.klant?.naam ?? 'bedrijf';
+        bedrijven.set(naam, r2((bedrijven.get(naam) ?? 0) + incl));
         continue;
       }
       ontvAantal++;
@@ -195,6 +212,8 @@ export class DagafsluitingService {
       },
       // Eigen gebruik: apart vermeld, telt niet mee in de dagontvangsten hierboven.
       eigenGebruik: { aantal: eigenAantal, incl: r2(eigenIncl) },
+      // Bedrijven op factuur: apart vermeld, niet in de dagontvangsten (factuur volgt).
+      bedrijvenOpFactuur: { aantal: bedrijfAantal, incl: r2(bedrijfIncl), perBedrijf: [...bedrijven.entries()].map(([naam, incl]) => ({ naam, incl })).sort((a, b) => a.naam.localeCompare(b.naam, 'nl')) },
       // Betalingen van openstaande rekeningen (verschuiving van "op rekening" naar de betaalwijze).
       rekeningBetalingen: { aantal: rb.length, totaal: r2(rbTotaal), perBetaalwijze: rbPerBetaalwijze },
       facturen,
@@ -264,9 +283,11 @@ export class DagafsluitingService {
         locatie: locatie.naam,
       });
 
-      // Dagtotaal = de echte ontvangsten; eigen gebruik ("Eigen rekening") telt niet mee.
+      // Dagtotaal = de echte ontvangsten; eigen gebruik ("Eigen rekening") en aankopen
+      // van bedrijven op factuur tellen niet mee.
+      const bedrijfIds = verkopen.filter((v) => isBedrijfOpFactuur(v)).map((v) => v.id);
       const totaalIncl = verkopen
-        .filter((v) => v.betaalwijze !== 'EIGEN_REKENING')
+        .filter((v) => v.betaalwijze !== 'EIGEN_REKENING' && !bedrijfIds.includes(v.id))
         .reduce((s, v) => s + Number(v.totaal), 0);
       const afsluiting = await tx.dagafsluiting.create({
         data: {
@@ -277,7 +298,7 @@ export class DagafsluitingService {
           vanaf,
           tot: nu,
           boekdatum,
-          aantalVerkopen: verkopen.length,
+          aantalVerkopen: verkopen.length - bedrijfIds.length,
           totaal: new Prisma.Decimal(r2(totaalIncl)),
           perBetaalwijze: rapport.dagontvangsten.perBetaalwijze as Prisma.InputJsonValue,
           perBtwTarief: rapport.dagontvangsten.perBtwTarief as Prisma.InputJsonValue,
@@ -289,6 +310,11 @@ export class DagafsluitingService {
           where: { id: { in: verkopen.map((v) => v.id) } },
           data: { afgesloten: true, dagafsluitingId: afsluiting.id },
         });
+      }
+      // Bedrijfsaankopen op factuur: mee afgesloten (zodat de dag "dicht" is), maar
+      // gemarkeerd als buiten de dagontvangsten -> geen correctie nodig bij de factuur.
+      if (bedrijfIds.length) {
+        await tx.verkoop.updateMany({ where: { id: { in: bedrijfIds } }, data: { buitenDagontvangsten: true } });
       }
 
       // De meegenomen rekeningbetalingen vastzetten op deze afsluiting.
@@ -481,10 +507,19 @@ export class DagafsluitingService {
     })) as VerkoopVol[];
     const perCat = new Map<string, number>();
     let eigenAantal = 0, eigenIncl = 0;
+    const bedrijven = new Map<string, number>();
+    let bedrijfAantal = 0, bedrijfIncl = 0;
     for (const v of verkopen) {
       if (v.betaalwijze === 'EIGEN_REKENING') {
         eigenAantal++;
         eigenIncl += this.lijnBedragen(v).incl;
+        continue;
+      }
+      if (v.buitenDagontvangsten) {
+        const incl = this.lijnBedragen(v).incl;
+        bedrijfAantal++; bedrijfIncl += incl;
+        const naam = v.rekeningBedrijf?.naam ?? v.klant?.naam ?? 'bedrijf';
+        bedrijven.set(naam, r2((bedrijven.get(naam) ?? 0) + incl));
         continue;
       }
       for (const l of v.lijnen) {
@@ -518,6 +553,7 @@ export class DagafsluitingService {
         totaalIncl,
       },
       eigenGebruik: { aantal: eigenAantal, incl: r2(eigenIncl) },
+      bedrijvenOpFactuur: { aantal: bedrijfAantal, incl: r2(bedrijfIncl), perBedrijf: [...bedrijven.entries()].map(([naam, incl]) => ({ naam, incl })).sort((x, y) => x.naam.localeCompare(y.naam, 'nl')) },
       facturen: [] as { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[],
       facturenTotaal: { aantal: 0, excl: 0, btw: 0, incl: 0 },
       algemeenTotaalIncl: totaalIncl,

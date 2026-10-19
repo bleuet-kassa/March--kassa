@@ -788,15 +788,24 @@ export class VerkoopfacturenService {
   // met factuurnummer en "correctie voor datum". Enkel zodra die dag zelf in Scrada
   // staat (anders WACHT_OP_DAG en later opnieuw).
   async verstuurCorrectie(id: string) {
-    const f = await this.prisma.verkoopfactuur.findUnique({ where: { id }, include: { verkopen: { select: { id: true, datum: true, betaalwijze: true, betalingen: true } } } });
+    const f = await this.prisma.verkoopfactuur.findUnique({ where: { id }, include: { verkopen: { select: { id: true, datum: true, betaalwijze: true, betalingen: true, buitenDagontvangsten: true, afgesloten: true } } } });
     if (!f) throw new NotFoundException('Factuur niet gevonden.');
     if (f.correctieStatus === 'VERSTUURD' || f.correctieStatus === 'NIET_NODIG') return { status: f.correctieStatus };
     if (f.scradaStatus !== 'VERSTUURD') return { status: f.correctieStatus, melding: 'Eerst de factuur zelf naar Scrada.' };
+
+    // Enkel aankopen die effectief in de dagontvangsten geteld werden, moeten daar
+    // weer uit. Bedrijfsaankopen op factuur (sinds deze regel) staan er nooit in.
+    const buiten = new Set(f.verkopen.filter((v) => v.buitenDagontvangsten).map((v) => v.id));
+    const nogOpen = f.verkopen.some((v) => !v.afgesloten);
+    const alleLijnen = (f.lijnen as FactuurLijn[]) ?? [];
+    const lijnen = alleLijnen.filter((l) => !buiten.has(l.verkoopId));
+    if (!lijnen.length && !nogOpen) {
+      await this.prisma.verkoopfactuur.update({ where: { id }, data: { correctieStatus: 'NIET_NODIG', correctieFout: null } });
+      return { status: 'NIET_NODIG', melding: 'Deze aankopen stonden niet in de dagontvangsten; geen correctie nodig.' };
+    }
     const c = this.scrada.config();
     const dag = await this.dagboek.instellingen();
     if (!c || !dag.journalID) return { status: f.correctieStatus, melding: 'Scrada/dagboek niet gekoppeld.' };
-
-    const lijnen = (f.lijnen as FactuurLijn[]) ?? [];
     const perDatum = new Map<string, FactuurLijn[]>();
     for (const l of lijnen) perDatum.set(l.datum, [...(perDatum.get(l.datum) ?? []), l]);
 

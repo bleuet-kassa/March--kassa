@@ -332,6 +332,8 @@ export type Dagrapport = {
   tot: string | null;
   boekdatum?: string | null; // kassadag YYYY-MM-DD (afsluiten na middernacht = nog de vorige dag)
   maandtotaal?: { maand: string; totaal: number; dagen: number } | null; // dagontvangsten van de maand t.e.m. deze dag
+  // Aankopen op rekening van bedrijven (op factuur): NIET in de dagontvangsten, komen op de factuur.
+  bedrijvenOpFactuur?: { aantal: number; incl: number; perBedrijf: { naam: string; incl: number }[] } | null;
   // Vergeten dagen: elke kassadag wordt apart afgesloten. openDagen = latere dagen die
   // nog open staan (voorbeeld); resterendeDagen = na deze afsluiting nog open;
   // extraAfsluitingen = bij bevestiging op de telefoon ook afgesloten dagen.

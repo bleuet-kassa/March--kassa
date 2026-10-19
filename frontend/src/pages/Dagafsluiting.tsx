@@ -279,6 +279,18 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
         </div>
       )}
 
+      {rapport.bedrijvenOpFactuur && rapport.bedrijvenOpFactuur.aantal > 0 && (
+        <div style={{ fontSize: 12, color: '#555', marginTop: 6, borderTop: '1px dashed #ccc', paddingTop: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontStyle: 'italic' }}>
+            <span>Op rekening bedrijven ({rapport.bedrijvenOpFactuur.aantal}) — factuur volgt, niet in de dagontvangsten</span>
+            <span>{euro(rapport.bedrijvenOpFactuur.incl)}</span>
+          </div>
+          {rapport.bedrijvenOpFactuur.perBedrijf.map((b) => (
+            <div key={b.naam} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 10 }}><span>{b.naam}</span><span>{euro(b.incl)}</span></div>
+          ))}
+        </div>
+      )}
+
       <hr />
       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15 }}>
         <span>TOTAAL</span><span>{euro(d.totaalIncl)}</span>

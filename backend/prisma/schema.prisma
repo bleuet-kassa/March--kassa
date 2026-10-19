@@ -426,6 +426,9 @@ model Verkoop {
   verkoopKortingPct Decimal? @db.Decimal(5, 2) // verkoopbrede korting (los van lijnkorting)
   // dagafsluiting: true zodra deze verkoop in een Z-rapport is meegeteld
   afgesloten    Boolean       @default(false)
+  // Aankoop op rekening van een bedrijf (op factuur): mee afgesloten maar NIET in de
+  // dagontvangsten geteld (komt op de factuur in het verkoopdagboek) -> geen correctie.
+  buitenDagontvangsten Boolean @default(false)
   dagafsluiting   Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
   dagafsluitingId String?
   // geannuleerd/geschrapt ticket: telt NIET mee in de dagafsluiting of omzet;
