@@ -429,6 +429,8 @@ model Verkoop {
   // Aankoop op rekening van een bedrijf (op factuur): mee afgesloten maar NIET in de
   // dagontvangsten geteld (komt op de factuur in het verkoopdagboek) -> geen correctie.
   buitenDagontvangsten Boolean @default(false)
+  // Maand handmatig als gefactureerd aangeduid (factuur buiten de kassa, bv. rechtstreeks in Scrada).
+  factuurReferentie String?
   dagafsluiting   Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
   dagafsluitingId String?
   // geannuleerd/geschrapt ticket: telt NIET mee in de dagafsluiting of omzet;
@@ -531,6 +533,8 @@ model Dagafsluiting {
   boekdatum      String?
   aantalVerkopen Int
   totaal         Decimal      @db.Decimal(10, 2)
+  // Bedrijfsfacturen die op deze dag gemaakt werden (niet in het dagontvangstenboek).
+  facturenTotaal Decimal      @default(0) @db.Decimal(10, 2)
   perBetaalwijze Json         // { CASH: 123.45, BANCONTACT: ... }
   perBtwTarief   Json         // [{ percentage, maatstaf, btw }]
   createdAt      DateTime     @default(now())
@@ -634,6 +638,8 @@ model Verkoopfactuur {
   // Rekening per e-mail verstuurd vanuit de kassa (particulieren: niet via Scrada/Peppol).
   gemaildOp         DateTime?
   gemaildNaar       String?
+  // Bedrijfsfactuur: meegeteld op de dagafsluiting van de dag waarop ze gemaakt werd.
+  dagafsluitingId   String?
   createdAt         DateTime @default(now())
 
   verkopen          Verkoop[]

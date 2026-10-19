@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { getRekeningKlanten, getRekeningUittreksel, getTicket, type RekeningKlant, type Uittreksel, type Ticket } from '../api/client';
+import { getRekeningKlanten, getRekeningUittreksel, getTicket, markeerMaandGefactureerd, type RekeningKlant, type Uittreksel, type Ticket } from '../api/client';
+import { heeftRecht } from '../rechten';
 import { TicketWeergave } from './Kassa';
 
 // Klantrekeningen: per klant (of bedrijf) een duidelijk uittreksel zoals bij de bank:
@@ -134,6 +135,7 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
         </div>
       </div>
       {u.opmerking && <p style={{ fontSize: 13, color: '#6b7280' }}>{u.opmerking}</p>}
+      <BtwTabel regels={u.regels} titel={`BTW per tarief — ${u.van || u.tot ? 'deze periode' : 'alle aankopen'}`} />
 
       <div className="niet-afdrukken" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 4px' }}>
         {heeftLeden && (
@@ -148,7 +150,7 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
           </label>
         )}
       </div>
-      {toon === 'persoon' && <PerPersoon regels={u.regels} onTicket={openTicket} />}
+      {toon === 'persoon' && <PerPersoon regels={u.regels} onTicket={openTicket} sleutel={sleutel} onGewijzigd={() => laad()} onFout={setFout} />}
       {toon === 'chrono' && <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 720 }}>
           <thead>
@@ -205,29 +207,99 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
 
 // Bedrijven: per kalendermaand en per personeelslid de aankopen, met subtotalen en
 // de maandfactuur waarin ze zitten (of "nog te factureren").
-function PerPersoon({ regels, onTicket }: { regels: Uittreksel['regels']; onTicket: (id: string) => void }) {
+// BTW-totalen per tarief van de (getoonde) aankopen: maatstaf (excl.), BTW, incl.
+function btwPerTarief(regels: Uittreksel['regels']) {
+  const m = new Map<number, { pct: number; incl: number; btw: number }>();
+  for (const r of regels) {
+    if (r.soort !== 'AANKOOP' || r.status === 'geannuleerd') continue;
+    for (const d of r.btw ?? []) {
+      const x = m.get(d.pct) ?? { pct: d.pct, incl: 0, btw: 0 };
+      x.incl += d.incl; x.btw += d.btw;
+      m.set(d.pct, x);
+    }
+  }
+  return [...m.values()].sort((a, b) => a.pct - b.pct).map((x) => ({ pct: x.pct, incl: Math.round(x.incl * 100) / 100, btw: Math.round(x.btw * 100) / 100, excl: Math.round((x.incl - x.btw) * 100) / 100 }));
+}
+function BtwTabel({ regels, titel, compact }: { regels: Uittreksel['regels']; titel?: string; compact?: boolean }) {
+  const rijen = btwPerTarief(regels);
+  if (!rijen.length) return null;
+  const tot = rijen.reduce((s, r) => ({ excl: s.excl + r.excl, btw: s.btw + r.btw, incl: s.incl + r.incl }), { excl: 0, btw: 0, incl: 0 });
+  return (
+    <div style={{ margin: compact ? 0 : '10px 0', overflowX: 'auto' }}>
+      {titel && <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{titel}</div>}
+      <table style={{ borderCollapse: 'collapse', fontSize: compact ? 12 : 13, minWidth: 360, fontVariantNumeric: 'tabular-nums' }}>
+        <thead>
+          <tr style={{ color: '#6b7280', fontSize: 11, textAlign: 'right' }}>
+            <th style={{ ...td, textAlign: 'left' }}>Tarief</th><th style={td}>Maatstaf (excl.)</th><th style={td}>BTW</th><th style={td}>Incl. BTW</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rijen.map((r) => (
+            <tr key={r.pct} style={{ textAlign: 'right', borderTop: '1px solid #f0f0f0' }}>
+              <td style={{ ...td, textAlign: 'left' }}>BTW {r.pct}%</td><td style={td}>{euro(r.excl)}</td><td style={td}>{euro(r.btw)}</td><td style={td}>{euro(r.incl)}</td>
+            </tr>
+          ))}
+          {rijen.length > 1 && (
+            <tr style={{ textAlign: 'right', borderTop: '1px solid #999', fontWeight: 700 }}>
+              <td style={{ ...td, textAlign: 'left' }}>Totaal</td><td style={td}>{euro(tot.excl)}</td><td style={td}>{euro(tot.btw)}</td><td style={td}>{euro(tot.incl)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PerPersoon({ regels, onTicket, sleutel, onGewijzigd, onFout }: { regels: Uittreksel['regels']; onTicket: (id: string) => void; sleutel: string; onGewijzigd: () => void; onFout: (m: string) => void }) {
   const aankopen = regels.filter((r) => r.soort === 'AANKOOP' && r.status !== 'geannuleerd');
   const maanden = [...new Set(aankopen.map((r) => r.datum.slice(0, 7)))].sort().reverse();
+  const magAanduiden = heeftRecht('rekeningen') || heeftRecht('boekhouding');
   if (!maanden.length) return <p style={{ color: '#6b7280' }}>Geen aankopen in deze periode.</p>;
   const maandNaam = (m: string) => new Date(m + '-15T12:00:00').toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
+  // Een maand handmatig als gefactureerd aanduiden (factuur buiten de kassa), of dat weer weghalen.
+  async function markeer(m: string, aan: boolean) {
+    let ref: string | undefined;
+    if (aan) {
+      const r = window.prompt(`${maandNaam(m)} aanduiden als gefactureerd.\n\nFactuurnummer of referentie (optioneel), bv. het nummer in Scrada:`, '');
+      if (r === null) return;
+      ref = r.trim() || undefined;
+    } else if (!window.confirm(`De aanduiding "gefactureerd" voor ${maandNaam(m)} weghalen? De aankopen staan dan terug als "nog te factureren".`)) return;
+    try { await markeerMaandGefactureerd(sleutel, m, aan, ref); onGewijzigd(); }
+    catch (e) { onFout(e instanceof Error ? e.message : 'Aanduiden mislukt'); }
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {maanden.map((m) => {
         const inMaand = aankopen.filter((r) => r.datum.slice(0, 7) === m);
         const facturen = [...new Set(inMaand.map((r) => r.factuurNummer).filter(Boolean))] as string[];
-        const open = inMaand.filter((r) => !r.factuurNummer);
+        const handmatig = inMaand.filter((r) => !r.factuurNummer && r.gefactureerd);
+        const refs = [...new Set(handmatig.map((r) => r.factuurRef).filter(Boolean))] as string[];
+        const open = inMaand.filter((r) => !r.factuurNummer && !r.gefactureerd);
         const leden = [...new Set(inMaand.map((r) => r.lid ?? '(geen personeelslid)'))].sort((a, b) => a.localeCompare(b, 'nl'));
+        const volledig = open.length === 0;
         return (
-          <section key={m} style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', breakInside: 'avoid' }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+          <section key={m} style={{ border: `1px solid ${volledig ? '#86efac' : '#e5e7eb'}`, borderRadius: 12, overflow: 'hidden', breakInside: 'avoid' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', background: volledig ? '#f0fdf4' : '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
               <strong style={{ fontSize: 16, textTransform: 'capitalize' }}>{maandNaam(m)}</strong>
+              {/* Factuurstatus van de maand, in één oogopslag */}
+              <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: volledig ? '#dcfce7' : open.length === inMaand.length ? '#fef3c7' : '#ffedd5', color: volledig ? '#166534' : '#b45309' }}>
+                {volledig ? '✓ gefactureerd' : open.length === inMaand.length ? 'nog niet gefactureerd' : 'deels gefactureerd'}
+              </span>
               <span style={{ fontSize: 13, color: '#374151' }}>
                 {facturen.length ? `factuur ${facturen.join(', ')}` : ''}
-                {facturen.length && open.length ? ' · ' : ''}
+                {handmatig.length ? `${facturen.length ? ' · ' : ''}buiten de kassa${refs.length ? ` (${refs.join(', ')})` : ''}` : ''}
+                {(facturen.length || handmatig.length) && open.length ? ' · ' : ''}
                 {open.length ? <span style={{ color: '#b45309', fontWeight: 600 }}>{euro(open.reduce((s, r) => s + r.bedrag, 0))} nog te factureren</span> : ''}
               </span>
+              {magAanduiden && (
+                <span className="niet-afdrukken" style={{ display: 'flex', gap: 4 }}>
+                  {open.length > 0 && <button onClick={() => markeer(m, true)} style={btnMini} title="Deze maand werd buiten de kassa gefactureerd">✓ Aanduiden als gefactureerd</button>}
+                  {handmatig.length > 0 && <button onClick={() => markeer(m, false)} style={{ ...btnMini, color: '#b91c1c' }}>Aanduiding wissen</button>}
+                </span>
+              )}
               <strong style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{euro(inMaand.reduce((s, r) => s + r.bedrag, 0))}</strong>
             </div>
+            <div style={{ padding: '6px 12px 0' }}><BtwTabel regels={inMaand} compact /></div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 600 }}>
                 <tbody>
@@ -243,7 +315,7 @@ function PerPersoon({ regels, onTicket }: { regels: Uittreksel['regels']; onTick
                         <tr key={lid + i} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ ...td, paddingLeft: 18, whiteSpace: 'nowrap', color: '#374151' }}>{datumTijd(r.datum)}</td>
                           <td style={{ ...td, color: '#374151' }}>{r.artikels ?? r.detail}</td>
-                          <td style={{ ...td, fontSize: 12, color: r.factuurNummer ? '#6b7280' : '#b45309', whiteSpace: 'nowrap' }}>{r.factuurNummer ? `factuur ${r.factuurNummer}` : 'nog te factureren'}</td>
+                          <td style={{ ...td, fontSize: 12, color: r.factuurNummer || r.gefactureerd ? '#6b7280' : '#b45309', whiteSpace: 'nowrap' }}>{r.factuurNummer ? `factuur ${r.factuurNummer}` : r.gefactureerd ? `gefactureerd${r.factuurRef ? ` (${r.factuurRef})` : ' buiten kassa'}` : 'nog te factureren'}</td>
                           <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{euro(r.bedrag)}</td>
                           <td className="niet-afdrukken" style={{ ...td, textAlign: 'right' }}>{r.verkoopId && <button onClick={() => onTicket(r.verkoopId!)} style={btnMini}>Ticket</button>}</td>
                         </tr>

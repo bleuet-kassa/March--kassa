@@ -75,14 +75,14 @@ export class RekeningenController {
     });
   }
 
-  // Maandfactuur: alle openstaande "op rekening"-tickets van het bedrijf worden
-  // één verkoopfactuur (klaar voor Scrada als concept); de tickets worden
-  // gemarkeerd als gefactureerd.
+  // Maandfacturen: de openstaande "op rekening"-tickets van het bedrijf worden één
+  // verkoopfactuur PER KALENDERMAAND (klaar voor Scrada als concept); de lopende maand
+  // enkel met { lopendeMaand: true }.
   @Recht('rekeningen')
   @Post('bedrijven/:id/factureer')
-  async factureer(@Param('id') id: string) {
-    const r = await this.facturen.maakMaandfactuur(id);
-    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer } };
+  async factureer(@Param('id') id: string, @Body() body: { lopendeMaand?: boolean }) {
+    const r = await this.facturen.maakMaandfactuur(id, { lopendeMaand: !!body?.lopendeMaand });
+    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer }, facturen: r.facturen.map((f) => ({ id: f.id, nummer: f.nummer, periode: f.periode, totaal: Number(f.totaalIncl) })) };
   }
 
   // Een verkoop verschuiven naar een andere rekening (bedrijf + lid).

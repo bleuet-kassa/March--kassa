@@ -134,10 +134,21 @@ export function Rekeningen() {
     } catch (e) { setFout(e instanceof Error ? e.message : 'Verplaatsen mislukt'); }
   }
 
+  // Factureren: één factuur per afgelopen kalendermaand; de lopende maand pas na het
+  // einde van de maand (of op uitdrukkelijke vraag).
   async function factureer(b: RekeningBedrijf) {
-    if (!window.confirm(`Alle openstaande verkopen van ${b.naam} (${euro(b.openstaand)}) als gefactureerd markeren?`)) return;
-    const r = await factureerBedrijf(b.id);
-    window.alert(`${r.aantal} verkopen gebundeld in maandfactuur ${r.factuur?.nummer ?? ''} (${euro(r.totaal)}).\n\nDe factuur staat als "openstaand" bij Beheerder → Boekhouding → Verkoopfacturen en gaat bij de volgende bevestiging als concept naar Scrada.`);
+    if (!window.confirm(`De openstaande aankopen van ${b.naam} (${euro(b.openstaand)}) factureren?\n\nEr komt één factuur per afgelopen kalendermaand. Aankopen van de lopende maand wachten tot het einde van de maand.`)) return;
+    setFout('');
+    const toon = (r: Awaited<ReturnType<typeof factureerBedrijf>>) => window.alert(
+      `${r.aantal} aankopen gefactureerd:\n${(r.facturen ?? []).map((f) => `• ${f.nummer}${f.periode ? ` (${f.periode})` : ''}: ${euro(f.totaal)}`).join('\n')}\n\nDe facturen staan bij Beheerder → Boekhouding → Verkoopfacturen en gaan bij de volgende bevestiging als concept naar Scrada.`,
+    );
+    try { toon(await factureerBedrijf(b.id)); }
+    catch (e) {
+      const m = e instanceof Error ? e.message : 'Factureren mislukt';
+      if (m.includes('lopende maand') && window.confirm(`${m}\n\nToch nu al een factuur maken voor de lopende maand?`)) {
+        try { toon(await factureerBedrijf(b.id, true)); } catch (e2) { setFout(e2 instanceof Error ? e2.message : 'Factureren mislukt'); }
+      } else setFout(m);
+    }
     await laad();
     setVerkopen((v) => { const k = { ...v }; delete k[b.id]; return k; });
   }

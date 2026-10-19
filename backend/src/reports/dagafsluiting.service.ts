@@ -15,6 +15,10 @@ type VerkoopVol = Prisma.VerkoopGetPayload<{
 
 const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: true } } } }, klant: true, betalingen: true, rekeningBedrijf: { select: { naam: true, btwNummer: true } } } as const;
 
+// Vanaf dit moment tellen bedrijfsfacturen mee op de dagafsluiting van hun dag (oudere
+// facturen niet: hun aankopen stonden al in de dagontvangsten -> het verleden blijft gelijk).
+const FACTUREN_IN_DAGAFSLUITING_VANAF = new Date('2026-10-20T00:00:00+02:00');
+
 // Aankoop op rekening door een BEDRIJF (met BTW-nummer) dat op factuur betaalt: hoort
 // niet in de dagontvangsten maar op de (maand)factuur, die in Scrada in het
 // verkoopdagboek komt. Particulieren op rekening blijven wél in de dagontvangsten.
@@ -114,6 +118,9 @@ export class DagafsluitingService {
       // Betalingen van openstaande rekeningen aan de kassa in deze periode:
       // +bedrag op de betaalwijze, -bedrag op "op rekening" (totaal blijft gelijk).
       rekeningBetalingen?: { bedrag: number; betalingen: { betaalwijze: string; bedrag: number }[] }[];
+      // Bedrijfsfacturen die op deze dag gemaakt werden (tellen mee in het dag-/maandtotaal,
+      // niet in het dagontvangstenboek: de factuur zelf staat in het verkoopdagboek).
+      facturen?: { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[];
     },
   ) {
     const perBetaalwijze: Record<string, number> = {};
@@ -126,8 +133,10 @@ export class DagafsluitingService {
     const bedrijven = new Map<string, number>();
     let bedrijfAantal = 0, bedrijfIncl = 0;
 
-    const facturen: { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[] = [];
-    const facExcl = 0, facBtw = 0, facIncl = 0;
+    const facturen = meta.facturen ?? [];
+    const facExcl = facturen.reduce((s, f) => s + f.excl, 0);
+    const facBtw = facturen.reduce((s, f) => s + f.btw, 0);
+    const facIncl = facturen.reduce((s, f) => s + f.incl, 0);
 
     // Eén dagontvangsten-ticket: alle winkelverkopen samen, met de BTW gewoon
     // uitgesplitst per tarief (6% / 21%) en de omzet per categorie.
@@ -228,9 +237,35 @@ export class DagafsluitingService {
     const maand = boekdatum.slice(0, 7);
     const rows = await client.dagafsluiting.findMany({
       where: { boekdatum: { startsWith: maand, lte: boekdatum } },
-      select: { totaal: true },
+      select: { totaal: true, facturenTotaal: true },
     });
-    return { maand, totaal: r2(rows.reduce((s, r) => s + Number(r.totaal), 0) + extra), dagen: rows.length + (extra !== 0 ? 1 : 0) };
+    // Dagontvangsten + bedrijfsfacturen van die dagen.
+    return { maand, totaal: r2(rows.reduce((s, r) => s + Number(r.totaal) + Number(r.facturenTotaal ?? 0), 0) + extra), dagen: rows.length + (extra !== 0 ? 1 : 0) };
+  }
+
+  // Bedrijfsfacturen (maandfacturen naar Scrada) die nog op geen dagafsluiting staan en
+  // t.e.m. `boekdatum` gemaakt werden. Het bedrag = enkel de aankopen die NIET in de
+  // dagontvangsten stonden (anders telt het dubbel); facturen van vóór deze regel en
+  // facturen voor reeds getelde aankopen vallen zo vanzelf weg (het verleden blijft gelijk).
+  private async bedrijfsFacturen(boekdatum: string, nuBuiten: string[], client: Prisma.TransactionClient | PrismaService = this.prisma, dagafsluitingId?: string) {
+    const rows = await client.verkoopfactuur.findMany({
+      where: dagafsluitingId
+        ? { dagafsluitingId }
+        : { dagafsluitingId: null, bron: 'MAANDFACTUUR', scradaStatus: { not: 'NIET_NODIG' }, createdAt: { gte: FACTUREN_IN_DAGAFSLUITING_VANAF } },
+      include: { verkopen: { select: { id: true, buitenDagontvangsten: true } } },
+      orderBy: { datum: 'asc' },
+    });
+    const uit: { id: string; ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[] = [];
+    for (const f of rows) {
+      if (!dagafsluitingId && kassadag(f.datum) > boekdatum) continue;
+      const telt = new Set(f.verkopen.filter((v) => v.buitenDagontvangsten || nuBuiten.includes(v.id)).map((v) => v.id));
+      const lijnen = ((f.lijnen as unknown) as { verkoopId: string; totaalIncl: number; btwBedrag: number }[] ?? []).filter((l) => telt.has(l.verkoopId));
+      if (!lijnen.length) continue;
+      const incl = r2(lijnen.reduce((s, l) => s + Number(l.totaalIncl), 0));
+      const btw = r2(lijnen.reduce((s, l) => s + Number(l.btwBedrag), 0));
+      uit.push({ id: f.id, ref: f.nummer, datum: kassadag(f.datum), klant: f.klantNaam, btwNummer: f.klantBtw, excl: r2(incl - btw), btw, incl });
+    }
+    return uit;
   }
 
   // Voorbeeld van het dagontvangsten-rapport (nog niet afgesloten).
@@ -240,9 +275,14 @@ export class DagafsluitingService {
     const { boekdatum, dagVerkopen: verkopen, resterendeDagen } = this.splitsOudsteDag(alle);
     // Rekeningbetalingen tot en met deze dag gaan mee; latere wachten op hun eigen dag.
     const rekeningBetalingen = (await this.openRekeningBetalingen()).filter((b) => kassadag(b.datum) <= boekdatum);
-    const vandaagTotaal = verkopen.filter((v) => v.betaalwijze !== 'EIGEN_REKENING').reduce((s, v) => s + Number(v.totaal), 0);
+    const bedrijfIds = (verkopen as VerkoopVol[]).filter((v) => isBedrijfOpFactuur(v)).map((v) => v.id);
+    const facturen = await this.bedrijfsFacturen(boekdatum, bedrijfIds);
+    // Lopend dagtotaal: zonder eigen gebruik en zonder bedrijfsaankopen (die komen op de factuur).
+    const vandaagTotaal = verkopen.filter((v) => v.betaalwijze !== 'EIGEN_REKENING' && !bedrijfIds.includes(v.id)).reduce((s, v) => s + Number(v.totaal), 0)
+      + facturen.reduce((s, f) => s + f.incl, 0);
     const rapport = this.bouwRapport(verkopen, {
       rekeningBetalingen,
+      facturen,
       volgnummer: null,
       vanaf: verkopen[0]?.datum ?? null,
       tot: new Date(),
@@ -273,8 +313,14 @@ export class DagafsluitingService {
 
       // Betalingen van openstaande rekeningen tot en met deze dag gaan mee.
       const rekeningBetalingen = (await this.openRekeningBetalingen(tx)).filter((b) => kassadag(b.datum) <= boekdatum);
+      // Bedrijfsaankopen op factuur: niet in de dagontvangsten. De bedrijfsfacturen die
+      // t.e.m. deze dag gemaakt werden, tellen wél mee in het dagtotaal (onderdeel Facturen).
+      const bedrijfIds = verkopen.filter((v) => isBedrijfOpFactuur(v)).map((v) => v.id);
+      const facturen = await this.bedrijfsFacturen(boekdatum, bedrijfIds, tx);
+      const facturenTotaal = r2(facturen.reduce((s, f) => s + f.incl, 0));
       const rapport = this.bouwRapport(verkopen, {
         rekeningBetalingen,
+        facturen,
         volgnummer,
         vanaf,
         tot: nu,
@@ -285,7 +331,6 @@ export class DagafsluitingService {
 
       // Dagtotaal = de echte ontvangsten; eigen gebruik ("Eigen rekening") en aankopen
       // van bedrijven op factuur tellen niet mee.
-      const bedrijfIds = verkopen.filter((v) => isBedrijfOpFactuur(v)).map((v) => v.id);
       const totaalIncl = verkopen
         .filter((v) => v.betaalwijze !== 'EIGEN_REKENING' && !bedrijfIds.includes(v.id))
         .reduce((s, v) => s + Number(v.totaal), 0);
@@ -300,6 +345,7 @@ export class DagafsluitingService {
           boekdatum,
           aantalVerkopen: verkopen.length - bedrijfIds.length,
           totaal: new Prisma.Decimal(r2(totaalIncl)),
+          facturenTotaal: new Prisma.Decimal(facturenTotaal),
           perBetaalwijze: rapport.dagontvangsten.perBetaalwijze as Prisma.InputJsonValue,
           perBtwTarief: rapport.dagontvangsten.perBtwTarief as Prisma.InputJsonValue,
         },
@@ -315,6 +361,10 @@ export class DagafsluitingService {
       // gemarkeerd als buiten de dagontvangsten -> geen correctie nodig bij de factuur.
       if (bedrijfIds.length) {
         await tx.verkoop.updateMany({ where: { id: { in: bedrijfIds } }, data: { buitenDagontvangsten: true } });
+      }
+      // De meegetelde bedrijfsfacturen vastzetten op deze dag.
+      if (facturen.length) {
+        await tx.verkoopfactuur.updateMany({ where: { id: { in: facturen.map((f) => f.id) } }, data: { dagafsluitingId: afsluiting.id } });
       }
 
       // De meegenomen rekeningbetalingen vastzetten op deze afsluiting.
@@ -530,6 +580,8 @@ export class DagafsluitingService {
     const perCategorie = [...perCat.entries()]
       .map(([categorie, omzetIncl]) => ({ categorie, omzetIncl: r2(omzetIncl) }))
       .sort((x, y) => y.omzetIncl - x.omzetIncl);
+    // Bedrijfsfacturen die op deze dag meegeteld werden.
+    const dagFacturen = (await this.bedrijfsFacturen(boekdatumVan(a), [], this.prisma, id)).map(({ id: _id, ...f }) => f);
 
     return {
       id: a.id,
@@ -554,9 +606,14 @@ export class DagafsluitingService {
       },
       eigenGebruik: { aantal: eigenAantal, incl: r2(eigenIncl) },
       bedrijvenOpFactuur: { aantal: bedrijfAantal, incl: r2(bedrijfIncl), perBedrijf: [...bedrijven.entries()].map(([naam, incl]) => ({ naam, incl })).sort((x, y) => x.naam.localeCompare(y.naam, 'nl')) },
-      facturen: [] as { ref: string; datum: string; klant: string; btwNummer: string | null; excl: number; btw: number; incl: number }[],
-      facturenTotaal: { aantal: 0, excl: 0, btw: 0, incl: 0 },
-      algemeenTotaalIncl: totaalIncl,
+      facturen: dagFacturen,
+      facturenTotaal: {
+        aantal: dagFacturen.length,
+        excl: r2(dagFacturen.reduce((s, f) => s + f.excl, 0)),
+        btw: r2(dagFacturen.reduce((s, f) => s + f.btw, 0)),
+        incl: Number(a.facturenTotaal ?? 0),
+      },
+      algemeenTotaalIncl: r2(totaalIncl + Number(a.facturenTotaal ?? 0)),
     };
   }
 
@@ -590,9 +647,10 @@ export class DagafsluitingService {
     const rows = await this.prisma.dagafsluiting.findMany({
       orderBy: { tot: 'desc' },
       take: 130, // ruim 4 maanden, zodat de maandtotalen in het register volledig zijn
-      select: { id: true, volgnummer: true, vanaf: true, tot: true, boekdatum: true, totaal: true, aantalVerkopen: true },
+      select: { id: true, volgnummer: true, vanaf: true, tot: true, boekdatum: true, totaal: true, facturenTotaal: true, aantalVerkopen: true },
     });
     // boekdatum = de kassadag (afsluiten na middernacht hoort nog bij de vorige dag).
-    return rows.map((r) => ({ ...r, boekdatum: boekdatumVan(r) }));
+    // totaal = dagontvangsten + bedrijfsfacturen van die dag (voor het register/maandtotaal).
+    return rows.map((r) => ({ ...r, boekdatum: boekdatumVan(r), dagontvangsten: Number(r.totaal), facturenTotaal: Number(r.facturenTotaal ?? 0), totaal: r2(Number(r.totaal) + Number(r.facturenTotaal ?? 0)) }));
   }
 }

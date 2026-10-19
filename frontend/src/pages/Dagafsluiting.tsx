@@ -66,7 +66,7 @@ export function Dagafsluiting() {
   }
 
   async function afsluiten() {
-    if (!rapport || (rapport.dagontvangsten.aantal + rapport.facturen.length) === 0 || bezig) return;
+    if (!rapport || (rapport.dagontvangsten.aantal + rapport.facturen.length + (rapport.bedrijvenOpFactuur?.aantal ?? 0) + (rapport.eigenGebruik?.aantal ?? 0)) === 0 || bezig) return;
     if (!window.confirm('De dag definitief afsluiten? De ontvangsten worden onwijzigbaar vastgelegd.')) return;
     setBezig(true); setFout('');
     try {
@@ -99,7 +99,8 @@ export function Dagafsluiting() {
   }
 
   if (!rapport) return <div>{fout || 'Laden…'}</div>;
-  const leeg = rapport.dagontvangsten.aantal + rapport.facturen.length === 0;
+  // Ook een dag met enkel bedrijfsaankopen of eigen gebruik moet afgesloten kunnen worden.
+  const leeg = rapport.dagontvangsten.aantal + rapport.facturen.length + (rapport.bedrijvenOpFactuur?.aantal ?? 0) + (rapport.eigenGebruik?.aantal ?? 0) === 0;
 
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -280,20 +281,44 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
       )}
 
       {rapport.bedrijvenOpFactuur && rapport.bedrijvenOpFactuur.aantal > 0 && (
-        <div style={{ fontSize: 12, color: '#555', marginTop: 6, borderTop: '1px dashed #ccc', paddingTop: 6 }}>
+        <div style={{ fontSize: 12, color: '#555', marginTop: 6, border: '1px dashed #999', padding: 6 }}>
+          <div style={{ fontWeight: 700 }}>NIET IN DE TOTALEN — ter info</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontStyle: 'italic' }}>
-            <span>Op rekening bedrijven ({rapport.bedrijvenOpFactuur.aantal}) — factuur volgt, niet in de dagontvangsten</span>
-            <span>{euro(rapport.bedrijvenOpFactuur.incl)}</span>
+            <span>Op rekening bedrijven ({rapport.bedrijvenOpFactuur.aantal}) — telt mee op de dag van de factuur</span>
+            <span>({euro(rapport.bedrijvenOpFactuur.incl)})</span>
           </div>
           {rapport.bedrijvenOpFactuur.perBedrijf.map((b) => (
-            <div key={b.naam} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 10 }}><span>{b.naam}</span><span>{euro(b.incl)}</span></div>
+            <div key={b.naam} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 10 }}><span>{b.naam}</span><span>({euro(b.incl)})</span></div>
           ))}
         </div>
       )}
 
+      {/* Bedrijfsfacturen die op deze dag gemaakt werden: tellen mee in het dagtotaal,
+          niet in het dagontvangstenboek (de factuur zelf staat in het verkoopdagboek). */}
+      {rapport.facturen.length > 0 && (
+        <>
+          <hr />
+          <div style={{ fontWeight: 600, fontSize: 13 }}>Facturen bedrijven ({rapport.facturen.length})</div>
+          {rapport.facturen.map((f) => (
+            <div key={f.ref} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, gap: 8 }}>
+              <span>{f.ref} · {f.klant}</span><span style={{ whiteSpace: 'nowrap' }}>{euro(f.incl)}</span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#555' }}>
+            <span>waarvan BTW</span><span>{euro(rapport.facturenTotaal.btw)}</span>
+          </div>
+        </>
+      )}
+
       <hr />
+      {rapport.facturen.length > 0 && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>Dagontvangsten</span><span>{euro(d.totaalIncl)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span>Facturen bedrijven</span><span>{euro(rapport.facturenTotaal.incl)}</span></div>
+        </>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15 }}>
-        <span>TOTAAL</span><span>{euro(d.totaalIncl)}</span>
+        <span>TOTAAL</span><span>{euro(rapport.facturen.length > 0 ? rapport.algemeenTotaalIncl : d.totaalIncl)}</span>
       </div>
       {rapport.maandtotaal && (
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #999' }}>

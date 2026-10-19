@@ -54,19 +54,30 @@ export function Boekhouding() {
     setFacturen(f); setFacOverzicht(o); setFacInst(i); setFacVolgend(i.volgend != null ? String(i.volgend) : ''); setTeFactureren(t); setMailStatus(m);
   }
   async function factureerEen(t: TeFactureren) {
-    if (!window.confirm(`Alle ${t.aantal} open aankopen van ${t.naam} (${euro(t.totaal)}) bundelen tot één ${t.naarScrada ? 'factuur (naar Scrada)' : 'rekening (enkel in de kassa)'}?`)) return;
+    if (!window.confirm(t.naarScrada
+      ? `De open aankopen van ${t.naam} factureren?\n\nEr komt één factuur per afgelopen kalendermaand (naar Scrada). Aankopen van de lopende maand worden pas na het einde van de maand gefactureerd.`
+      : `Alle ${t.aantal} open aankopen van ${t.naam} (${euro(t.totaal)}) bundelen tot één rekening (enkel in de kassa)?`)) return;
     setBezig(true); setMelding('');
-    try { const r = await factureerRekening(t.sleutel); setMelding(`${t.naarScrada ? 'Factuur' : 'Rekening'} ${r.factuur.nummer} voor ${t.naam}: ${r.aantal} aankopen, ${euro(r.totaal)}.`); await laadFacturen(); }
-    catch (e) { setMelding(e instanceof Error ? e.message : 'Factureren mislukt'); }
+    const toon = (r: Awaited<ReturnType<typeof factureerRekening>>) => setMelding(`${t.naam}: ${r.facturen.map((f) => `${t.naarScrada ? 'factuur' : 'rekening'} ${f.nummer}${f.periode ? ` (${f.periode})` : ''} ${euro(f.totaal)}`).join(' · ')}.`);
+    try { toon(await factureerRekening(t.sleutel)); await laadFacturen(); }
+    catch (e) {
+      const m = e instanceof Error ? e.message : 'Factureren mislukt';
+      // Enkel de lopende maand open: op vraag toch nu factureren.
+      if (m.includes('lopende maand') && window.confirm(`${m}\n\nToch nu al een factuur maken voor de lopende maand?`)) {
+        try { toon(await factureerRekening(t.sleutel, true)); await laadFacturen(); }
+        catch (e2) { setMelding(e2 instanceof Error ? e2.message : 'Factureren mislukt'); }
+      } else setMelding(m);
+    }
     finally { setBezig(false); }
   }
   async function factureerAlles() {
-    if (!window.confirm(`Maandafsluiting: voor alle ${teFactureren.length} klanten met open aankopen één factuur/rekening maken?\n\nFacturen van klanten met BTW-nummer staan daarna klaar om naar Scrada te sturen.`)) return;
+    if (!window.confirm(`Maandafsluiting: voor alle ${teFactureren.length} klanten met open aankopen factureren?\n\nBedrijven krijgen één factuur per afgelopen kalendermaand (de lopende maand wacht); particulieren één rekening. Facturen van bedrijven staan daarna klaar om naar Scrada te sturen.`)) return;
     setBezig(true); setMelding('');
     try {
       const r = await factureerAlleRekeningen();
       const fouten = r.resultaten.filter((x) => x.fout);
-      setMelding(`${r.aantal} factuur/rekening(en) gemaakt${fouten.length ? ` · mislukt: ${fouten.map((x) => `${x.naam} (${x.fout})`).join(', ')}` : ''}.`);
+      const wacht = r.resultaten.filter((x) => x.overgeslagen);
+      setMelding(`${r.aantal} klant(en) gefactureerd${wacht.length ? ` · wacht op het einde van de maand: ${wacht.map((x) => x.naam).join(', ')}` : ''}${fouten.length ? ` · mislukt: ${fouten.map((x) => `${x.naam} (${x.fout})`).join(', ')}` : ''}.`);
       await laadFacturen();
     } catch (e) { setMelding(e instanceof Error ? e.message : 'Factureren mislukt'); }
     finally { setBezig(false); }

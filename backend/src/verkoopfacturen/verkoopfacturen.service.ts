@@ -229,26 +229,57 @@ export class VerkoopfacturenService {
   }
 
   // Maandfactuur voor een bedrijf (Klant factuur -> Factureren).
-  async maakMaandfactuur(bedrijfId: string) { return this.maakBundel({ bedrijfId }); }
+  async maakMaandfactuur(bedrijfId: string, opties: { lopendeMaand?: boolean } = {}) { return this.maakBundel({ bedrijfId }, opties); }
   // Maandfactuur/rekening voor een klant of bedrijf via de sleutel (b:… / k:…).
-  async maakBundelVoorSleutel(sleutel: string) { return this.maakBundel(this.doelVanSleutel(sleutel)); }
-  // Alle open rekeningen in één keer factureren (einde van de maand).
+  async maakBundelVoorSleutel(sleutel: string, opties: { lopendeMaand?: boolean } = {}) { return this.maakBundel(this.doelVanSleutel(sleutel), opties); }
+  // Alle open rekeningen in één keer factureren (einde van de maand). Bedrijven: enkel de
+  // afgelopen maanden (één factuur per kalendermaand); de lopende maand wacht.
   async factureerAlles() {
     const groepen = await this.teFactureren();
-    const uit: { sleutel: string; naam: string; nummer?: string; totaal?: number; fout?: string }[] = [];
+    const uit: { sleutel: string; naam: string; nummer?: string; totaal?: number; fout?: string; overgeslagen?: string }[] = [];
     for (const g of groepen) {
-      try { const r = await this.maakBundelVoorSleutel(g.sleutel); uit.push({ sleutel: g.sleutel, naam: g.naam, nummer: r.factuur.nummer, totaal: r.totaal }); }
-      catch (e) { uit.push({ sleutel: g.sleutel, naam: g.naam, fout: e instanceof Error ? e.message : 'fout' }); }
+      try {
+        const r = await this.maakBundelVoorSleutel(g.sleutel);
+        uit.push({ sleutel: g.sleutel, naam: g.naam, nummer: r.facturen.map((f) => f.nummer).join(', '), totaal: r.totaal });
+      } catch (e) {
+        const m = e instanceof Error ? e.message : 'fout';
+        if (m.includes('lopende maand')) uit.push({ sleutel: g.sleutel, naam: g.naam, overgeslagen: 'enkel aankopen van de lopende maand' });
+        else uit.push({ sleutel: g.sleutel, naam: g.naam, fout: m });
+      }
     }
     return { aantal: uit.filter((u) => u.nummer).length, resultaten: uit };
   }
 
-  // Bundel: alle open "op rekening"-aankopen van één bedrijf of klant in één factuur.
-  private async maakBundel(doel: { bedrijfId?: string; klantId?: string }) {
+  // Bundel de open "op rekening"-aankopen van één bedrijf of klant.
+  //  - Bedrijf (BTW-nummer): één factuur PER KALENDERMAAND; de lopende maand pas na het
+  //    einde van de maand (tenzij `lopendeMaand`).
+  //  - Particulier: alles in één rekening (bv. wanneer hij aan de kassa betaalt).
+  private async maakBundel(doel: { bedrijfId?: string; klantId?: string }, opties: { lopendeMaand?: boolean } = {}) {
     const verkopen = await this.prisma.verkoop.findMany({ where: this.openVerkoopWhere(doel), include: VERKOOP_INCLUDE, orderBy: { datum: 'asc' } });
     if (!verkopen.length) throw new BadRequestException('Geen openstaande aankopen op rekening voor deze klant.');
     const klant = this.klantVan(verkopen[0]);
     if (!klant) throw new BadRequestException('Klant niet gevonden.');
+    let groepen: VerkoopVol[][];
+    if (klant.btw) {
+      const huidig = brusselDatum(new Date()).slice(0, 7);
+      const perMaand = new Map<string, VerkoopVol[]>();
+      for (const v of verkopen) {
+        const m = brusselDatum(v.datum).slice(0, 7);
+        if (m === huidig && !opties.lopendeMaand) continue;
+        perMaand.set(m, [...(perMaand.get(m) ?? []), v]);
+      }
+      groepen = [...perMaand.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, g]) => g);
+      if (!groepen.length) throw new BadRequestException(`Er staan enkel aankopen van de lopende maand (${huidig}) open; die worden gefactureerd na het einde van de maand.`);
+    } else {
+      groepen = [verkopen];
+    }
+    const facturen: Awaited<ReturnType<typeof this.maakEenFactuur>>[] = [];
+    for (const g of groepen) facturen.push(await this.maakEenFactuur(doel, klant, g));
+    const aantal = groepen.reduce((s, g) => s + g.length, 0);
+    return { facturen, factuur: facturen[0], aantal, totaal: r2(facturen.reduce((s, f) => s + Number(f.totaalIncl), 0)) };
+  }
+
+  private async maakEenFactuur(doel: { bedrijfId?: string; klantId?: string }, klant: NonNullable<ReturnType<VerkoopfacturenService['klantVan']>>, verkopen: VerkoopVol[]) {
     const lijnen = this.lijnenVan(verkopen);
     const perBtw = this.perBtwVan(lijnen);
     const laatste = verkopen[verkopen.length - 1].datum;
@@ -276,7 +307,7 @@ export class VerkoopfacturenService {
       },
     });
     await this.prisma.verkoop.updateMany({ where: { id: { in: verkopen.map((v) => v.id) } }, data: { gefactureerd: true, gefactureerdOp: new Date() } });
-    return { factuur: f, aantal: verkopen.length, totaal: Number(f.totaalIncl) };
+    return f;
   }
 
   // Betaalde tickets waarvoor aan de kassa een factuur gevraagd werd en die nog geen
@@ -453,7 +484,8 @@ export class VerkoopfacturenService {
     const gebruikers = new Map((await this.prisma.gebruiker.findMany({ select: { id: true, naam: true } })).map((g) => [g.id, g.naam]));
     const BW: Record<string, string> = { CASH: 'cash', BANCONTACT: 'Bancontact', KAART: 'kaart', OVERSCHRIJVING: 'overschrijving', QR: 'QR', CADEAUBON: 'cadeaubon' };
 
-    type Regel = { datum: Date; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; telt: boolean; lid?: string | null; artikels?: string; factuurNummer?: string | null };
+    type BtwDeel = { pct: number; incl: number; btw: number };
+    type Regel = { datum: Date; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; telt: boolean; lid?: string | null; artikels?: string; factuurNummer?: string | null; gefactureerd?: boolean; factuurRef?: string | null; btw?: BtwDeel[] };
     const regels: Regel[] = [];
     for (const v of verkopen) {
       const artikels = v.lijnen.map((l) => `${Number(l.aantal) % 1 ? Number(l.aantal).toFixed(3) + ' kg' : Number(l.aantal) + '×'} ${l.product.naam}`).join(', ');
@@ -462,10 +494,25 @@ export class VerkoopfacturenService {
         omschrijving: `Aankoop op rekening${v.rekeningLid ? ` · ${v.rekeningLid.naam}` : ''}`,
         detail: artikels + (v.gebruiker?.naam ? ` · bediend door ${v.gebruiker.naam}` : ''),
         verkoopId: v.id, bedrag: v.geannuleerd ? 0 : r2(Number(v.totaal)),
-        status: v.geannuleerd ? 'geannuleerd' : v.factuur ? `in ${doel.bedrijfId || klant?.btwNummer ? 'factuur' : 'rekening'} ${v.factuur.nummer}` : 'nog te factureren',
+        status: v.geannuleerd ? 'geannuleerd'
+          : v.factuur ? `in ${doel.bedrijfId || klant?.btwNummer ? 'factuur' : 'rekening'} ${v.factuur.nummer}`
+          : v.gefactureerd ? `gefactureerd${v.factuurReferentie ? ` (${v.factuurReferentie})` : ' buiten de kassa'}`
+          : 'nog te factureren',
         telt: !v.geannuleerd,
-        // Voor de weergave per persoon per maand (bedrijven).
+        // Voor de weergave per persoon per maand (bedrijven) en de BTW-totalen.
         lid: v.rekeningLid?.naam ?? null, artikels, factuurNummer: v.factuur?.nummer ?? null,
+        gefactureerd: v.gefactureerd, factuurRef: v.factuurReferentie ?? null,
+        btw: (() => {
+          const m = new Map<number, BtwDeel>();
+          for (const l of v.lijnen) {
+            const pct = Number(l.btwPercentage);
+            const incl = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * Number(l.aantal);
+            const d = m.get(pct) ?? { pct, incl: 0, btw: 0 };
+            d.incl = r2(d.incl + incl); d.btw = r2(d.btw + Number(l.btwBedrag));
+            m.set(pct, d);
+          }
+          return [...m.values()];
+        })(),
       });
     }
     for (const f of facturen) {
@@ -508,7 +555,7 @@ export class VerkoopfacturenService {
       },
       van: van ?? null, tot: tot ?? null,
       vorigSaldo: vanD ? vorigSaldo : null,
-      regels: zichtbaar.map((r) => ({ datum: r.datum, soort: r.soort, omschrijving: r.omschrijving, detail: r.detail, verkoopId: r.verkoopId, bedrag: r.bedrag, status: r.status, saldo: r.saldo, lid: r.lid ?? null, artikels: r.artikels ?? null, factuurNummer: r.factuurNummer ?? null })),
+      regels: zichtbaar.map((r) => ({ datum: r.datum, soort: r.soort, omschrijving: r.omschrijving, detail: r.detail, verkoopId: r.verkoopId, bedrag: r.bedrag, status: r.status, saldo: r.saldo, lid: r.lid ?? null, artikels: r.artikels ?? null, factuurNummer: r.factuurNummer ?? null, gefactureerd: r.gefactureerd ?? false, factuurRef: r.factuurRef ?? null, btw: r.telt ? (r.btw ?? []) : [] })),
       totalen: {
         aankopen: r2(inPeriode.filter((r) => r.bedrag > 0).reduce((s, r) => s + r.bedrag, 0)),
         betalingen: r2(-inPeriode.filter((r) => r.bedrag < 0).reduce((s, r) => s + r.bedrag, 0)),
@@ -518,6 +565,33 @@ export class VerkoopfacturenService {
       },
       opmerking: isBedrijf ? 'Bedrijven betalen hun facturen per overschrijving; die betalingen worden in Scrada/de boekhouding opgevolgd en staan hier niet.' : null,
     };
+  }
+
+  // Een maand (van een bedrijf/klant) handmatig als gefactureerd aanduiden, bv. omdat de
+  // factuur buiten de kassa gemaakt werd; of die aanduiding weer weghalen. Aankopen die
+  // al in een factuur van de kassa zitten, blijven ongemoeid.
+  async markeerMaand(input: { sleutel: string; maand: string; gefactureerd: boolean; referentie?: string | null }) {
+    const doel = this.doelVanSleutel(input.sleutel);
+    if (!/^\d{4}-\d{2}$/.test(input.maand ?? '')) throw new BadRequestException('Geef een geldige maand (JJJJ-MM).');
+    const [j, m] = input.maand.split('-').map(Number);
+    const van = new Date(Date.UTC(j, m - 1, 1) - 3 * 3600_000); // ruim (tijdzone), daarna exact filteren
+    const tot = new Date(Date.UTC(j, m, 1) + 3 * 3600_000);
+    const basis: Prisma.VerkoopWhereInput = doel.bedrijfId
+      ? { rekeningBedrijfId: doel.bedrijfId, betaalwijze: null, kanaal: 'KASSA' }
+      : { klantId: doel.klantId, rekeningBedrijfId: null, betaalwijze: null, kanaal: 'KASSA' };
+    const kandidaten = await this.prisma.verkoop.findMany({
+      where: { ...basis, geannuleerd: false, factuurId: null, gefactureerd: !input.gefactureerd, datum: { gte: van, lt: tot } },
+      select: { id: true, datum: true },
+    });
+    const ids = kandidaten.filter((v) => brusselDatum(v.datum).slice(0, 7) === input.maand).map((v) => v.id);
+    if (!ids.length) throw new BadRequestException(input.gefactureerd ? 'Geen open aankopen in deze maand.' : 'Geen handmatig aangeduide aankopen in deze maand.');
+    await this.prisma.verkoop.updateMany({
+      where: { id: { in: ids } },
+      data: input.gefactureerd
+        ? { gefactureerd: true, gefactureerdOp: new Date(), factuurReferentie: input.referentie?.trim() || null }
+        : { gefactureerd: false, gefactureerdOp: null, factuurReferentie: null },
+    });
+    return { aantal: ids.length };
   }
 
   // --- open rekeningen: betalingen ontvangen aan de kassa (alle medewerkers) ----------

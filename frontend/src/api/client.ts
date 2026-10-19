@@ -208,7 +208,12 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
 // --- Klantrekeningen: overzicht per klant + uittreksel met lopend saldo ---
 export type RekeningKlant = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; aankopen: number; aantal: number; betaald: number; nogTeFactureren: number; saldo: number; laatste: string; isBedrijf: boolean };
-export type UittrekselRegel = { datum: string; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; saldo: number; lid?: string | null; artikels?: string | null; factuurNummer?: string | null };
+export type UittrekselRegel = {
+  datum: string; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; saldo: number;
+  lid?: string | null; artikels?: string | null; factuurNummer?: string | null;
+  gefactureerd?: boolean; factuurRef?: string | null; // handmatig als gefactureerd aangeduid (buiten de kassa)
+  btw?: { pct: number; incl: number; btw: number }[]; // per BTW-tarief (enkel aankopen die meetellen)
+};
 export type Uittreksel = {
   sleutel: string;
   klant: { naam: string; btwNummer: string | null; adres: string | null; email: string | null; telefoon: string | null; isBedrijf: boolean };
@@ -871,12 +876,18 @@ export type TeFactureren = { sleutel: string; naam: string; btwNummer: string | 
 export async function getTeFactureren(): Promise<TeFactureren[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/te-factureren`));
 }
-// Alle open aankopen van één klant/bedrijf bundelen tot één factuur (maandfactuur).
-export async function factureerRekening(sleutel: string): Promise<{ aantal: number; totaal: number; factuur: { id: string; nummer: string } }> {
-  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/factureer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel }) }));
+// Factureren: bedrijf = één factuur per afgelopen kalendermaand (lopende maand enkel met
+// lopendeMaand); particulier = één rekening met alle open aankopen.
+export type GemaakteFactuur = { id: string; nummer: string; periode: string | null; totaal: number };
+export async function factureerRekening(sleutel: string, lopendeMaand = false): Promise<{ aantal: number; totaal: number; factuur: { id: string; nummer: string }; facturen: GemaakteFactuur[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/factureer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel, lopendeMaand }) }));
 }
-// Maandafsluiting: elke open rekening één factuur.
-export async function factureerAlleRekeningen(): Promise<{ aantal: number; resultaten: { sleutel: string; naam: string; nummer?: string; totaal?: number; fout?: string }[] }> {
+// Een maand handmatig als (niet) gefactureerd aanduiden (factuur buiten de kassa).
+export async function markeerMaandGefactureerd(sleutel: string, maand: string, gefactureerd: boolean, referentie?: string): Promise<{ aantal: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/markeer-maand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sleutel, maand, gefactureerd, referentie }) }));
+}
+// Maandafsluiting: elke open rekening factureren (bedrijven: per afgelopen maand).
+export async function factureerAlleRekeningen(): Promise<{ aantal: number; resultaten: { sleutel: string; naam: string; nummer?: string; totaal?: number; fout?: string; overgeslagen?: string }[] }> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/factureer-alles`, { method: 'POST' }));
 }
 export type FactuurVerzendResultaat = { modus: string; aangemaakt: number; gevonden?: number; verstuurd: number; mislukt: number; correcties: number; geweigerd?: boolean; melding?: string; fout?: string };
@@ -1078,8 +1089,8 @@ export async function getBedrijfVerkopen(id: string, opties: { alle?: boolean; v
   const qs = q.toString();
   return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/verkopen${qs ? '?' + qs : ''}`));
 }
-export async function factureerBedrijf(id: string): Promise<{ aantal: number; totaal: number; factuur?: { id: string; nummer: string } }> {
-  return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/factureer`, { method: 'POST' }));
+export async function factureerBedrijf(id: string, lopendeMaand = false): Promise<{ aantal: number; totaal: number; factuur?: { id: string; nummer: string }; facturen?: GemaakteFactuur[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/rekeningen/bedrijven/${id}/factureer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lopendeMaand }) }));
 }
 // Een (nog niet gefactureerde) verkoop verschuiven naar een andere rekening (bedrijf + lid).
 export async function verplaatsRekeningVerkoop(verkoopId: string, bedrijfId: string, lidId: string): Promise<{ ok: true }> {

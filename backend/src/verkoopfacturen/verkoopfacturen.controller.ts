@@ -45,6 +45,14 @@ export class VerkoopfacturenController {
     return this.facturen.rekeningUittreksel(String(sleutel ?? ''), van || undefined, tot || undefined);
   }
 
+  // POST /verkoopfacturen/markeer-maand { sleutel, maand: "JJJJ-MM", gefactureerd, referentie? }
+  // -> een maand handmatig als (niet) gefactureerd aanduiden
+  @Recht('rekeningen', 'boekhouding')
+  @Post('markeer-maand')
+  markeerMaand(@Body() body: { sleutel: string; maand: string; gefactureerd: boolean; referentie?: string | null }) {
+    return this.facturen.markeerMaand({ sleutel: String(body?.sleutel ?? ''), maand: String(body?.maand ?? ''), gefactureerd: !!body?.gefactureerd, referentie: body?.referentie ?? null });
+  }
+
   // POST /verkoopfacturen/betaling { sleutel, betalingen:[{betaalwijze,bedrag}] }
   // -> betaling van een rekening ontvangen aan de kassa (alle medewerkers)
   @Post('betaling')
@@ -84,12 +92,13 @@ export class VerkoopfacturenController {
     return this.facturen.teFactureren();
   }
 
-  // POST /verkoopfacturen/factureer { sleutel } -> alle open aankopen van die klant/bedrijf in één factuur
+  // POST /verkoopfacturen/factureer { sleutel, lopendeMaand? } -> bedrijf: één factuur per
+  // afgelopen kalendermaand; particulier: één rekening met alle open aankopen
   @Post('factureer')
   @Recht('boekhouding')
-  async factureer(@Body() body: { sleutel: string }) {
-    const r = await this.facturen.maakBundelVoorSleutel(String(body?.sleutel ?? ''));
-    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer } };
+  async factureer(@Body() body: { sleutel: string; lopendeMaand?: boolean }) {
+    const r = await this.facturen.maakBundelVoorSleutel(String(body?.sleutel ?? ''), { lopendeMaand: !!body?.lopendeMaand });
+    return { aantal: r.aantal, totaal: r.totaal, factuur: { id: r.factuur.id, nummer: r.factuur.nummer }, facturen: r.facturen.map((f) => ({ id: f.id, nummer: f.nummer, periode: f.periode, totaal: Number(f.totaalIncl) })) };
   }
 
   // POST /verkoopfacturen/factureer-alles -> maandafsluiting: elke open rekening één factuur
