@@ -72,6 +72,8 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
   const [fout, setFout] = useState('');
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [toonFacturen, setToonFacturen] = useState(true);
+  // Bedrijven: standaard per maand en per persoon (wat op welke maandfactuur hoort).
+  const [weergave, setWeergave] = useState<'persoon' | 'chrono' | null>(null);
 
   async function laad(v = van, t = tot) {
     setFout('');
@@ -84,6 +86,9 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
   if (ticket) return <TicketWeergave ticket={ticket} autoPrint={false} onNieuw={() => setTicket(null)} nieuwLabel="← Terug naar het overzicht" />;
   if (!u) return <div>{fout || 'Laden…'} <Link to="/kassa/klantrekeningen">← Klantrekeningen</Link></div>;
   const k = u.klant;
+  const heeftLeden = u.regels.some((r) => r.soort === 'AANKOOP' && r.lid);
+  const toon = weergave ?? (k.isBedrijf && heeftLeden ? 'persoon' : 'chrono');
+  const openTicket = async (id: string) => { try { setTicket(await getTicket(id)); } catch (e) { setFout(e instanceof Error ? e.message : 'Ticket ophalen mislukt'); } };
 
   function periode(maanden: number | null) {
     if (maanden === null) { setVan(''); setTot(''); laad('', ''); return; }
@@ -130,10 +135,21 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
       </div>
       {u.opmerking && <p style={{ fontSize: 13, color: '#6b7280' }}>{u.opmerking}</p>}
 
-      <label className="niet-afdrukken" style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', margin: '10px 0 4px' }}>
-        <input type="checkbox" checked={toonFacturen} onChange={(e) => setToonFacturen(e.target.checked)} /> ook de opgemaakte rekeningen/facturen tonen
-      </label>
-      <div style={{ overflowX: 'auto' }}>
+      <div className="niet-afdrukken" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 4px' }}>
+        {heeftLeden && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button onClick={() => setWeergave('persoon')} style={{ ...btnMini, fontWeight: toon === 'persoon' ? 700 : 400, background: toon === 'persoon' ? '#111827' : '#fff', color: toon === 'persoon' ? '#fff' : '#111827' }}>Per maand en per persoon</button>
+            <button onClick={() => setWeergave('chrono')} style={{ ...btnMini, fontWeight: toon === 'chrono' ? 700 : 400, background: toon === 'chrono' ? '#111827' : '#fff', color: toon === 'chrono' ? '#fff' : '#111827' }}>Alles chronologisch</button>
+          </div>
+        )}
+        {toon === 'chrono' && (
+          <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="checkbox" checked={toonFacturen} onChange={(e) => setToonFacturen(e.target.checked)} /> ook de opgemaakte rekeningen/facturen tonen
+          </label>
+        )}
+      </div>
+      {toon === 'persoon' && <PerPersoon regels={u.regels} onTicket={openTicket} />}
+      {toon === 'chrono' && <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 720 }}>
           <thead>
             <tr style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', borderBottom: '2px solid #e5e7eb' }}>
@@ -181,8 +197,65 @@ function UittrekselPagina({ sleutel }: { sleutel: string }) {
             </tfoot>
           )}
         </table>
-      </div>
+      </div>}
       <style>{'@media print { nav, .niet-afdrukken { display: none !important; } main { padding: 0 !important; } .uittreksel { max-width: none !important; } }'}</style>
+    </div>
+  );
+}
+
+// Bedrijven: per kalendermaand en per personeelslid de aankopen, met subtotalen en
+// de maandfactuur waarin ze zitten (of "nog te factureren").
+function PerPersoon({ regels, onTicket }: { regels: Uittreksel['regels']; onTicket: (id: string) => void }) {
+  const aankopen = regels.filter((r) => r.soort === 'AANKOOP' && r.status !== 'geannuleerd');
+  const maanden = [...new Set(aankopen.map((r) => r.datum.slice(0, 7)))].sort().reverse();
+  if (!maanden.length) return <p style={{ color: '#6b7280' }}>Geen aankopen in deze periode.</p>;
+  const maandNaam = (m: string) => new Date(m + '-15T12:00:00').toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {maanden.map((m) => {
+        const inMaand = aankopen.filter((r) => r.datum.slice(0, 7) === m);
+        const facturen = [...new Set(inMaand.map((r) => r.factuurNummer).filter(Boolean))] as string[];
+        const open = inMaand.filter((r) => !r.factuurNummer);
+        const leden = [...new Set(inMaand.map((r) => r.lid ?? '(geen personeelslid)'))].sort((a, b) => a.localeCompare(b, 'nl'));
+        return (
+          <section key={m} style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', breakInside: 'avoid' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+              <strong style={{ fontSize: 16, textTransform: 'capitalize' }}>{maandNaam(m)}</strong>
+              <span style={{ fontSize: 13, color: '#374151' }}>
+                {facturen.length ? `factuur ${facturen.join(', ')}` : ''}
+                {facturen.length && open.length ? ' · ' : ''}
+                {open.length ? <span style={{ color: '#b45309', fontWeight: 600 }}>{euro(open.reduce((s, r) => s + r.bedrag, 0))} nog te factureren</span> : ''}
+              </span>
+              <strong style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{euro(inMaand.reduce((s, r) => s + r.bedrag, 0))}</strong>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 600 }}>
+                <tbody>
+                  {leden.map((lid) => {
+                    const rijen = inMaand.filter((r) => (r.lid ?? '(geen personeelslid)') === lid);
+                    return [
+                      <tr key={lid + '-kop'} style={{ background: '#fff' }}>
+                        <td colSpan={3} style={{ ...td, fontWeight: 700, paddingTop: 10 }}>{lid} <span style={{ fontWeight: 400, color: '#6b7280', fontSize: 13 }}>· {rijen.length} aankoop{rijen.length === 1 ? '' : 'en'}</span></td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 700, paddingTop: 10, fontVariantNumeric: 'tabular-nums' }}>{euro(rijen.reduce((s, r) => s + r.bedrag, 0))}</td>
+                        <td className="niet-afdrukken" style={td} />
+                      </tr>,
+                      ...rijen.map((r, i) => (
+                        <tr key={lid + i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ ...td, paddingLeft: 18, whiteSpace: 'nowrap', color: '#374151' }}>{datumTijd(r.datum)}</td>
+                          <td style={{ ...td, color: '#374151' }}>{r.artikels ?? r.detail}</td>
+                          <td style={{ ...td, fontSize: 12, color: r.factuurNummer ? '#6b7280' : '#b45309', whiteSpace: 'nowrap' }}>{r.factuurNummer ? `factuur ${r.factuurNummer}` : 'nog te factureren'}</td>
+                          <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{euro(r.bedrag)}</td>
+                          <td className="niet-afdrukken" style={{ ...td, textAlign: 'right' }}>{r.verkoopId && <button onClick={() => onTicket(r.verkoopId!)} style={btnMini}>Ticket</button>}</td>
+                        </tr>
+                      )),
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

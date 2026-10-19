@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import {
   getRekeningOverzicht, nieuwRekeningBedrijf, nieuwRekeningLid,
   updateRekeningBedrijf, updateRekeningLid, verplaatsRekeningVerkoop,
@@ -176,6 +177,7 @@ export function Rekeningen() {
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>
               <div style={{ fontWeight: 700, fontSize: 18, color: (b.openstaand ?? 0) > 0 ? '#b45309' : '#166534' }}>{euro(b.openstaand)}</div>
             </div>
+            <Link to={`/kassa/klantrekeningen/${encodeURIComponent('b:' + b.id)}`} style={{ ...btnMini, textDecoration: 'none', color: '#0d4589' }} title="Aankopen per maand en per persoon">📄 Per persoon</Link>
             <button onClick={() => bewerkBedrijf(b)} style={btnMini}>✎ Bewerken</button>
             <button onClick={() => toonVerkopen(b.id)} style={btnMini}>{verkopen[b.id] ? 'Verberg' : 'Verkopen'}</button>
             <button onClick={() => factureer(b)} disabled={(b.openstaand ?? 0) <= 0} style={{ ...btnBlauw, opacity: (b.openstaand ?? 0) <= 0 ? 0.5 : 1 }}>Factureren</button>

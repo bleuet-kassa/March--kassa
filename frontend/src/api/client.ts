@@ -208,7 +208,7 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
 // --- Klantrekeningen: overzicht per klant + uittreksel met lopend saldo ---
 export type RekeningKlant = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; aankopen: number; aantal: number; betaald: number; nogTeFactureren: number; saldo: number; laatste: string; isBedrijf: boolean };
-export type UittrekselRegel = { datum: string; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; saldo: number };
+export type UittrekselRegel = { datum: string; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; saldo: number; lid?: string | null; artikels?: string | null; factuurNummer?: string | null };
 export type Uittreksel = {
   sleutel: string;
   klant: { naam: string; btwNummer: string | null; adres: string | null; email: string | null; telefoon: string | null; isBedrijf: boolean };

@@ -453,7 +453,7 @@ export class VerkoopfacturenService {
     const gebruikers = new Map((await this.prisma.gebruiker.findMany({ select: { id: true, naam: true } })).map((g) => [g.id, g.naam]));
     const BW: Record<string, string> = { CASH: 'cash', BANCONTACT: 'Bancontact', KAART: 'kaart', OVERSCHRIJVING: 'overschrijving', QR: 'QR', CADEAUBON: 'cadeaubon' };
 
-    type Regel = { datum: Date; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; telt: boolean };
+    type Regel = { datum: Date; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; telt: boolean; lid?: string | null; artikels?: string; factuurNummer?: string | null };
     const regels: Regel[] = [];
     for (const v of verkopen) {
       const artikels = v.lijnen.map((l) => `${Number(l.aantal) % 1 ? Number(l.aantal).toFixed(3) + ' kg' : Number(l.aantal) + '×'} ${l.product.naam}`).join(', ');
@@ -464,6 +464,8 @@ export class VerkoopfacturenService {
         verkoopId: v.id, bedrag: v.geannuleerd ? 0 : r2(Number(v.totaal)),
         status: v.geannuleerd ? 'geannuleerd' : v.factuur ? `in ${doel.bedrijfId || klant?.btwNummer ? 'factuur' : 'rekening'} ${v.factuur.nummer}` : 'nog te factureren',
         telt: !v.geannuleerd,
+        // Voor de weergave per persoon per maand (bedrijven).
+        lid: v.rekeningLid?.naam ?? null, artikels, factuurNummer: v.factuur?.nummer ?? null,
       });
     }
     for (const f of facturen) {
@@ -506,7 +508,7 @@ export class VerkoopfacturenService {
       },
       van: van ?? null, tot: tot ?? null,
       vorigSaldo: vanD ? vorigSaldo : null,
-      regels: zichtbaar.map((r) => ({ datum: r.datum, soort: r.soort, omschrijving: r.omschrijving, detail: r.detail, verkoopId: r.verkoopId, bedrag: r.bedrag, status: r.status, saldo: r.saldo })),
+      regels: zichtbaar.map((r) => ({ datum: r.datum, soort: r.soort, omschrijving: r.omschrijving, detail: r.detail, verkoopId: r.verkoopId, bedrag: r.bedrag, status: r.status, saldo: r.saldo, lid: r.lid ?? null, artikels: r.artikels ?? null, factuurNummer: r.factuurNummer ?? null })),
       totalen: {
         aankopen: r2(inPeriode.filter((r) => r.bedrag > 0).reduce((s, r) => s + r.bedrag, 0)),
         betalingen: r2(-inPeriode.filter((r) => r.bedrag < 0).reduce((s, r) => s + r.bedrag, 0)),
