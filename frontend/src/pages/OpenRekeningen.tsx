@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import { getOpenRekeningen, registreerRekeningBetaling, type OpenRekening } from '../api/client';
 
 const euro = (n: number) => '€ ' + Number(n).toFixed(2);
@@ -81,7 +82,11 @@ export function OpenRekeningen() {
         <div key={g.sleutel} style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14, marginBottom: 10 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 180 }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{g.naam}</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>
+                {g.naam}{' '}
+                {/* Volledig overzicht van deze klant: elke aankoop met datum, rekeningen en betalingen. */}
+                <Link to={`/kassa/klantrekeningen/${encodeURIComponent(g.sleutel)}`} style={{ fontSize: 13, fontWeight: 500 }}>📄 overzicht</Link>
+              </div>
               <div style={{ fontSize: 12, color: '#6b7280' }}>
                 {g.btwNummer ? g.btwNummer : 'particulier'}{g.telefoon ? ` · ☎ ${g.telefoon}` : ''}{g.adres ? ` · ${g.adres}` : ''} · {g.items.length} open post(en)
               </div>

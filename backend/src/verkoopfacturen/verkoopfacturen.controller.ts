@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { VerkoopfacturenService, type FactuurInstellingen } from './verkoopfacturen.service';
 import { Recht } from '../auth/auth.guard';
 
@@ -29,6 +29,20 @@ export class VerkoopfacturenController {
   @Get('open-rekeningen')
   openRekeningen() {
     return this.facturen.openRekeningen();
+  }
+
+  // GET /verkoopfacturen/rekening-klanten -> alle klanten/bedrijven met rekeninghistoriek + saldo
+  @Recht('open_rekeningen', 'rekeningen', 'boekhouding')
+  @Get('rekening-klanten')
+  rekeningKlanten() {
+    return this.facturen.rekeningKlanten();
+  }
+
+  // GET /verkoopfacturen/rekening-uittreksel?sleutel=k:…|b:…&van&tot -> uittreksel met lopend saldo
+  @Recht('open_rekeningen', 'rekeningen', 'boekhouding')
+  @Get('rekening-uittreksel')
+  rekeningUittreksel(@Query('sleutel') sleutel: string, @Query('van') van?: string, @Query('tot') tot?: string) {
+    return this.facturen.rekeningUittreksel(String(sleutel ?? ''), van || undefined, tot || undefined);
   }
 
   // POST /verkoopfacturen/betaling { sleutel, betalingen:[{betaalwijze,bedrag}] }

@@ -206,6 +206,27 @@ export async function verwijderVerkoop(id: string): Promise<{ ok: true; id: stri
 // --- Auth (verkoper) ---
 // rechten = effectieve toegangen; rechtenIngesteld = false zolang de standaard geldt.
 export type Personeelslid = { id: string; naam: string; email: string; rol: string; actief: boolean; rechten: string[]; rechtenIngesteld: boolean; tankkaart: boolean; tankkaartNummer: string | null; tankkaartHeeftCode: boolean };
+// --- Klantrekeningen: overzicht per klant + uittreksel met lopend saldo ---
+export type RekeningKlant = { sleutel: string; naam: string; btwNummer: string | null; telefoon: string | null; aankopen: number; aantal: number; betaald: number; nogTeFactureren: number; saldo: number; laatste: string; isBedrijf: boolean };
+export type UittrekselRegel = { datum: string; soort: 'AANKOOP' | 'FACTUUR' | 'BETALING'; omschrijving: string; detail: string; verkoopId: string | null; bedrag: number; status: string; saldo: number };
+export type Uittreksel = {
+  sleutel: string;
+  klant: { naam: string; btwNummer: string | null; adres: string | null; email: string | null; telefoon: string | null; isBedrijf: boolean };
+  van: string | null; tot: string | null; vorigSaldo: number | null;
+  regels: UittrekselRegel[];
+  totalen: { aankopen: number; betalingen: number; aantalAankopen: number; eindSaldo: number; nogTeFactureren: number };
+  opmerking: string | null;
+};
+export async function getRekeningKlanten(): Promise<RekeningKlant[]> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/rekening-klanten`));
+}
+export async function getRekeningUittreksel(sleutel: string, van?: string, tot?: string): Promise<Uittreksel> {
+  const q = new URLSearchParams({ sleutel });
+  if (van) q.set('van', van);
+  if (tot) q.set('tot', tot);
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/rekening-uittreksel?${q.toString()}`));
+}
+
 // --- Uurroosters (planning) ---
 export type Dienst = { id: string; gebruikerId: string; dag: string; start: string; eind: string; pauzeMin: number; locatie: string | null; opmerking: string | null; uren: number };
 export type DienstInput = { gebruikerId: string; dag: string; start: string; eind: string; pauzeMin?: number; locatie?: string | null; opmerking?: string | null };
