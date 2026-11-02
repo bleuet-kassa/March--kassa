@@ -26,7 +26,7 @@ export class WebshopService {
     return this.prisma.product.findMany({
       where: { ...WEBSHOP_WHERE, ...(afdelingId ? { afdelingId } : {}) },
       select: {
-        id: true, naam: true, verkoopprijs: true, isAlcohol: true, eenheid: true,
+        id: true, naam: true, omschrijving: true, verkoopprijs: true, isAlcohol: true, eenheid: true,
         allergenen: true, afdelingId: true, fotoUrl: true,
         afdeling: { select: { id: true, naam: true, volgorde: true } },
         categorie: { select: { id: true, naam: true } },

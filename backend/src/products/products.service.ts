@@ -6,6 +6,7 @@ import { genereerBarcode } from '../common/barcode';
 // Gegevens om een product aan te maken of te bewerken (vanuit het beheerscherm).
 export type ProductInput = {
   naam: string;
+  omschrijving?: string | null;
   barcode?: string | null;
   interneCode?: string | null;
   verkoopprijs: number;
@@ -34,6 +35,7 @@ export class ProductsService {
           ? {
               OR: [
                 { naam: { contains: zoek, mode: 'insensitive' } },
+                { omschrijving: { contains: zoek, mode: 'insensitive' } },
                 { barcode: { contains: zoek } },
                 { interneCode: { contains: zoek, mode: 'insensitive' } },
               ],
@@ -92,6 +94,14 @@ export class ProductsService {
     return genereerBarcode(max + 1);
   }
 
+  // Omschrijving opschonen: leeg = geen omschrijving; niet meegestuurd = ongewijzigd.
+  private omschrijving(waarde: string | null | undefined): string | null | undefined {
+    if (waarde === undefined) return undefined;
+    const tekst = (waarde ?? '').trim();
+    if (tekst.length > 2000) throw new BadRequestException('De omschrijving is te lang (maximaal 2000 tekens).');
+    return tekst || null;
+  }
+
   async create(input: ProductInput) {
     await this.controleerUniek(input.barcode, input.interneCode, null);
     const barcode = input.barcode?.trim() || (await this.nieuweBarcode());
@@ -99,6 +109,7 @@ export class ProductsService {
     return this.prisma.product.create({
       data: {
         naam: input.naam,
+        omschrijving: this.omschrijving(input.omschrijving),
         barcode,
         interneCode: input.interneCode || null,
         verkoopprijs: new Prisma.Decimal(input.verkoopprijs),
@@ -163,13 +174,16 @@ export class ProductsService {
       where: { id },
       data: {
         naam: input.naam,
+        omschrijving: this.omschrijving(input.omschrijving),
         barcode: input.barcode?.trim() || null,
-        interneCode: input.interneCode || null,
+        // Niet meegestuurd = ongewijzigd: het productformulier kent deze velden niet, en de
+        // kassaknoppen (DIV6, CADEAU, PRIJSKG…) hangen aan de interne code.
+        ...(input.interneCode !== undefined ? { interneCode: input.interneCode || null } : {}),
         verkoopprijs: new Prisma.Decimal(input.verkoopprijs),
         inkoopprijs: input.inkoopprijs != null ? new Prisma.Decimal(input.inkoopprijs) : null,
         isAlcohol: input.isAlcohol ?? false,
         eenheid: input.eenheid ?? Eenheid.STUK,
-        allergenen: input.allergenen || null,
+        ...(input.allergenen !== undefined ? { allergenen: input.allergenen || null } : {}),
         webshopZichtbaar: input.webshopZichtbaar ?? false,
         fotoUrl: input.fotoUrl ?? null,
         btwTariefId: input.btwTariefId,

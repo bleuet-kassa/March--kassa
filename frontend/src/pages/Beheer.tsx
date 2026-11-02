@@ -107,7 +107,10 @@ export function Beheer() {
             return (
               <tr key={p.id} onClick={() => setBewerken({ mode: 'edit', product: p })}
                 style={{ borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}>
-                <td style={{ padding: '8px 4px' }}>{p.naam}{p.isAlcohol && ' 🍷'}</td>
+                <td style={{ padding: '8px 4px', maxWidth: 280 }}>
+                  {p.naam}{p.isAlcohol && ' 🍷'}
+                  {p.omschrijving && <div style={{ fontSize: 12, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.omschrijving}>{p.omschrijving}</div>}
+                </td>
                 <td style={{ padding: '8px 4px', fontFamily: 'monospace', fontSize: 13 }}>{p.barcode}</td>
                 <td style={{ padding: '4px' }} onClick={(e) => e.stopPropagation()}>
                   {/* Categorie meteen hier wijzigen; de afdeling volgt de categorie. */}
@@ -149,6 +152,7 @@ export function ProductForm({
   onMetaWijzig: () => Promise<void>;
 }) {
   const [naam, setNaam] = useState(product?.naam ?? '');
+  const [omschrijving, setOmschrijving] = useState(product?.omschrijving ?? '');
   const [barcode, setBarcode] = useState(product?.barcode ?? prefillBarcode ?? '');
   const [verkoop, setVerkoop] = useState(product ? String(Number(product.verkoopprijs)) : '');
   const [inkoop, setInkoop] = useState(product?.inkoopprijs != null ? String(Number(product.inkoopprijs)) : '');
@@ -194,6 +198,7 @@ export function ProductForm({
     setBezig(true);
     const input: ProductInput = {
       naam: naam.trim(),
+      omschrijving: omschrijving.trim() || null,
       barcode: barcode.trim() || null,
       verkoopprijs: num(verkoop),
       inkoopprijs: inkoop ? num(inkoop) : null,
@@ -258,6 +263,9 @@ export function ProductForm({
 
       <label style={muted}>Naam *</label>
       <input value={naam} onChange={(e) => setNaam(e.target.value)} style={inp} autoFocus />
+
+      <label style={muted}>Omschrijving (optioneel, ook zichtbaar in de webshop)</label>
+      <textarea value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={2000} rows={3} placeholder="bv. druivenras, herkomst, smaak, bewaartip…" style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
 
       <label style={muted}>Barcode</label>
       <div style={{ display: 'flex', gap: 8 }}>

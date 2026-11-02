@@ -277,6 +277,7 @@ export function WebshopPubliek() {
                       </div>
                       <div className="shop-body">
                         <div className="shop-naam">{p.naam}{p.isAlcohol && ' 🍷'}</div>
+                        {p.omschrijving && <div className="shop-omschrijving">{p.omschrijving}</div>}
                         <div className="shop-prijs">{euro(Number(p.verkoopprijs))}{p.eenheid === 'KG' ? ' /kg' : ''}</div>
                         {aantal > 0
                           ? <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>

@@ -474,6 +474,7 @@ export type Meta = {
 };
 
 export type ProductVol = Product & {
+  omschrijving?: string | null;
   interneCode: string | null;
   inkoopprijs: string | null;
   eenheid: string;
@@ -510,6 +511,7 @@ export async function wijzigStatiegeldSoort(id: string, input: { naam?: string; 
 
 export type ProductInput = {
   naam: string;
+  omschrijving?: string | null;
   barcode?: string | null;
   interneCode?: string | null;
   verkoopprijs: number;
@@ -593,7 +595,7 @@ export async function setProductWebshop(id: string, zichtbaar: boolean): Promise
 
 // --- Publieke webshop-catalogus (enkel actief + webshopZichtbaar) ---
 export type WebshopProduct = {
-  id: string; naam: string; verkoopprijs: string; isAlcohol: boolean; eenheid: string;
+  id: string; naam: string; omschrijving?: string | null; verkoopprijs: string; isAlcohol: boolean; eenheid: string;
   allergenen: string | null; afdelingId: string | null; fotoUrl: string | null;
   afdeling: { id: string; naam: string; volgorde: number } | null;
   categorie: { id: string; naam: string } | null;

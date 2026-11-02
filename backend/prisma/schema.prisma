@@ -170,6 +170,7 @@ model Leverancier {
 model Product {
   id           String   @id @default(cuid())
   naam         String
+  omschrijving String?  // vrije tekst bij het artikel (ook zichtbaar in de webshop)
   interneCode  String?  @unique
   barcode      String?  @unique // EAN of eigen barcode
   verkoopprijs Decimal  @db.Decimal(10, 2)

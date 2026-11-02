@@ -1634,6 +1634,7 @@ function NieuwArtikelModal({
   const [catId, setCatId] = useState('');
   const [barcode, setBarcode] = useState(initBarcode);
   const [naam, setNaam] = useState('');
+  const [omschrijving, setOmschrijving] = useState('');
   const [prijs, setPrijs] = useState('');
   const [btwId, setBtwId] = useState(btwTarieven[0]?.id ?? '');
   const [eenheid, setEenheid] = useState('STUK');
@@ -1652,6 +1653,7 @@ function NieuwArtikelModal({
     try {
       const input: ProductInput = {
         naam: naam.trim(),
+        omschrijving: omschrijving.trim() || null,
         barcode: barcode.trim() || null,
         verkoopprijs: num(prijs),
         eenheid,
@@ -1700,6 +1702,9 @@ function NieuwArtikelModal({
 
         <div style={veldLabel}>Naam</div>
         <input value={naam} onChange={(e) => setNaam(e.target.value)} style={veld} />
+
+        <div style={veldLabel}>Omschrijving (optioneel, ook zichtbaar in de webshop)</div>
+        <textarea value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={2000} rows={2} style={{ ...veld, resize: 'vertical', fontFamily: 'inherit' }} />
 
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
