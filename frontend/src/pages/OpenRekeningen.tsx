@@ -4,9 +4,11 @@ import { getOpenRekeningen, registreerRekeningBetaling, type OpenRekening } from
 
 const euro = (n: number) => '€ ' + Number(n).toFixed(2);
 const datumNl = (s: string) => new Date(s).toLocaleDateString('nl-BE');
-// Particulier (geen BTW-nummer) met een rekening die al langer dan een maand open staat.
+// Bedrijf op rekening: met BTW-nummer, of een rekeningbedrijf (sleutel b:…).
+const isBedrijf = (g: OpenRekening) => !!g.btwNummer || g.sleutel.startsWith('b:');
+// Particulier met een rekening die al langer dan een maand open staat.
 function teLaat(g: OpenRekening) {
-  if (g.btwNummer || !g.oudste) return false;
+  if (isBedrijf(g) || !g.oudste) return false;
   const grens = new Date(); grens.setMonth(grens.getMonth() - 1);
   return new Date(g.oudste) < grens;
 }
@@ -72,7 +74,7 @@ export function OpenRekeningen() {
         <span style={{ color: '#6b7280' }}>Totaal openstaand: <strong>{euro(totaalOpen)}</strong> · {lijst.length} klant(en)</span>
       </div>
       <p style={{ color: '#6b7280', marginTop: 4, fontSize: 14 }}>
-        Particulieren die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag. Aankopen die nog niet gefactureerd zijn, worden bij de betaling automatisch gebundeld tot één rekening. Bedrijven (met BTW-nummer) betalen hun factuur per overschrijving, niet aan de kassa.
+        Particulieren die op rekening kochten, betalen hier hun rekening: met Bancontact, cash, overschrijving, cadeaubon… (nooit opnieuw op rekening). De betaling komt op de dagafsluiting van vandaag. Aankopen die nog niet gefactureerd zijn, worden bij de betaling automatisch gebundeld tot één rekening. Bedrijven op rekening betalen hun factuur per overschrijving, niet aan de kassa.
       </p>
       <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek klant…" style={{ ...inp, width: '100%', maxWidth: 360, marginBottom: 12 }} />
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
@@ -88,7 +90,7 @@ export function OpenRekeningen() {
                 <Link to={`/kassa/klantrekeningen/${encodeURIComponent(g.sleutel)}`} style={{ fontSize: 13, fontWeight: 500 }}>📄 overzicht</Link>
               </div>
               <div style={{ fontSize: 12, color: '#6b7280' }}>
-                {g.btwNummer ? g.btwNummer : 'particulier'}{g.telefoon ? ` · ☎ ${g.telefoon}` : ''}{g.adres ? ` · ${g.adres}` : ''} · {g.items.length} open post(en)
+                {g.btwNummer ? g.btwNummer : isBedrijf(g) ? 'bedrijf' : 'particulier'}{g.telefoon ? ` · ☎ ${g.telefoon}` : ''}{g.adres ? ` · ${g.adres}` : ''} · {g.items.length} open post(en)
               </div>
               {teLaat(g) && (
                 <div style={{ fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>⚠ Open sinds {datumNl(g.oudste!)} — ouder dan een maand</div>
@@ -98,8 +100,8 @@ export function OpenRekeningen() {
               <div style={{ fontSize: 12, color: '#6b7280' }}>Openstaand</div>
               <div style={{ fontWeight: 700, fontSize: 20, color: '#b45309' }}>{euro(g.open)}</div>
             </div>
-            {g.btwNummer
-              ? <div style={{ fontSize: 12, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '6px 10px', maxWidth: 220 }}>Bedrijf: betaalt per <strong>overschrijving</strong> op de factuur (via Scrada). Geen kassabetaling.</div>
+            {isBedrijf(g)
+              ? <div style={{ fontSize: 12, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '6px 10px', maxWidth: 220 }}>Bedrijf: betaalt per <strong>overschrijving</strong> op de factuur. Geen kassabetaling.</div>
               : actief !== g.sleutel && <button onClick={() => open(g)} style={btnGroen}>Betaling ontvangen</button>}
           </div>
 

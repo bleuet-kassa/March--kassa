@@ -300,7 +300,7 @@ function Ticket({ rapport, afgesloten }: { rapport: Dagrapport; afgesloten: bool
           <hr />
           <div style={{ fontWeight: 600, fontSize: 13 }}>Facturen bedrijven ({rapport.facturen.length})</div>
           {rapport.facturen.map((f) => (
-            <div key={f.ref} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, gap: 8 }}>
+            <div key={`${f.ref}|${f.klant}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, gap: 8 }}>
               <span>{f.ref} · {f.klant}</span><span style={{ whiteSpace: 'nowrap' }}>{euro(f.incl)}</span>
             </div>
           ))}

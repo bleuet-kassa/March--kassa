@@ -260,7 +260,7 @@ function PerPersoon({ regels, onTicket, sleutel, onGewijzigd, onFout }: { regels
   async function markeer(m: string, aan: boolean) {
     let ref: string | undefined;
     if (aan) {
-      const r = window.prompt(`${maandNaam(m)} aanduiden als gefactureerd.\n\nFactuurnummer of referentie (optioneel), bv. het nummer in Scrada:`, '');
+      const r = window.prompt(`${maandNaam(m)} aanduiden als gefactureerd.\n\nDe bedrijfsaankopen tellen mee in de dagontvangsten van de dag die nu open staat. Eens die dag afgesloten is, kan je dit niet meer wissen.\n\nFactuurnummer of referentie (optioneel), bv. het nummer in Scrada:`, '');
       if (r === null) return;
       ref = r.trim() || undefined;
     } else if (!window.confirm(`De aanduiding "gefactureerd" voor ${maandNaam(m)} weghalen? De aankopen staan dan terug als "nog te factureren".`)) return;

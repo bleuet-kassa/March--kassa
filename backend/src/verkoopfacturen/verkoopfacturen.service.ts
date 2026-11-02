@@ -196,10 +196,11 @@ export class VerkoopfacturenService {
   // Enkel kassaverkopen: een webshopbestelling staat ook op naam zonder betaalwijze
   // (betalen bij afhaling), maar is geen aankoop op rekening.
   private openVerkoopWhere(doel?: { bedrijfId?: string; klantId?: string }): Prisma.VerkoopWhereInput {
-    const basis: Prisma.VerkoopWhereInput = { gefactureerd: false, geannuleerd: false, factuurId: null, kanaal: 'KASSA' };
+    // Direct betaald (ook door een bedrijf) is nooit "open": die aankoop hoort op geen maandfactuur.
+    const basis: Prisma.VerkoopWhereInput = { gefactureerd: false, geannuleerd: false, factuurId: null, kanaal: 'KASSA', betaalwijze: null };
     if (doel?.bedrijfId) return { ...basis, rekeningBedrijfId: doel.bedrijfId };
-    if (doel?.klantId) return { ...basis, klantId: doel.klantId, rekeningBedrijfId: null, betaalwijze: null };
-    return { ...basis, OR: [{ rekeningBedrijfId: { not: null } }, { klantId: { not: null }, betaalwijze: null }] };
+    if (doel?.klantId) return { ...basis, klantId: doel.klantId, rekeningBedrijfId: null };
+    return { ...basis, OR: [{ rekeningBedrijfId: { not: null } }, { klantId: { not: null } }] };
   }
   private sleutelVanVerkoop(v: { rekeningBedrijfId: string | null; klantId: string | null }) {
     return v.rekeningBedrijfId ? `b:${v.rekeningBedrijfId}` : `k:${v.klantId}`;
@@ -251,8 +252,8 @@ export class VerkoopfacturenService {
   }
 
   // Bundel de open "op rekening"-aankopen van één bedrijf of klant.
-  //  - Bedrijf (BTW-nummer): één factuur PER KALENDERMAAND; de lopende maand pas na het
-  //    einde van de maand (tenzij `lopendeMaand`).
+  //  - Bedrijf (rekeningbedrijf of BTW-nummer): één factuur PER KALENDERMAAND; de lopende
+  //    maand pas na het einde van de maand (tenzij `lopendeMaand`).
   //  - Particulier: alles in één rekening (bv. wanneer hij aan de kassa betaalt).
   private async maakBundel(doel: { bedrijfId?: string; klantId?: string }, opties: { lopendeMaand?: boolean } = {}) {
     const verkopen = await this.prisma.verkoop.findMany({ where: this.openVerkoopWhere(doel), include: VERKOOP_INCLUDE, orderBy: { datum: 'asc' } });
@@ -260,7 +261,7 @@ export class VerkoopfacturenService {
     const klant = this.klantVan(verkopen[0]);
     if (!klant) throw new BadRequestException('Klant niet gevonden.');
     let groepen: VerkoopVol[][];
-    if (klant.btw) {
+    if (klant.btw || klant.bedrijfId) {
       const huidig = brusselDatum(new Date()).slice(0, 7);
       const perMaand = new Map<string, VerkoopVol[]>();
       for (const v of verkopen) {
@@ -457,7 +458,7 @@ export class VerkoopfacturenService {
       if (b.datum > k.laatste) k.laatste = b.datum;
     }
     return [...m.values()]
-      .map((k) => ({ ...k, saldo: r2(k.aankopen - k.betaald), isBedrijf: !!k.btwNummer }))
+      .map((k) => ({ ...k, saldo: r2(k.aankopen - k.betaald), isBedrijf: !!k.btwNummer || k.sleutel.startsWith('b:') }))
       .sort((a, b) => a.naam.localeCompare(b.naam, 'nl'));
   }
 
@@ -569,7 +570,9 @@ export class VerkoopfacturenService {
 
   // Een maand (van een bedrijf/klant) handmatig als gefactureerd aanduiden, bv. omdat de
   // factuur buiten de kassa gemaakt werd; of die aanduiding weer weghalen. Aankopen die
-  // al in een factuur van de kassa zitten, blijven ongemoeid.
+  // al in een factuur van de kassa zitten, blijven ongemoeid. Bedrijfsaankopen tellen
+  // mee op de dagafsluiting van de dag van de aanduiding; eens die dag afgesloten is,
+  // ligt de aanduiding vast.
   async markeerMaand(input: { sleutel: string; maand: string; gefactureerd: boolean; referentie?: string | null }) {
     const doel = this.doelVanSleutel(input.sleutel);
     if (!/^\d{4}-\d{2}$/.test(input.maand ?? '')) throw new BadRequestException('Geef een geldige maand (JJJJ-MM).');
@@ -581,9 +584,11 @@ export class VerkoopfacturenService {
       : { klantId: doel.klantId, rekeningBedrijfId: null, betaalwijze: null, kanaal: 'KASSA' };
     const kandidaten = await this.prisma.verkoop.findMany({
       where: { ...basis, geannuleerd: false, factuurId: null, gefactureerd: !input.gefactureerd, datum: { gte: van, lt: tot } },
-      select: { id: true, datum: true },
+      select: { id: true, datum: true, gefactureerdDagafsluitingId: true },
     });
-    const ids = kandidaten.filter((v) => brusselDatum(v.datum).slice(0, 7) === input.maand).map((v) => v.id);
+    const inMaand = kandidaten.filter((v) => brusselDatum(v.datum).slice(0, 7) === input.maand);
+    const ids = inMaand.filter((v) => !v.gefactureerdDagafsluitingId).map((v) => v.id);
+    if (!ids.length && inMaand.length) throw new BadRequestException('Deze aanduiding staat al op een afgesloten dag en kan niet meer gewist worden.');
     if (!ids.length) throw new BadRequestException(input.gefactureerd ? 'Geen open aankopen in deze maand.' : 'Geen handmatig aangeduide aankopen in deze maand.');
     await this.prisma.verkoop.updateMany({
       where: { id: { in: ids } },
@@ -651,9 +656,10 @@ export class VerkoopfacturenService {
     const totaal = r2(betalingen.reduce((s, b) => s + b.bedrag, 0));
     let groep = (await this.openRekeningen()).find((g) => g.sleutel === input.sleutel);
     if (!groep) throw new NotFoundException('Geen openstaande rekening gevonden voor deze klant.');
-    // Bedrijven (klant met BTW-nummer) betalen hun factuur per overschrijving; die betaling
-    // wordt in Scrada op de factuur geboekt en hoort niet in de dagontvangsten van de kassa.
-    if (groep.btwNummer) throw new BadRequestException(`${groep.naam} is een bedrijf (BTW-nummer ${groep.btwNummer}): de factuur wordt per overschrijving betaald, niet aan de kassa.`);
+    // Bedrijven op rekening betalen hun factuur per overschrijving; die betaling hoort niet
+    // in de dagontvangsten van de kassa. (Een bedrijf dat direct betaalt, rekent gewoon af
+    // bij de aankoop en staat hier dus niet.)
+    if (groep.btwNummer || groep.sleutel.startsWith('b:')) throw new BadRequestException(`${groep.naam} is een bedrijf${groep.btwNummer ? ` (BTW-nummer ${groep.btwNummer})` : ''}: de factuur wordt per overschrijving betaald, niet aan de kassa.`);
     if (totaal > groep.open + 0.005) throw new BadRequestException(`Het bedrag (€ ${totaal.toFixed(2)}) is hoger dan het openstaande (€ ${groep.open.toFixed(2)}).`);
 
     // Betaalt de klant terwijl er nog niet-gefactureerde aankopen open staan, dan
@@ -761,6 +767,7 @@ export class VerkoopfacturenService {
   async verwijder(id: string) {
     const f = await this.prisma.verkoopfactuur.findUnique({ where: { id } });
     if (!f) throw new NotFoundException('Factuur niet gevonden.');
+    if (f.dagafsluitingId) throw new BadRequestException(`Factuur ${f.nummer} staat al op een afgesloten dag en kan niet meer verwijderd worden.`);
     await this.prisma.$transaction(async (tx) => {
       await tx.verkoop.updateMany({ where: { factuurId: id }, data: { factuurId: null, factuurGewenst: false, gefactureerd: false, gefactureerdOp: null } });
       await tx.verkoopfactuur.delete({ where: { id } });

@@ -432,6 +432,8 @@ model Verkoop {
   buitenDagontvangsten Boolean @default(false)
   // Maand handmatig als gefactureerd aangeduid (factuur buiten de kassa, bv. rechtstreeks in Scrada).
   factuurReferentie String?
+  // De dagafsluiting waarop die handmatige aanduiding meegeteld werd (daarna ligt ze vast).
+  gefactureerdDagafsluitingId String?
   dagafsluiting   Dagafsluiting? @relation(fields: [dagafsluitingId], references: [id])
   dagafsluitingId String?
   // geannuleerd/geschrapt ticket: telt NIET mee in de dagafsluiting of omzet;
