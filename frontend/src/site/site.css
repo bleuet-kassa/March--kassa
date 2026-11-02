@@ -114,10 +114,11 @@ body { margin: 0; }
 .marche-site .shop-foto { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
 .marche-site .shop-foto img { width: 100%; height: 100%; object-fit: cover; }
 .marche-site .shop-foto-leeg { font-size: 34px; opacity: .5; }
-.marche-site .shop-body { padding: 12px; display: flex; flex-direction: column; }
+.marche-site .shop-body { padding: 12px; display: flex; flex-direction: column; flex: 1; }
 .marche-site .shop-naam { font-weight: 600; }
 .marche-site .shop-omschrijving { color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 2px; white-space: pre-line; }
-.marche-site .shop-prijs { color: var(--brand); font-weight: 700; margin-top: 2px; }
+/* margin-top auto: prijs en knop staan onderaan de kaart, dus op één lijn binnen de rij */
+.marche-site .shop-prijs { color: var(--brand); font-weight: 700; margin-top: auto; padding-top: 2px; }
 .marche-site .form-veld { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .marche-site .form-veld label { font-size: .82rem; color: var(--muted); font-weight: 600; }
 .marche-site .form-veld input { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
