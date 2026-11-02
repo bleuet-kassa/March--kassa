@@ -115,7 +115,8 @@ export class RapportenService {
     for (const l of lijnen) {
       const cat = l.product.categorie?.naam ?? 'Zonder categorie';
       const aantal = Number(l.aantal);
-      const omzetExcl = Number(l.eenheidsprijs) * aantal - Number(l.btwBedrag);
+      // Het exact aangerekende lijntotaal (zoals de dagontvangsten); enkel oudere lijnen herberekenen.
+      const omzetExcl = (l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * aantal) - Number(l.btwBedrag);
       const inkoopStuk = l.inkoopprijs != null ? Number(l.inkoopprijs) : Number(l.product.inkoopprijs ?? 0);
       const inkoop = inkoopStuk * aantal;
       const rij = perCat.get(cat) ?? { categorie: cat, omzetExcl: 0, inkoop: 0 };
