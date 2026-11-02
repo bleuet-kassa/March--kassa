@@ -40,6 +40,7 @@ export function Rapporten() {
       <h2>Rapporten</h2>
 
       <h3>Maandoverzicht (omzet incl. BTW) — jaren vergelijken</h3>
+      <p style={{ color: '#6b7280', fontSize: 13, marginTop: -6 }}>Telt zoals de dagontvangsten: aankopen op rekening van bedrijven staan in de maand waarin ze gefactureerd zijn.</p>
       {jaren.length === 0 ? <p style={{ color: '#999' }}>Nog geen omzetgegevens.</p> : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 14, minWidth: 360 }}>
@@ -86,7 +87,7 @@ export function Rapporten() {
           <div style={kaart}>
             <div style={{ fontSize: 12, color: '#6b7280' }}>Facturen (B2B)</div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>{euro(kf.facturen.omzetIncl)}</div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>{kf.facturen.aantal} facturen · incl. BTW</div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>{kf.facturen.aantal} aankopen · incl. BTW</div>
           </div>
         </div>
       )}

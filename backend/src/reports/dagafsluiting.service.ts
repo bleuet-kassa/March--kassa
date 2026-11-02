@@ -17,11 +17,11 @@ const LIJN_INCLUDE = { lijnen: { include: { product: { include: { categorie: tru
 
 // Vanaf dit moment tellen bedrijfsfacturen mee op de dagafsluiting van hun dag (oudere
 // facturen niet: hun aankopen stonden al in de dagontvangsten -> het verleden blijft gelijk).
-const FACTUREN_IN_DAGAFSLUITING_VANAF = new Date('2026-10-20T00:00:00+02:00');
+export const FACTUREN_IN_DAGAFSLUITING_VANAF = new Date('2026-10-20T00:00:00+02:00');
 // Handmatige aanduidingen ("gefactureerd buiten de kassa") tellen mee vanaf dit moment.
 // Oudere aanduidingen tellen niet vanzelf mee op een latere dag; wissen en opnieuw
 // aanduiden zet ze op de dag die dan open staat.
-const AANDUIDINGEN_IN_DAGAFSLUITING_VANAF = new Date('2026-11-02T22:45:00Z');
+export const AANDUIDINGEN_IN_DAGAFSLUITING_VANAF = new Date('2026-11-02T22:45:00Z');
 
 // Aankoop op rekening door een BEDRIJF (rekeningbedrijf, of klant met BTW-nummer): hoort
 // niet in de dagontvangsten maar telt op de dag van de factuur. Een bedrijf dat direct
