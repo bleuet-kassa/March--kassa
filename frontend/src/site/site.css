@@ -119,6 +119,8 @@ body { margin: 0; }
 .marche-site .shop-omschrijving { color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 2px; white-space: pre-line; }
 /* margin-top auto: prijs en knop staan onderaan de kaart, dus op één lijn binnen de rij */
 .marche-site .shop-prijs { color: var(--brand); font-weight: 700; margin-top: auto; padding-top: 2px; }
+.marche-site .shop-allergenen { color: var(--muted); font-size: 12px; line-height: 1.35; margin: 4px 0 6px; }
+.marche-site .shop-melding { color: var(--muted); font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; }
 .marche-site .form-veld { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .marche-site .form-veld label { font-size: .82rem; color: var(--muted); font-weight: 600; }
 .marche-site .form-veld input { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
@@ -173,6 +175,19 @@ body { margin: 0; }
 .marche-site .foot-nav a { color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: .92rem; }
 .marche-site .foot-nav a:hover { color: var(--brand); background: var(--surface-2); }
 .marche-site .foot-legal { color: var(--muted); font-size: .82rem; margin-top: 20px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.marche-site .foot-legal a:hover { color: var(--brand); }
+.marche-site .foot-bedrijf { margin-top: 10px; }
+
+/* Juridische pagina's */
+.marche-site .juridisch { max-width: 760px; padding-top: 36px; padding-bottom: 60px; }
+.marche-site .juridisch h1 { font-size: clamp(2rem, 4vw, 2.6rem); margin-bottom: 16px; }
+.marche-site .juridisch h2 { font-size: 1.3rem; margin: 28px 0 8px; }
+.marche-site .juridisch p { margin: 0 0 12px; }
+.marche-site .juridisch ul { margin: 0 0 12px; padding-left: 22px; }
+.marche-site .juridisch li { margin-bottom: 4px; }
+.marche-site .juridisch mark { background: #fef3c7; color: #92400e; padding: 1px 4px; border-radius: 4px; }
+.marche-site .herroep-kader { margin: 0 0 24px; padding: 20px; }
+.marche-site .herroep-fout { background: #fee2e2; color: #991b1b; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
 .marche-site .badge-ph { display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--warm); background: var(--warm-soft); padding: 2px 8px; border-radius: 6px; margin-left: 8px; vertical-align: middle; }
 
 /* Reveal-animatie (verschijnt bij het scrollen). */

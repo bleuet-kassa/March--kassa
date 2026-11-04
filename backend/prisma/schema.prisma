@@ -416,6 +416,12 @@ model Verkoop {
   status        String?       // NIEUW | BETAALD | KLAAR | AFGEHAALD ...
   gewensteDag   String?       // door de klant gekozen afhaal-/leverdatum (YYYY-MM-DD)
   gewensteTijd  String?       // gekozen uur (HH:MM), optioneel
+  // Contactgegevens zoals ingevuld bij de bestelling. Een publieke bestelling raakt de
+  // klantenlijst niet: e-mailadressen worden niet geverifieerd.
+  bestelNaam     String?
+  bestelEmail    String?
+  bestelTelefoon String?
+  bestelAdres    String?
   // online betaling (webshop, bv. Axepta)
   betaald       Boolean       @default(false)
   betaalRef     String?

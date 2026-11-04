@@ -26,6 +26,7 @@ import { MijnRooster } from './pages/MijnRooster';
 import { Klantrekeningen } from './pages/Klantrekeningen';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
+import { Juridisch } from './site/Juridisch';
 import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
 import { Login } from './pages/Login';
 import { getVerkoper, logout, zetVerkoper } from './auth';
@@ -235,6 +236,9 @@ function App() {
         {/* Publieke website (marché.eu) — geen login */}
         <Route path="/" element={<PublicSite />} />
         <Route path="/webshop" element={<WebshopPubliek />} />
+        <Route path="/privacy" element={<Juridisch soort="privacy" />} />
+        <Route path="/voorwaarden" element={<Juridisch soort="voorwaarden" />} />
+        <Route path="/herroeping" element={<Juridisch soort="herroeping" />} />
         {/* Bevestigpagina op de telefoon van de beheerder (geheime link uit de pushmelding) */}
         <Route path="/bevestig-afsluiting/:token" element={<BevestigAfsluiting />} />
         {/* Interne personeelsapp achter login */}

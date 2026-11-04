@@ -4,6 +4,7 @@ import {
   uploadSiteAfbeelding,
   type SiteInhoud, type Openingsuur, type SitePartner,
 } from '../api/client';
+import { JURIDISCH, type JuridischSoort } from '../site/juridischeTeksten';
 
 const DAGEN = ['', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
 const AANBOD_TILES: { slug: string; naam: string }[] = [
@@ -62,6 +63,7 @@ export function Website() {
   const [galerij, setGalerij] = useState<string[]>([]);
   const [uren, setUren] = useState<Openingsuur[]>([]);
   const [partners, setPartners] = useState<SitePartner[]>([]);
+  const [juridisch, setJuridisch] = useState<Record<JuridischSoort, string>>({ privacy: '', voorwaarden: '', herroeping: '' });
   const [pNaam, setPNaam] = useState('');
   const [pWebsite, setPWebsite] = useState('');
   const [melding, setMelding] = useState('');
@@ -80,6 +82,11 @@ export function Website() {
     const perDag = new Map(i.openingsuren.map((u) => [u.dag, u]));
     setUren(Array.from({ length: 7 }, (_, k) => perDag.get(k + 1) ?? { id: '', dag: k + 1, gesloten: false, van: '', tot: '' }));
     setPartners(i.partners);
+    setJuridisch({
+      privacy: i.teksten[JURIDISCH.privacy.sleutel] || JURIDISCH.privacy.tekst,
+      voorwaarden: i.teksten[JURIDISCH.voorwaarden.sleutel] || JURIDISCH.voorwaarden.tekst,
+      herroeping: i.teksten[JURIDISCH.herroeping.sleutel] || JURIDISCH.herroeping.tekst,
+    });
   }
   async function laad() { vulIn(await getSiteInhoud()); }
   useEffect(() => { laad(); }, []);
@@ -89,6 +96,13 @@ export function Website() {
   async function bewaarTeksten() {
     setFout('');
     try { await zetSiteTeksten(teksten); flits('Teksten bewaard.'); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
+  }
+  // Ongewijzigd = leeg bewaren: de pagina toont dan gewoon de standaardtekst.
+  async function bewaarJuridisch(soort: JuridischSoort) {
+    setFout('');
+    const { sleutel, tekst } = JURIDISCH[soort];
+    try { await zetSiteTeksten({ [sleutel]: juridisch[soort].trim() === tekst.trim() ? '' : juridisch[soort] }); flits('Tekst bewaard.'); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
   }
   async function bewaarUren() {
@@ -293,6 +307,31 @@ export function Website() {
           </div>
         ))}
         {partners.length === 0 && <div style={{ color: '#999' }}>Nog geen partners.</div>}
+      </section>
+
+      <section style={kaart}>
+        <h3 style={{ marginTop: 0 }}>Juridische teksten</h3>
+        <div style={muted}>
+          "## " maakt een kop en "- " een opsomming. {'{bedrijf}, {adres}, {ondernemingsnummer}, {btw}, {email} en {telefoon}'} worden automatisch ingevuld vanuit Instellingen en Contact.
+          Stukken [tussen vierkante haken] moet je nog vervangen: die staan geel op de site.
+        </div>
+        {(Object.keys(JURIDISCH) as JuridischSoort[]).map((soort) => {
+          const nogInTeVullen = juridisch[soort].match(/\[[^\]]+\]/g) ?? [];
+          return (
+            <div key={soort} style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 4 }}>
+                <strong>{JURIDISCH[soort].titel}</strong>
+                <a href={JURIDISCH[soort].pad} target="_blank" rel="noopener" style={{ fontSize: 13 }}>Bekijk op de site ↗</a>
+                {nogInTeVullen.length > 0 && <span style={{ color: '#92400e', fontSize: 13, fontWeight: 600 }}>{nogInTeVullen.length} nog in te vullen</span>}
+              </div>
+              <textarea value={juridisch[soort]} onChange={(e) => setJuridisch({ ...juridisch, [soort]: e.target.value })} rows={12} style={{ ...inp, width: '100%', resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => bewaarJuridisch(soort)} style={btnBlauw}>Bewaren</button>
+                <button onClick={() => setJuridisch({ ...juridisch, [soort]: JURIDISCH[soort].tekst })} style={btnMini}>Standaardtekst terugzetten</button>
+              </div>
+            </div>
+          );
+        })}
       </section>
     </div>
   );

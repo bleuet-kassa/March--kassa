@@ -197,6 +197,16 @@ export class ProductsService {
     });
   }
 
+  // Allergenen snel invullen vanuit het webshop-assortiment.
+  async setAllergenen(id: string, allergenen: string | null) {
+    await this.findOne(id);
+    return this.prisma.product.update({
+      where: { id },
+      data: { allergenen: String(allergenen ?? '').trim().slice(0, 500) || null },
+      include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
+    });
+  }
+
   // Snelle schakelaar voor het webshop-assortiment (dagelijks aan/uit vinken).
   async setWebshop(id: string, zichtbaar: boolean) {
     await this.findOne(id);

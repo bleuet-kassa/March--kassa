@@ -11,13 +11,18 @@ const kleur: Record<string, string> = {
 export function Bestellingen() {
   const [lijst, setLijst] = useState<WebshopOrder[]>([]);
   const [filter, setFilter] = useState('');
+  const [fout, setFout] = useState('');
 
   async function laad() { setLijst(await getBestellingen()); }
   useEffect(() => { laad(); }, []);
 
   async function zetStatus(id: string, status: string) {
-    await updateBestellingStatus(id, status);
-    setLijst((l) => l.map((o) => (o.id === id ? { ...o, status } : o)));
+    setFout('');
+    if (status === 'GEANNULEERD' && !window.confirm('Deze bestelling annuleren? De stock wordt teruggeboekt en je kan ze daarna niet meer heropenen.')) return;
+    try {
+      await updateBestellingStatus(id, status);
+      setLijst((l) => l.map((o) => (o.id === id ? { ...o, status, geannuleerd: o.geannuleerd || status === 'GEANNULEERD' } : o)));
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Status wijzigen mislukt'); }
   }
 
   const zichtbaar = filter ? lijst.filter((o) => (o.status ?? 'NIEUW') === filter) : lijst;
@@ -34,15 +39,20 @@ export function Bestellingen() {
         {STATUSSEN.map((s) => <button key={s} onClick={() => setFilter(s)} style={chip(filter === s)}>{s.replace('_', ' ').toLowerCase()}</button>)}
       </div>
 
+      {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
       {zichtbaar.length === 0 && <p style={{ color: '#999' }}>Geen bestellingen.</p>}
 
-      {zichtbaar.map((o) => (
+      {zichtbaar.map((o) => {
+        // De gegevens van de bestelling zelf; oudere bestellingen hebben die enkel op de klant.
+        const telefoon = o.bestelTelefoon ?? o.klant?.telefoon;
+        const adres = o.bestelAdres ?? o.klant?.adres;
+        return (
         <div key={o.id} style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontWeight: 700 }}>{o.klant?.naam ?? 'Onbekende klant'}</div>
+              <div style={{ fontWeight: 700 }}>{o.bestelNaam ?? o.klant?.naam ?? 'Onbekende klant'} <span style={{ fontWeight: 400, fontSize: 13, color: '#6b7280' }}>{o.bestelnummer}</span></div>
               <div style={{ fontSize: 13, color: '#6b7280' }}>
-                {o.klant?.email ?? ''} · {new Date(o.datum).toLocaleString('nl-BE')}
+                {o.bestelEmail ?? o.klant?.email ?? ''}{telefoon ? ` · ${telefoon}` : ''} · {new Date(o.datum).toLocaleString('nl-BE')}
               </div>
             </div>
             <span style={{ padding: '4px 10px', borderRadius: 8, background: '#f3f4f6', fontSize: 13 }}>
@@ -53,13 +63,13 @@ export function Bestellingen() {
               {o.betaald ? '✓ Betaald' : 'Nog te betalen'}
             </span>
             <strong>{euro(o.totaal)}</strong>
-            <select value={o.status ?? 'NIEUW'} onChange={(e) => zetStatus(o.id, e.target.value)}
+            <select value={o.status ?? 'NIEUW'} disabled={o.geannuleerd} onChange={(e) => zetStatus(o.id, e.target.value)}
               style={{ ...inp, marginBottom: 0, fontWeight: 600, color: kleur[o.status ?? 'NIEUW'] ?? '#111' }}>
               {STATUSSEN.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </div>
-          {o.leverwijze === 'LEVEREN' && o.klant?.adres && (
-            <div style={{ fontSize: 13, color: '#374151', marginTop: 8 }}>📍 {o.klant.adres}</div>
+          {o.leverwijze === 'LEVEREN' && adres && (
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 8 }}>📍 {adres}</div>
           )}
           <div style={{ marginTop: 10, fontSize: 14, color: '#374151' }}>
             {o.lijnen.map((l, i) => (
@@ -67,8 +77,10 @@ export function Bestellingen() {
             ))}
           </div>
           {o.kortingReden && <div style={{ fontSize: 13, color: '#0d4589', marginTop: 6 }}>Korting: {o.kortingReden}</div>}
+          {o.mogelijkeKorting && !o.kortingReden && <div style={{ fontSize: 13, color: '#92400e', marginTop: 6 }}>Dit e-mailadres staat op de kortingslijst ({o.mogelijkeKorting}). De korting is niet toegepast: controleer bij het afrekenen wie de klant is.</div>}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -153,6 +153,7 @@ export function ProductForm({
 }) {
   const [naam, setNaam] = useState(product?.naam ?? '');
   const [omschrijving, setOmschrijving] = useState(product?.omschrijving ?? '');
+  const [allergenen, setAllergenen] = useState(product?.allergenen ?? '');
   const [barcode, setBarcode] = useState(product?.barcode ?? prefillBarcode ?? '');
   const [verkoop, setVerkoop] = useState(product ? String(Number(product.verkoopprijs)) : '');
   const [inkoop, setInkoop] = useState(product?.inkoopprijs != null ? String(Number(product.inkoopprijs)) : '');
@@ -199,6 +200,7 @@ export function ProductForm({
     const input: ProductInput = {
       naam: naam.trim(),
       omschrijving: omschrijving.trim() || null,
+      allergenen: allergenen.trim() || null,
       barcode: barcode.trim() || null,
       verkoopprijs: num(verkoop),
       inkoopprijs: inkoop ? num(inkoop) : null,
@@ -266,6 +268,9 @@ export function ProductForm({
 
       <label style={muted}>Omschrijving (optioneel, ook zichtbaar in de webshop)</label>
       <textarea value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={2000} rows={3} placeholder="bv. druivenras, herkomst, smaak, bewaartip…" style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
+
+      <label style={muted}>Allergenen (zichtbaar in de webshop; leeg = "vraag het ons")</label>
+      <input value={allergenen} onChange={(e) => setAllergenen(e.target.value)} maxLength={500} placeholder="bv. gluten, melk, ei, of: geen" style={inp} />
 
       <label style={muted}>Barcode</label>
       <div style={{ display: 'flex', gap: 8 }}>

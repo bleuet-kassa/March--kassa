@@ -593,6 +593,16 @@ export async function setProductWebshop(id: string, zichtbaar: boolean): Promise
   );
 }
 
+export async function setProductAllergenen(id: string, allergenen: string): Promise<ProductVol> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/producten/${id}/allergenen`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allergenen }),
+    }),
+  );
+}
+
 // --- Publieke webshop-catalogus (enkel actief + webshopZichtbaar) ---
 export type WebshopProduct = {
   id: string; naam: string; omschrijving?: string | null; verkoopprijs: string; isAlcohol: boolean; eenheid: string;
@@ -613,29 +623,32 @@ export async function getWebshopAfdelingen(): Promise<WebshopAfdeling[]> {
 // Een webshop-bestelling plaatsen (betalen bij afhaling/levering).
 export type BestellingKlant = { naam: string; email: string; telefoon?: string; adres?: string };
 export type BestellingBevestiging = {
-  id: string; totaal: number; leverwijze: string; status: string; kortingReden?: string | null;
+  id: string; bestelnummer: string; totaal: number; leverwijze: string; status: string;
   gewensteDag?: string; gewensteTijd?: string | null;
   lijnen: { naam: string; aantal: number; eenheidsprijs: number; totaal: number }[];
   klant?: { naam: string; email: string };
-  online: boolean; betaalModus: 'TEST' | 'LIVE'; betaalUrl: string | null; betaald: boolean;
+  bevestigingPerMail: boolean;
 };
-export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; betaalwijze: 'ACHTERAF' | 'ONLINE'; gewensteDag: string; gewensteTijd?: string }): Promise<BestellingBevestiging> {
+export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; gewensteDag: string; gewensteTijd?: string }): Promise<BestellingBevestiging> {
   return jsonOrThrow(await fetch(`${BASE}/webshop/bestelling`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }));
 }
-// Testmodus: de online betaling simuleren (in LIVE gebeurt dit via Axepta).
-export async function betalingAfronden(id: string, gelukt: boolean): Promise<{ betaald: boolean }> {
-  return jsonOrThrow(await fetch(`${BASE}/webshop/betaling/${id}/afronden`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gelukt }),
+// De herroepingsfunctie van de website.
+export type HerroepingBevestiging = { ok: boolean; ontvangenOp: string; bevestigingPerMail: boolean };
+export async function plaatsHerroeping(input: { naam: string; email: string; bestelling: string; toelichting?: string }): Promise<HerroepingBevestiging> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/herroeping`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }));
 }
 
 // Beheer van webshop-bestellingen.
 export type WebshopOrder = {
-  id: string; datum: string; totaal: string; leverwijze: string | null; status: string | null; kortingReden: string | null;
-  betaald: boolean; betaalRef: string | null; gewensteDag?: string | null; gewensteTijd?: string | null;
-  klant: { naam: string; email: string | null; adres: string | null } | null;
+  id: string; bestelnummer: string; datum: string; totaal: string; leverwijze: string | null; status: string | null; kortingReden: string | null;
+  mogelijkeKorting: string | null; // staat op de kortingslijst; niet automatisch toegepast
+  betaald: boolean; betaalRef: string | null; geannuleerd: boolean; gewensteDag?: string | null; gewensteTijd?: string | null;
+  bestelNaam: string | null; bestelEmail: string | null; bestelTelefoon: string | null; bestelAdres: string | null;
+  klant: { naam: string; email: string | null; telefoon: string | null; adres: string | null } | null; // enkel nog bij oudere bestellingen
   lijnen: { aantal: string; eenheidsprijs: string; product: { naam: string } }[];
 };
 export async function getBestellingen(): Promise<WebshopOrder[]> {
@@ -1014,7 +1027,8 @@ export async function kortingVoorEmail(email: string): Promise<Kortingsregeling 
 // --- Website-inhoud (publieke site, zelf aanpasbaar) ---
 export type Openingsuur = { id: string; dag: number; gesloten: boolean; van: string | null; tot: string | null };
 export type SitePartner = { id: string; naam: string; website: string | null; logoUrl: string | null; volgorde: number };
-export type SiteInhoud = { teksten: Record<string, string>; openingsuren: Openingsuur[]; partners: SitePartner[] };
+export type SiteOnderneming = { naam: string; ondernemingsnummer: string; btwNummer: string | null; adres: string | null };
+export type SiteInhoud = { teksten: Record<string, string>; openingsuren: Openingsuur[]; partners: SitePartner[]; onderneming: SiteOnderneming | null };
 
 export async function getSiteInhoud(): Promise<SiteInhoud> {
   return (await fetch(`${BASE}/site/inhoud`)).json();

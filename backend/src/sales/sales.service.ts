@@ -370,7 +370,7 @@ export class SalesService {
     return rows.map((v) => {
       // Op rekening = niet betaald (geen betaalwijze) en op naam (bedrijf of klant).
       const opRekening = !v.betaalwijze && !!(v.rekeningBedrijfId || v.klantId);
-      const klantNaam = v.rekeningBedrijf ? `${v.rekeningBedrijf.naam}${v.rekeningLid ? ' · ' + v.rekeningLid.naam : ''}` : v.klant?.naam ?? null;
+      const klantNaam = v.rekeningBedrijf ? `${v.rekeningBedrijf.naam}${v.rekeningLid ? ' · ' + v.rekeningLid.naam : ''}` : v.klant?.naam ?? v.bestelNaam ?? null;
       return {
         id: v.id,
         datum: v.datum,

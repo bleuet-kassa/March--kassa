@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  getWebshopProducten, getWebshopAfdelingen, plaatsBestelling, betalingAfronden,
-  type WebshopProduct, type WebshopAfdeling, type BestellingBevestiging,
+  getWebshopProducten, getWebshopAfdelingen, plaatsBestelling, getSiteInhoud,
+  type WebshopProduct, type WebshopAfdeling, type BestellingBevestiging, type SiteInhoud,
 } from '../api/client';
+import { SiteVoet } from './SiteVoet';
 import './site.css';
 
 const euro = (n: number) => '€ ' + n.toFixed(2);
+const MAX_AANTAL = 999; // zelfde grens als de server
+
+// Afdelingen zonder voeding: daar hoeft geen allergeneninformatie bij.
+const GEEN_VOEDING = ['Onderhoudsproducten', 'Private hygiëne', 'Lifestyle'];
+// Leeg betekent "nog niet ingevuld", niet "bevat geen allergenen".
+function allergeenTekst(p: WebshopProduct) {
+  if (p.afdeling && GEEN_VOEDING.includes(p.afdeling.naam)) return null;
+  return `Allergenen: ${p.allergenen?.trim() || 'vraag het ons'}`;
+}
 
 // Publieke webshop: catalogus (selectie uit het assortiment) → winkelmandje →
 // afrekenen (afhalen/leveren, betalen bij afhaling). Verlaagt dezelfde stock.
@@ -15,15 +25,14 @@ export function WebshopPubliek() {
   const [afdelingen, setAfdelingen] = useState<WebshopAfdeling[]>([]);
   const [afd, setAfd] = useState('');
   const [mandje, setMandje] = useState<Record<string, number>>({});
-  const [scherm, setScherm] = useState<'catalogus' | 'afrekenen' | 'betalen' | 'klaar'>('catalogus');
+  const [scherm, setScherm] = useState<'catalogus' | 'afrekenen' | 'klaar'>('catalogus');
+  const [inhoud, setInhoud] = useState<SiteInhoud | null>(null);
   const [klant, setKlant] = useState({ naam: '', email: '', telefoon: '', adres: '' });
   const [leverwijze, setLeverwijze] = useState<'AFHALEN' | 'LEVEREN'>('AFHALEN');
   // Gewenste afhaal-/leverdatum (verplicht) en uur (optioneel); komt in de agenda van de winkel.
   const vandaagIso = new Date().toLocaleDateString('sv-SE');
   const [gewensteDag, setGewensteDag] = useState('');
   const [gewensteTijd, setGewensteTijd] = useState('');
-  const [betaalwijze, setBetaalwijze] = useState<'ACHTERAF' | 'ONLINE'>('ACHTERAF');
-  const [betaald, setBetaald] = useState(false);
   const [leeftijdOk, setLeeftijdOk] = useState(false);
   const [akkoord, setAkkoord] = useState(false);
   const [bevestiging, setBevestiging] = useState<BestellingBevestiging | null>(null);
@@ -34,6 +43,7 @@ export function WebshopPubliek() {
     document.title = 'Webshop — Marché';
     getWebshopProducten().then(setProducten).catch(() => {});
     getWebshopAfdelingen().then(setAfdelingen).catch(() => {});
+    getSiteInhoud().then(setInhoud).catch(() => {});
   }, []);
 
   const prodById = useMemo(() => Object.fromEntries(producten.map((p) => [p.id, p])), [producten]);
@@ -52,15 +62,17 @@ export function WebshopPubliek() {
       const step = p?.eenheid === 'KG' ? 0.5 : 1;
       const n = Math.round(((m[id] ?? 0) + delta * step) * 1000) / 1000;
       const kopie = { ...m };
-      if (n <= 0) delete kopie[id]; else kopie[id] = n;
+      if (n <= 0) delete kopie[id]; else kopie[id] = Math.min(n, MAX_AANTAL);
       return kopie;
     });
   }
   function zet(id: string, waarde: string) {
-    const n = Number(waarde.replace(',', '.'));
+    const getal = Number(waarde.replace(',', '.'));
+    // Stukken bestel je per stuk; kilo's mogen een komma hebben.
+    const n = prodById[id]?.eenheid === 'KG' ? getal : Math.floor(getal);
     setMandje((m) => {
       const kopie = { ...m };
-      if (!(n > 0)) delete kopie[id]; else kopie[id] = n;
+      if (!(n > 0)) delete kopie[id]; else kopie[id] = Math.min(n, MAX_AANTAL);
       return kopie;
     });
   }
@@ -79,29 +91,14 @@ export function WebshopPubliek() {
       const b = await plaatsBestelling({
         lijnen: lijnen.map((l) => ({ productId: l.p.id, aantal: l.aantal })),
         klant: { naam: klant.naam.trim(), email: klant.email.trim(), telefoon: klant.telefoon.trim() || undefined, adres: klant.adres.trim() || undefined },
-        leverwijze, betaalwijze, gewensteDag, gewensteTijd: gewensteTijd || undefined,
+        leverwijze, gewensteDag, gewensteTijd: gewensteTijd || undefined,
       });
       setBevestiging(b);
       setMandje({});
-      if (b.online && b.betaalModus === 'LIVE' && b.betaalUrl) {
-        window.location.href = b.betaalUrl; // echte Axepta-betaalpagina
-        return;
-      }
-      setScherm(b.online ? 'betalen' : 'klaar'); // online → (test)betaalscherm
+      setScherm('klaar');
     } catch (e) {
       setFout(e instanceof Error ? e.message : 'Bestellen mislukt');
-    } finally { setBezig(false); }
-  }
-
-  async function simuleerBetaling(gelukt: boolean) {
-    if (!bevestiging) return;
-    setBezig(true);
-    try {
-      const r = await betalingAfronden(bevestiging.id, gelukt);
-      if (r.betaald) { setBetaald(true); setScherm('klaar'); }
-      else { setFout('Betaling niet gelukt. Probeer opnieuw of kies "betalen bij afhaling".'); setScherm('afrekenen'); }
-    } catch (e) {
-      setFout(e instanceof Error ? e.message : 'Betaling mislukt');
+      window.scrollTo({ top: 0, behavior: 'smooth' }); // de melding staat bovenaan
     } finally { setBezig(false); }
   }
 
@@ -137,9 +134,11 @@ export function WebshopPubliek() {
               <h1 style={{ fontSize: 'clamp(2rem,4vw,2.8rem)', margin: '10px 0' }}>Je bestelling is geplaatst.</h1>
               <p className="lead">
                 We hebben je bestelling goed ontvangen{bevestiging.klant ? `, ${bevestiging.klant.naam}` : ''}.
-                {betaald ? ' Je betaling is ontvangen.' : ` Je betaalt bij ${bevestiging.leverwijze === 'LEVEREN' ? 'de levering' : 'het afhalen'}.`} We contacteren je zodra ze klaar is.
+                {` Je betaalt bij ${bevestiging.leverwijze === 'LEVEREN' ? 'de levering' : 'het afhalen'}.`} We contacteren je zodra ze klaar is.
+                {bevestiging.bevestigingPerMail && bevestiging.klant ? ` We sturen ook een bevestiging naar ${bevestiging.klant.email}.` : ''}
               </p>
               <div className="panel" style={{ marginTop: 16 }}>
+                <div style={{ color: 'var(--muted)', marginBottom: 6 }}>Bestelnummer <b>{bevestiging.bestelnummer}</b></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 18 }}>
                   <span>Totaal</span><span>{euro(bevestiging.totaal)}</span>
                 </div>
@@ -147,31 +146,10 @@ export function WebshopPubliek() {
                   {bevestiging.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'}
                   {bevestiging.gewensteDag ? ` op ${new Date(bevestiging.gewensteDag + 'T12:00:00').toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })}${bevestiging.gewensteTijd ? ` om ${bevestiging.gewensteTijd}` : ''}` : ''} · {bevestiging.lijnen.length} artikel(s)
                 </div>
-                {bevestiging.kortingReden && <div style={{ color: 'var(--brand)', marginTop: 6 }}>Korting toegepast: {bevestiging.kortingReden}</div>}
               </div>
               <div className="actions" style={{ marginTop: 24 }}>
                 <button className="btn btn-primary" onClick={() => { setScherm('catalogus'); setBevestiging(null); }}>Verder winkelen</button>
                 <Link className="btn btn-ghost" to="/">Naar de startpagina</Link>
-              </div>
-            </div>
-          )}
-
-          {scherm === 'betalen' && bevestiging && (
-            <div style={{ maxWidth: 480 }}>
-              <span className="eyebrow">Betaling · testmodus</span>
-              <h1 style={{ fontSize: 'clamp(1.7rem,4vw,2.3rem)', margin: '10px 0' }}>Online betalen (Axepta)</h1>
-              <div className="panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 20 }}>
-                  <span>Te betalen</span><span>{euro(bevestiging.totaal)}</span>
-                </div>
-                <p style={{ color: 'var(--muted)', marginTop: 10 }}>
-                  Dit is de testomgeving. In het echt kom je hier op de beveiligde betaalpagina van Axepta terecht.
-                  Simuleer nu het resultaat:
-                </p>
-                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                  <button className="btn btn-primary" disabled={bezig} onClick={() => simuleerBetaling(true)} style={{ flex: 1, justifyContent: 'center' }}>Betaling gelukt</button>
-                  <button className="btn btn-ghost" disabled={bezig} onClick={() => simuleerBetaling(false)} style={{ flex: 1, justifyContent: 'center' }}>Mislukt</button>
-                </div>
               </div>
             </div>
           )}
@@ -182,7 +160,7 @@ export function WebshopPubliek() {
                 <button className="btn btn-ghost" onClick={() => setScherm('catalogus')} style={{ marginBottom: 16 }}>← Verder winkelen</button>
                 <h2 style={{ marginBottom: 12 }}>Jouw gegevens</h2>
                 <div className="form-veld"><label>Naam</label><input value={klant.naam} onChange={(e) => setKlant({ ...klant, naam: e.target.value })} /></div>
-                <div className="form-veld"><label>E-mail</label><input value={klant.email} onChange={(e) => setKlant({ ...klant, email: e.target.value })} placeholder="voor de bevestiging" /></div>
+                <div className="form-veld"><label>E-mail</label><input value={klant.email} onChange={(e) => setKlant({ ...klant, email: e.target.value })} placeholder="we contacteren je via dit adres" /></div>
                 <div className="form-veld"><label>Telefoon (optioneel)</label><input value={klant.telefoon} onChange={(e) => setKlant({ ...klant, telefoon: e.target.value })} /></div>
 
                 <h2 style={{ margin: '20px 0 12px' }}>Afhalen of leveren?</h2>
@@ -202,16 +180,12 @@ export function WebshopPubliek() {
                   <div className="form-veld"><label>Uur (optioneel)</label><input type="time" step={900} value={gewensteTijd} onChange={(e) => setGewensteTijd(e.target.value)} /></div>
                 </div>
 
-                <h2 style={{ margin: '20px 0 12px' }}>Betaling</h2>
-                <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
-                  {([['ACHTERAF', 'Bij afhaling/levering'], ['ONLINE', 'Nu online betalen']] as const).map(([bw, label]) => (
-                    <button key={bw} onClick={() => setBetaalwijze(bw)}
-                      style={{ flex: 1, padding: 12, borderRadius: 10, cursor: 'pointer', border: betaalwijze === bw ? '2px solid var(--brand)' : '1px solid var(--line)', background: betaalwijze === bw ? 'var(--surface-2)' : 'var(--surface)', fontWeight: 600 }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {betaalwijze === 'ONLINE' && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>Online betalen (Axepta) staat in testmodus — je kunt de betaling simuleren.</div>}
+                <h2 style={{ margin: '20px 0 8px' }}>Betaling</h2>
+                <p style={{ margin: 0 }}>Je betaalt bij {leverwijze === 'LEVEREN' ? 'de levering' : 'het afhalen in de winkel'}.</p>
+
+                <p style={{ fontSize: 14, color: 'var(--muted)', margin: '14px 0 0' }}>
+                  Verse voeding en bereide gerechten vallen niet onder het herroepingsrecht. <Link to="/herroeping" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>Lees wat wel en niet kan</Link>.
+                </p>
 
                 {heeftAlcohol && (
                   <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 12 }}>
@@ -221,11 +195,11 @@ export function WebshopPubliek() {
                 )}
                 <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10 }}>
                   <input type="checkbox" checked={akkoord} onChange={(e) => setAkkoord(e.target.checked)} />
-                  <span>Ik ga akkoord met de algemene voorwaarden en het privacybeleid. Betaling gebeurt bij afhaling/levering.</span>
+                  <span>Ik ga akkoord met de <Link to="/voorwaarden" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>algemene voorwaarden</Link> en heb de <Link to="/privacy" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>privacyverklaring</Link> gelezen.</span>
                 </label>
 
                 <button className="btn btn-primary" onClick={bestel} disabled={bezig} style={{ marginTop: 18, width: '100%', justifyContent: 'center', fontSize: 17 }}>
-                  {bezig ? 'Bezig…' : `${betaalwijze === 'ONLINE' ? 'Naar betaling' : 'Bestelling plaatsen'} · ${euro(totaal)}`}
+                  {bezig ? 'Bezig…' : `Bestellen met betalingsverplichting · ${euro(totaal)}`}
                 </button>
               </div>
 
@@ -236,6 +210,7 @@ export function WebshopPubliek() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{l.p.naam}{l.p.isAlcohol && ' 🍷'}</div>
                       <div style={{ fontSize: 13, color: 'var(--muted)' }}>{euro(Number(l.p.verkoopprijs))}{l.p.eenheid === 'KG' ? ' /kg' : ''}</div>
+                      {allergeenTekst(l.p) && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{allergeenTekst(l.p)}</div>}
                     </div>
                     <div style={{ whiteSpace: 'nowrap' }}>
                       <button onClick={() => stap(l.p.id, -1)} style={qtyBtn}>−</button>
@@ -257,6 +232,9 @@ export function WebshopPubliek() {
               <span className="eyebrow">Webshop</span>
               <h1 style={{ fontSize: 'clamp(2rem,4vw,2.8rem)', margin: '8px 0 6px' }}>Bestel online, haal af of laat leveren.</h1>
               <p className="lead" style={{ marginBottom: 20 }}>Een dagverse selectie uit onze winkel. Betalen doe je bij afhaling of levering.</p>
+              <div className="shop-melding">
+                Allergie of intolerantie? Neem vóór je bestelt contact met ons op{inhoud?.teksten.contact_telefoon ? `: ${inhoud.teksten.contact_telefoon}` : ''}. Sporen van allergenen zijn nooit helemaal uit te sluiten.
+              </div>
 
               {producten.length === 0 && <p style={{ color: 'var(--muted)' }}>Er staan momenteel geen producten online.</p>}
 
@@ -278,6 +256,7 @@ export function WebshopPubliek() {
                       <div className="shop-body">
                         <div className="shop-naam">{p.naam}{p.isAlcohol && ' 🍷'}</div>
                         {p.omschrijving && <div className="shop-omschrijving">{p.omschrijving}</div>}
+                        {allergeenTekst(p) && <div className="shop-allergenen">{allergeenTekst(p)}</div>}
                         <div className="shop-prijs">{euro(Number(p.verkoopprijs))}{p.eenheid === 'KG' ? ' /kg' : ''}</div>
                         {aantal > 0
                           ? <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
@@ -296,6 +275,7 @@ export function WebshopPubliek() {
           )}
         </div>
       </main>
+      <SiteVoet inhoud={inhoud} />
     </div>
   );
 }

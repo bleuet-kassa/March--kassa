@@ -8,14 +8,16 @@ export class SiteService {
   constructor(private prisma: PrismaService) {}
 
   async inhoud() {
-    const [teksten, openingsuren, partners] = await Promise.all([
+    const [teksten, openingsuren, partners, onderneming] = await Promise.all([
       this.prisma.siteTekst.findMany(),
       this.prisma.openingsuur.findMany({ orderBy: { dag: 'asc' } }),
       this.prisma.partner.findMany({ orderBy: [{ volgorde: 'asc' }, { naam: 'asc' }] }),
+      // De verkopende onderneming: die gegevens moeten wettelijk op de website staan.
+      this.prisma.onderneming.findFirst({ where: { isImporteur: false }, select: { naam: true, ondernemingsnummer: true, btwNummer: true, adres: true } }),
     ]);
     const t: Record<string, string> = {};
     for (const r of teksten) t[r.sleutel] = r.waarde;
-    return { teksten: t, openingsuren, partners };
+    return { teksten: t, openingsuren, partners, onderneming };
   }
 
   async zetTeksten(teksten: Record<string, string>) {

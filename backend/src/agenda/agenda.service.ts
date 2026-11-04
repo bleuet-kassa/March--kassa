@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { Prisma } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
+import { SalesService } from '../sales/sales.service';
 
 // Agenda van de zaak: iedereen kan er manueel bestellingen en agendapunten in
 // zetten; webshopbestellingen komen er automatisch in. Export naar Excel.
@@ -28,7 +29,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 @Injectable()
 export class AgendaService implements OnModuleInit {
   private readonly log = new Logger(AgendaService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private sales: SalesService) {}
 
   // Bestaande webshopbestellingen (bv. van vóór de agenda) alsnog in de agenda zetten.
   async onModuleInit() {
@@ -220,6 +221,12 @@ export class AgendaService implements OnModuleInit {
     const bestaand = await this.prisma.agendaItem.findUnique({ where: { id } });
     if (!bestaand) throw new NotFoundException('Agendapunt niet gevonden.');
     const data = this.valideer(input, false);
+    // Webshopbestelling annuleren boekt de stock terug; daarna kan ze niet meer heropend worden.
+    if (bestaand.verkoopId && input.status && input.status !== bestaand.status) {
+      const v = await this.prisma.verkoop.findUnique({ where: { id: bestaand.verkoopId }, select: { geannuleerd: true } });
+      if (v?.geannuleerd && input.status !== 'GEANNULEERD') throw new BadRequestException('Een geannuleerde bestelling kan je niet heropenen; plaats een nieuwe bestelling.');
+      if (v && !v.geannuleerd && input.status === 'GEANNULEERD') await this.sales.annuleer(bestaand.verkoopId, 'Webshopbestelling geannuleerd');
+    }
     const a = await this.prisma.agendaItem.update({ where: { id }, data });
     // Status van een webshopbestelling mee bijwerken (KLAAR -> KLAAR, GEANNULEERD -> GEANNULEERD).
     if (bestaand.verkoopId && input.status && input.status !== bestaand.status) {
@@ -249,14 +256,17 @@ export class AgendaService implements OnModuleInit {
     const status = v.geannuleerd || v.status === 'GEANNULEERD' ? 'GEANNULEERD' : ['KLAAR', 'AFGEHAALD', 'GELEVERD'].includes(v.status ?? '') ? 'KLAAR' : 'OPEN';
     const afhaalDag = v.gewensteDag ?? null;
     const afhaalNl = afhaalDag ? `${afhaalDag.slice(8, 10)}/${afhaalDag.slice(5, 7)}${v.gewensteTijd ? ' ' + v.gewensteTijd : ''}` : null;
+    // De gegevens van de bestelling zelf; oudere bestellingen hebben die enkel op de klant.
+    const naam = v.bestelNaam ?? v.klant?.naam ?? null;
+    const adres = v.bestelAdres ?? v.klant?.adres ?? null;
     // Bestelling staat eerst op de besteldag (ongelezen); na "Gelezen" verhuist ze naar de afhaal-/leverdag.
     await this.prisma.agendaItem.create({
       data: {
         dag, soort: v.leverwijze === 'LEVEREN' ? 'LEVERING' : 'BESTELLING', bron: 'WEBSHOP', gelezen: false,
         afhaalDag, afhaalTijd: v.gewensteTijd ?? null,
-        titel: `Webshop: ${v.klant?.naam ?? 'klant'} · ${lever}${afhaalNl ? ' op ' + afhaalNl : ''}`,
-        omschrijving: `${artikels}${v.klant?.adres && v.leverwijze === 'LEVEREN' ? ` · ${v.klant.adres}` : ''}${v.betaald ? ' · online betaald' : ' · betalen bij ' + lever}`,
-        klantNaam: v.klant?.naam ?? null, klantEmail: v.klant?.email ?? null, klantTelefoon: v.klant?.telefoon ?? null,
+        titel: `Webshop: ${naam ?? 'klant'} · ${lever}${afhaalNl ? ' op ' + afhaalNl : ''}`,
+        omschrijving: `${artikels}${adres && v.leverwijze === 'LEVEREN' ? ` · ${adres}` : ''}${v.betaald ? ' · online betaald' : ' · betalen bij ' + lever}`,
+        klantNaam: naam, klantEmail: v.bestelEmail ?? v.klant?.email ?? null, klantTelefoon: v.bestelTelefoon ?? v.klant?.telefoon ?? null,
         bedrag: v.totaal, locatie: 'WINKEL', categorie: 'BOODSCHAPPEN', status, verkoopId: v.id, aangemaaktDoor: 'webshop',
       },
     });

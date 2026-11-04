@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
-  getProductenBeheer, setProductWebshop, getMeta,
+  getProductenBeheer, setProductWebshop, setProductAllergenen, getMeta,
   type ProductVol, type Meta,
 } from '../api/client';
 import { ProductForm } from './Beheer';
@@ -32,6 +32,13 @@ export function WebshopAssortiment() {
   }, [producten, afdId, enkelOnline]);
 
   const aantalOnline = producten.filter((p) => p.webshopZichtbaar && p.actief).length;
+  const zonderAllergenen = producten.filter((p) => p.webshopZichtbaar && p.actief && !p.allergenen?.trim()).length;
+
+  async function bewaarAllergenen(p: ProductVol, tekst: string) {
+    if (tekst.trim() === (p.allergenen ?? '')) return;
+    const bijgewerkt = await setProductAllergenen(p.id, tekst);
+    setProducten((lijst) => lijst.map((x) => (x.id === p.id ? { ...x, allergenen: bijgewerkt.allergenen } : x)));
+  }
 
   async function toggle(p: ProductVol) {
     setBezigId(p.id);
@@ -61,9 +68,11 @@ export function WebshopAssortiment() {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>Webshop-assortiment</h2>
         <span style={{ color: '#6b7280', fontSize: 14 }}><strong>{aantalOnline}</strong> producten online</span>
+        {zonderAllergenen > 0 && <span style={{ color: '#92400e', background: '#fef3c7', padding: '2px 10px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>{zonderAllergenen} online zonder allergenen</span>}
       </div>
       <p style={{ color: '#6b7280', marginTop: 6 }}>
         Vink aan wat online mag staan. Enkel <strong>actieve</strong> producten verschijnen in de webshop.
+        Vul bij voeding de allergenen in (of "geen"); leeg toont de webshop "vraag het ons". Het vakje bewaart zodra je eruit klikt.
       </p>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '10px 0 14px' }}>
@@ -84,6 +93,7 @@ export function WebshopAssortiment() {
           <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: 12, color: '#666' }}>
             <th style={{ padding: 6 }}>Product</th>
             <th style={{ padding: 6 }}>Afdeling</th>
+            <th style={{ padding: 6 }}>Allergenen</th>
             <th style={{ padding: 6, textAlign: 'right' }}>Prijs</th>
             <th style={{ padding: 6 }}>Status</th>
             <th style={{ padding: 6, textAlign: 'center' }}>In webshop</th>
@@ -95,6 +105,12 @@ export function WebshopAssortiment() {
             <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0', opacity: p.actief ? 1 : 0.55 }}>
               <td style={{ padding: 6 }}>{p.naam}{p.isAlcohol && ' 🍷'}</td>
               <td style={{ padding: 6, color: '#6b7280' }}>{p.afdeling?.naam ?? '—'}</td>
+              <td style={{ padding: 6 }}>
+                {p.webshopZichtbaar && (
+                  <input key={p.allergenen ?? ''} defaultValue={p.allergenen ?? ''} maxLength={500} placeholder="bv. gluten, melk, of: geen" aria-label={`Allergenen van ${p.naam}`}
+                    onBlur={(e) => bewaarAllergenen(p, e.target.value)} style={{ ...inp, marginBottom: 0, padding: 5, fontSize: 13, width: 170 }} />
+                )}
+              </td>
               <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>€ {Number(p.verkoopprijs).toFixed(2)}</td>
               <td style={{ padding: 6 }}>
                 {p.actief
@@ -124,7 +140,7 @@ export function WebshopAssortiment() {
               </td>
             </tr>
           ))}
-          {zichtbaar.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: '#999' }}>Geen producten gevonden.</td></tr>}
+          {zichtbaar.length === 0 && <tr><td colSpan={7}style={{ padding: 16, color: '#999' }}>Geen producten gevonden.</td></tr>}
         </tbody>
       </table>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSiteInhoud, type SiteInhoud, type Openingsuur } from '../api/client';
+import { SiteVoet } from './SiteVoet';
 import './site.css';
 
 const DAGEN = ['', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
@@ -232,26 +233,14 @@ export function PublicSite() {
         </section>
       </main>
 
-      <footer className="foot">
-        <div className="wrap">
-          <div className="foot-grid">
-            <a className="brand" href="#top"><span className="word" style={{ fontSize: '1.4rem' }}>Marché</span></a>
-            <nav className="foot-nav" aria-label="Voettekst">
-              <a href="#uren">Openingsuren</a>
-              <a href="#partners">Onze partners</a>
-              <a href="#contact">Contact</a>
-              <Link to="/webshop">Webshop</Link>
-            </nav>
-          </div>
-          <div className="foot-legal">
-            <span>© Marché · met smaak gekozen · by Bleuet · marché.eu</span>
-            <a href="#">Herroepingsrecht</a>
-            <a href="#">Privacy (GDPR)</a>
-            <a href="#">Algemene voorwaarden</a>
-            <Link to="/kassa" style={{ marginLeft: 'auto' }}>Personeel</Link>
-          </div>
-        </div>
-      </footer>
+      <SiteVoet inhoud={inhoud} nav={
+        <nav className="foot-nav" aria-label="Voettekst">
+          <a href="#uren">Openingsuren</a>
+          <a href="#partners">Onze partners</a>
+          <a href="#contact">Contact</a>
+          <Link to="/webshop">Webshop</Link>
+        </nav>
+      } />
     </div>
   );
 }

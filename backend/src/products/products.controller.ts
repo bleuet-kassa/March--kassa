@@ -68,6 +68,12 @@ export class ProductsController {
     return this.products.setWebshop(id, body.zichtbaar);
   }
 
+  // PATCH /producten/:id/allergenen  -> allergenen snel invullen vanuit het assortiment
+  @Patch(':id/allergenen')
+  setAllergenen(@Param('id') id: string, @Body() body: { allergenen: string | null }) {
+    return this.products.setAllergenen(id, body?.allergenen ?? null);
+  }
+
   // PATCH /producten/:id/categorie { categorieId }  -> snel van categorie veranderen (alle medewerkers)
   @Patch(':id/categorie')
   zetCategorie(@Param('id') id: string, @Body() body: { categorieId?: string | null }) {
