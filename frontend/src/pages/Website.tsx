@@ -5,7 +5,6 @@ import {
   type SiteInhoud, type Openingsuur, type SitePartner,
 } from '../api/client';
 import { JURIDISCH, type JuridischSoort } from '../site/juridischeTeksten';
-import { dagNaam, leesExtraAfhaaldagen, vandaagBrussel } from '../site/afhaaldagen';
 
 const DAGEN = ['', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
 const AANBOD_TILES: { slug: string; naam: string }[] = [
@@ -65,8 +64,6 @@ export function Website() {
   const [uren, setUren] = useState<Openingsuur[]>([]);
   const [partners, setPartners] = useState<SitePartner[]>([]);
   const [juridisch, setJuridisch] = useState<Record<JuridischSoort, string>>({ privacy: '', voorwaarden: '', herroeping: '' });
-  const [extraDagen, setExtraDagen] = useState<string[]>([]);
-  const [nieuweDag, setNieuweDag] = useState('');
   const [pNaam, setPNaam] = useState('');
   const [pWebsite, setPWebsite] = useState('');
   const [melding, setMelding] = useState('');
@@ -85,7 +82,6 @@ export function Website() {
     const perDag = new Map(i.openingsuren.map((u) => [u.dag, u]));
     setUren(Array.from({ length: 7 }, (_, k) => perDag.get(k + 1) ?? { id: '', dag: k + 1, gesloten: false, van: '', tot: '' }));
     setPartners(i.partners);
-    setExtraDagen(leesExtraAfhaaldagen(i.teksten['extra_afhaaldagen']));
     setJuridisch({
       privacy: i.teksten[JURIDISCH.privacy.sleutel] || JURIDISCH.privacy.tekst,
       voorwaarden: i.teksten[JURIDISCH.voorwaarden.sleutel] || JURIDISCH.voorwaarden.tekst,
@@ -116,18 +112,6 @@ export function Website() {
       const nieuw = await zetOpeningsuren(rijen);
       setUren(nieuw);
       flits('Openingsuren bewaard.');
-    } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
-  }
-  // Extra afhaaldagen: dagen dat de winkel normaal dicht is, maar klanten toch kunnen afhalen.
-  // Voorbije dagen vallen bij het bewaren vanzelf weg.
-  async function bewaarExtraDagen(dagen: string[]) {
-    setFout('');
-    const nieuw = [...new Set(dagen)].filter((d) => d >= vandaagBrussel()).sort();
-    try {
-      await zetSiteTeksten({ extra_afhaaldagen: JSON.stringify(nieuw) });
-      setExtraDagen(nieuw);
-      setNieuweDag('');
-      flits('Afhaaldagen bewaard.');
     } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
   }
   async function voegPartnerToe() {
@@ -301,22 +285,7 @@ export function Website() {
           </tbody>
         </table>
         <button onClick={bewaarUren} style={{ ...btnBlauw, marginTop: 12 }}>Openingsuren bewaren</button>
-      </section>
-
-      <section style={kaart}>
-        <h3 style={{ marginTop: 0 }}>Extra afhaaldagen (webshop)</h3>
-        <div style={muted}>Klanten kunnen enkel afhalen op dagen dat de winkel open is. Voeg hier dagen toe waarop de winkel normaal gesloten is, maar afhalen toch kan (bv. voor de feestdagen).</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
-          <input type="date" min={vandaagBrussel()} value={nieuweDag} onChange={(e) => setNieuweDag(e.target.value)} aria-label="Extra afhaaldag" style={{ ...inp, marginBottom: 0 }} />
-          <button onClick={() => bewaarExtraDagen([...extraDagen, nieuweDag])} disabled={!nieuweDag} style={btnBlauw}>Toevoegen</button>
-        </div>
-        {extraDagen.map((d) => (
-          <div key={d} style={{ display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid #f0f0f0', padding: '6px 0' }}>
-            <span style={{ flex: 1 }}>{dagNaam(d)} {d.slice(0, 4)}</span>
-            <button onClick={() => bewaarExtraDagen(extraDagen.filter((x) => x !== d))} style={{ ...btnMini, color: 'crimson' }}>Verwijderen</button>
-          </div>
-        ))}
-        {extraDagen.length === 0 && <div style={{ color: '#999' }}>Geen extra afhaaldagen.</div>}
+        <div style={{ ...muted, marginTop: 10 }}>Op welke dagen klanten van de webshop kunnen afhalen of laten leveren, stel je per dag in onder Webshop → Afhaal- en leverdagen.</div>
       </section>
 
       <section style={kaart}>

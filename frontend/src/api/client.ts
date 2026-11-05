@@ -614,6 +614,28 @@ export type WebshopProduct = {
 };
 export type WebshopAfdeling = { id: string; naam: string; volgorde: number; aantal: number };
 
+// Dagen waarop een klant kan afhalen of laten leveren (vanaf het minimum aantal dagen vooraf).
+// van/tot = openingsuren, enkel op gewone open dagen.
+export type WebshopDag = { iso: string; afhalen: boolean; leveren: boolean; van: string | null; tot: string | null };
+export async function getWebshopDagen(): Promise<{ dagenVooraf: number; dagen: WebshopDag[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/dagen`));
+}
+// Webshopkalender (beheer): per dag afhalen en leveren aan of uit.
+export type KalenderDag = WebshopDag & { winkelOpen: boolean; afhalenAangepast: boolean; leverenAangepast: boolean };
+export async function getWebshopKalender(maand: string): Promise<{ dagenVooraf: number; dagen: KalenderDag[] }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/kalender?maand=${encodeURIComponent(maand)}`));
+}
+export async function zetWebshopDag(datum: string, input: { afhalen?: boolean; leveren?: boolean }): Promise<KalenderDag> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/kalender/${datum}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  }));
+}
+export async function zetDagenVooraf(dagenVooraf: number): Promise<{ dagenVooraf: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/dagen-vooraf`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dagenVooraf }),
+  }));
+}
+
 // UIT = geen Mollie-sleutel (er kan niet besteld worden), TEST = testsleutel (geen echt geld).
 export type BetaalModus = 'UIT' | 'TEST' | 'LIVE';
 export async function getWebshopInstellingen(): Promise<{ betalen: BetaalModus }> {

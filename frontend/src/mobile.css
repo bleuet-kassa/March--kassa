@@ -28,6 +28,9 @@
 
   /* Kassaticket-weergave: volledige breedte op de telefoon. */
   .ticket-print { max-width: 100%; }
+
+  /* Webshopkalender: enkel de icoontjes, anders passen 7 dagen niet naast elkaar. */
+  .wk-label { display: none; }
 }
 
 /* Heel smalle schermen: producttegels in de kassa iets kleiner. */

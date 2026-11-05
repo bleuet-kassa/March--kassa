@@ -4,6 +4,7 @@ import {
   type ProductVol, type Meta,
 } from '../api/client';
 import { ProductForm } from './Beheer';
+import { WebshopKalender } from './WebshopKalender';
 
 // Webshop-assortiment: snel producten in/uit de webshop zetten (dagelijks werk)
 // en manueel nieuwe producten toevoegen per afdeling. Enkel actieve producten
@@ -17,6 +18,7 @@ export function WebshopAssortiment() {
   const [enkelOnline, setEnkelOnline] = useState(false);
   const [bezigId, setBezigId] = useState('');
   const [form, setForm] = useState<{ product: ProductVol | null } | null>(null);
+  const [tab, setTab] = useState<'assortiment' | 'kalender'>('assortiment');
 
   async function laadMeta() { setMeta(await getMeta()); }
   async function laadProducten() { setProducten(await getProductenBeheer(zoek)); }
@@ -63,8 +65,27 @@ export function WebshopAssortiment() {
     );
   }
 
+  // Twee onderdelen: wat er online staat, en op welke dagen klanten kunnen afhalen of laten leveren.
+  const tabs = (
+    <div style={{ display: 'flex', gap: 6, margin: '10px 0' }}>
+      {([['assortiment', 'Assortiment'], ['kalender', 'Afhaal- en leverdagen']] as const).map(([k, label]) => (
+        <button key={k} onClick={() => setTab(k)} style={{ padding: '6px 12px', borderRadius: 20, cursor: 'pointer', fontSize: 13, border: tab === k ? '2px solid #0d4589' : '1px solid #cbd5e1', background: tab === k ? '#eff6ff' : '#fff', fontWeight: tab === k ? 600 : 400 }}>{label}</button>
+      ))}
+    </div>
+  );
+  if (tab === 'kalender') {
+    return (
+      <div style={{ maxWidth: 900 }}>
+        <h2 style={{ margin: 0 }}>Webshop</h2>
+        {tabs}
+        <WebshopKalender />
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 900 }}>
+      {tabs}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>Webshop-assortiment</h2>
         <span style={{ color: '#6b7280', fontSize: 14 }}><strong>{aantalOnline}</strong> producten online</span>

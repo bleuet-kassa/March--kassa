@@ -78,7 +78,7 @@ Je bestelling is geplaatst zodra je op "Bestellen met betalingsverplichting" kli
 Wil je iets wijzigen of annuleren? Neem dan zo snel mogelijk contact met ons op. Zolang we nog niet aan je bestelling begonnen zijn, betalen we je alles terug.
 
 ## Afhalen en leveren
-Afhalen kan op de dagen dat de winkel open is en op de extra afhaaldagen die je bij het bestellen kan kiezen. Bij leveren kies je zelf de datum. Past die dag voor ons niet, dan spreken we samen een andere dag af.
+Bij het bestellen kies je een afhaal- of leverdag uit de dagen die we aanbieden. Daar zie je ook hoeveel dagen op voorhand je moet bestellen. Leveren kan enkel op de dagen waarop we leveren aanbieden.
 
 [Vul in: in welke gemeenten je levert en wat een levering kost.]
 

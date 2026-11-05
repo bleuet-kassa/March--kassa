@@ -360,6 +360,15 @@ model Cadeaubon {
   createdAt     DateTime  @default(now())
 }
 
+// Webshopkalender: per dag afhalen en leveren aan of uit. Null = de standaard: afhalen op
+// dagen dat de winkel open is (openingsuren), leveren nooit.
+model Webshopdag {
+  datum     String   @id // YYYY-MM-DD
+  afhalen   Boolean?
+  leveren   Boolean?
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 // Webshopbestelling die wacht op de betaling via Mollie. Pas als ze betaald is, wordt ze
 // een Verkoop: tot dan raakt ze de stock, de agenda en de dagontvangsten niet.
 model WebshopBetaling {

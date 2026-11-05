@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { WebshopService, type BestellingInput, type HerroepingInput } from './webshop.service';
 import { Publiek, Recht, Rollen } from '../auth/auth.guard';
@@ -27,6 +27,32 @@ export class WebshopController {
   @Get('instellingen')
   instellingen() {
     return this.webshop.instellingen();
+  }
+
+  // Publiek: de dagen waarop een klant kan afhalen of laten leveren.
+  @Publiek()
+  @Get('dagen')
+  dagen() {
+    return this.webshop.beschikbareDagen();
+  }
+
+  // Webshopkalender: per dag afhalen en leveren aan of uit, en hoeveel dagen op voorhand.
+  @Recht('webshop', 'website')
+  @Get('kalender')
+  kalender(@Query('maand') maand: string) {
+    return this.webshop.kalender(maand);
+  }
+
+  @Recht('webshop', 'website')
+  @Put('kalender/:datum')
+  zetDag(@Param('datum') datum: string, @Body() body: { afhalen?: boolean; leveren?: boolean }) {
+    return this.webshop.zetDag(datum, body ?? {});
+  }
+
+  @Recht('webshop', 'website')
+  @Put('dagen-vooraf')
+  zetDagenVooraf(@Body() body: { dagenVooraf: number }) {
+    return this.webshop.zetDagenVooraf(body?.dagenVooraf);
   }
 
   // Publiek: een bestelling starten; de klant gaat daarna naar de betaalpagina van Mollie.

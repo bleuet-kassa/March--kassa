@@ -23,6 +23,8 @@ export type BestellingInput = {
 };
 export type HerroepingInput = { naam: string; email: string; bestelling: string; toelichting?: string };
 type BetaalLijn = { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean };
+// Een dag in de webshopkalender, zoals hij voor de klant geldt. van/tot enkel op gewone open dagen.
+type KalenderDag = { iso: string; winkelOpen: boolean; afhalen: boolean; leveren: boolean; van: string | null; tot: string | null; afhalenAangepast: boolean; leverenAangepast: boolean };
 
 const STATUSSEN = ['NIEUW', 'IN_BEHANDELING', 'KLAAR', 'AFGEHAALD', 'GELEVERD', 'GEANNULEERD'];
 const MAX_LIJNEN = 100;
@@ -34,11 +36,17 @@ const BEWAAR_POGING_MS = 30 * 24 * 3600 * 1000; // betaalpogingen wissen (staat 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Betaalmethoden die niet meteen betaald melden: de bestelling zou pas dagen later doorkomen.
 const TRAGE_METHODEN = ['banktransfer', 'klarna', 'billie', 'riverty'];
+const DAGEN_VOORUIT = 120; // zo ver vooruit kan een klant een dag kiezen
+const SLEUTEL_DAGEN_VOORAF = 'webshop.dagenVooraf';
+const STANDAARD_DAGEN_VOORAF = 2; // klantregel: minstens 2 dagen op voorhand bestellen
 
 const brusselVandaag = () => kassadag(new Date());
 const brusselUur = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit' }).format(new Date());
 const brusselMoment = (d: Date) => d.toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', dateStyle: 'long', timeStyle: 'short' });
-const volgendeDag = (d: string) => new Date(new Date(`${d}T12:00:00Z`).getTime() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+const plusDagen = (d: string, n: number) => new Date(new Date(`${d}T12:00:00Z`).getTime() + n * 24 * 3600 * 1000).toISOString().slice(0, 10);
+const weekdagVan = (d: string) => ((new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7) + 1; // 1 = maandag
+const dagNaam = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
+const isDatum = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d;
 const euro = (n: number) => '€ ' + n.toFixed(2).replace('.', ',');
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const bestelnummerVan = (id: string) => 'W-' + id.slice(-8).toUpperCase();
@@ -165,33 +173,112 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
     return { lijnen, totaal: totaalCent / 100 };
   }
 
-  // Extra afhaaldagen (normaal gesloten, uitzonderlijk open): instelbaar op het Website-scherm.
-  private async extraAfhaaldagen(): Promise<string[]> {
-    const t = await this.prisma.siteTekst.findUnique({ where: { sleutel: 'extra_afhaaldagen' } });
-    try { const v = JSON.parse(t?.waarde ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; }
-    catch { return []; }
+  // --- Webshopkalender ---------------------------------------------------------------
+
+  // Hoeveel dagen op voorhand een klant minstens moet bestellen (instelbaar in de kalender).
+  async dagenVooraf() {
+    const i = await this.prisma.instelling.findUnique({ where: { sleutel: SLEUTEL_DAGEN_VOORAF } });
+    const n = i ? Number(i.waarde) : NaN;
+    return Number.isInteger(n) && n >= 0 ? n : STANDAARD_DAGEN_VOORAF;
+  }
+
+  async zetDagenVooraf(waarde: unknown) {
+    const n = Number(waarde);
+    if (!Number.isInteger(n) || n < 0 || n > 30) throw new BadRequestException('Geef een aantal dagen tussen 0 en 30.');
+    await this.prisma.instelling.upsert({ where: { sleutel: SLEUTEL_DAGEN_VOORAF }, create: { sleutel: SLEUTEL_DAGEN_VOORAF, waarde: String(n) }, update: { waarde: String(n) } });
+    return { dagenVooraf: n };
+  }
+
+  // Afhalen en leveren per dag: standaard afhalen op dagen dat de winkel open is en nergens
+  // leveren; wat in de webshopkalender voor een dag ingesteld is, gaat voor.
+  private async kalenderDagen(van: string, aantal: number): Promise<KalenderDag[]> {
+    const [uren, rijen] = await Promise.all([
+      this.prisma.openingsuur.findMany(),
+      this.prisma.webshopdag.findMany({ where: { datum: { gte: van, lte: plusDagen(van, aantal - 1) } } }),
+    ]);
+    const perWeekdag = new Map(uren.map((u) => [u.dag, u]));
+    const perDatum = new Map(rijen.map((r) => [r.datum, r]));
+    return Array.from({ length: aantal }, (_, i) => {
+      const iso = plusDagen(van, i);
+      const u = perWeekdag.get(weekdagVan(iso));
+      const winkelOpen = !u?.gesloten;
+      const r = perDatum.get(iso);
+      return {
+        iso, winkelOpen,
+        afhalen: r?.afhalen ?? winkelOpen,
+        leveren: r?.leveren ?? false,
+        van: winkelOpen ? u?.van ?? null : null,
+        tot: winkelOpen ? u?.tot ?? null : null,
+        afhalenAangepast: r?.afhalen != null,
+        leverenAangepast: r?.leveren != null,
+      };
+    });
+  }
+
+  // Publiek: de dagen waarop een klant kan afhalen of laten leveren.
+  async beschikbareDagen() {
+    const dagenVooraf = await this.dagenVooraf();
+    const vandaag = brusselVandaag();
+    const nu = brusselUur();
+    const dagen = await this.kalenderDagen(plusDagen(vandaag, dagenVooraf), DAGEN_VOORUIT);
+    return {
+      dagenVooraf,
+      dagen: dagen
+        .map((d) => ({ ...d, afhalen: d.afhalen && !(d.iso === vandaag && d.tot && nu >= d.tot) })) // vandaag al dicht (bij 0 dagen vooraf)
+        .filter((d) => d.afhalen || d.leveren)
+        .map(({ iso, afhalen, leveren, van, tot }) => ({ iso, afhalen, leveren, van, tot })),
+    };
+  }
+
+  // Beheer: een maand van de kalender.
+  async kalender(maand: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(maand))) throw new BadRequestException('Geef een maand (JJJJ-MM).');
+    const aantal = new Date(Date.UTC(Number(maand.slice(0, 4)), Number(maand.slice(5, 7)), 0)).getUTCDate();
+    return { dagenVooraf: await this.dagenVooraf(), dagen: await this.kalenderDagen(`${maand}-01`, aantal) };
+  }
+
+  // Beheer: afhalen en/of leveren voor één dag aan of uit. Gelijk aan de standaard = niets
+  // bewaren, zodat de dag gewoon de openingsuren blijft volgen.
+  async zetDag(datum: string, input: { afhalen?: unknown; leveren?: unknown }) {
+    if (!isDatum(String(datum))) throw new BadRequestException('Ongeldige datum.');
+    if (datum < brusselVandaag()) throw new BadRequestException('Een voorbije dag kan je niet meer aanpassen.');
+    for (const k of ['afhalen', 'leveren'] as const) {
+      if (input?.[k] !== undefined && typeof input[k] !== 'boolean') throw new BadRequestException(`Ongeldige waarde voor ${k}.`);
+    }
+    const [dag] = await this.kalenderDagen(datum, 1);
+    const bestaand = await this.prisma.webshopdag.findUnique({ where: { datum } });
+    const afhalen = input.afhalen === undefined ? bestaand?.afhalen ?? null : input.afhalen === dag.winkelOpen ? null : (input.afhalen as boolean);
+    const leveren = input.leveren === undefined ? bestaand?.leveren ?? null : input.leveren ? true : null;
+    if (afhalen === null && leveren === null) await this.prisma.webshopdag.deleteMany({ where: { datum } });
+    else await this.prisma.webshopdag.upsert({ where: { datum }, create: { datum, afhalen, leveren }, update: { afhalen, leveren } });
+    return (await this.kalenderDagen(datum, 1))[0];
   }
 
   private async controleerDatum(input: BestellingInput) {
     const gewensteDag = String(input.gewensteDag ?? '').trim();
-    const dag = new Date(`${gewensteDag}T12:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(gewensteDag) || Number.isNaN(dag.getTime()) || dag.toISOString().slice(0, 10) !== gewensteDag) {
-      throw new BadRequestException(`Kies een ${input.leverwijze === 'LEVEREN' ? 'lever' : 'afhaal'}datum.`);
-    }
+    if (!isDatum(gewensteDag)) throw new BadRequestException(`Kies een ${input.leverwijze === 'LEVEREN' ? 'lever' : 'afhaal'}dag.`);
     const vandaag = brusselVandaag();
-    if (gewensteDag < vandaag) throw new BadRequestException('De gekozen datum ligt in het verleden.');
-    if (dag.getTime() > Date.now() + 366 * 24 * 3600 * 1000) throw new BadRequestException('De gekozen datum ligt te ver in de toekomst.');
+    const dagenVooraf = await this.dagenVooraf();
+    const eerste = plusDagen(vandaag, dagenVooraf);
+    if (gewensteDag < eerste) {
+      throw new BadRequestException(dagenVooraf
+        ? `Bestel minstens ${dagenVooraf} ${dagenVooraf === 1 ? 'dag' : 'dagen'} op voorhand. De eerste mogelijke dag is ${dagNaam(eerste)}.`
+        : 'De gekozen datum ligt in het verleden.');
+    }
+    if (gewensteDag > plusDagen(vandaag, 366)) throw new BadRequestException('De gekozen datum ligt te ver in de toekomst.');
     const gewensteTijd = String(input.gewensteTijd ?? '').trim();
     if (gewensteTijd && !/^([01]\d|2[0-3]):[0-5]\d$/.test(gewensteTijd)) throw new BadRequestException('Geef een geldig uur (bv. 14:00).');
     if (gewensteDag === vandaag && gewensteTijd && gewensteTijd < brusselUur()) throw new BadRequestException('Dat uur is vandaag al voorbij.');
 
-    // Afhalen kan enkel als de winkel open is, of op een extra afhaaldag.
-    if (input.leverwijze === 'AFHALEN' && !(await this.extraAfhaaldagen()).includes(gewensteDag)) {
-      const uren = await this.prisma.openingsuur.findUnique({ where: { dag: ((dag.getUTCDay() + 6) % 7) + 1 } });
-      if (uren?.gesloten) throw new BadRequestException('Op die dag zijn we gesloten. Kies een andere afhaaldag.');
-      if (uren?.van && uren.tot) {
-        if (gewensteDag === vandaag && brusselUur() >= uren.tot) throw new BadRequestException('De winkel is vandaag al gesloten. Kies een andere afhaaldag.');
-        if (gewensteTijd && (gewensteTijd < uren.van || gewensteTijd > uren.tot)) throw new BadRequestException(`Op die dag kan je afhalen tussen ${uren.van} en ${uren.tot}.`);
+    // Enkel op de dagen die de kalender toelaat; op een gewone open dag binnen de openingsuren.
+    const [dag] = await this.kalenderDagen(gewensteDag, 1);
+    if (input.leverwijze === 'LEVEREN') {
+      if (!dag.leveren) throw new BadRequestException('Op die dag leveren we niet. Kies een andere leverdag.');
+    } else {
+      if (!dag.afhalen) throw new BadRequestException('Op die dag kan je niet afhalen. Kies een andere afhaaldag.');
+      if (dag.van && dag.tot) {
+        if (gewensteDag === vandaag && brusselUur() >= dag.tot) throw new BadRequestException('De winkel is vandaag al gesloten. Kies een andere afhaaldag.');
+        if (gewensteTijd && (gewensteTijd < dag.van || gewensteTijd > dag.tot)) throw new BadRequestException(`Op die dag kan je afhalen tussen ${dag.van} en ${dag.tot}.`);
       }
     }
     return { gewensteDag, gewensteTijd };
@@ -300,7 +387,7 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
   private async telDagVoorNu(): Promise<string | null> {
     const vandaag = brusselVandaag();
     let dag = vandaag;
-    while (await this.prisma.dagafsluiting.findFirst({ where: { boekdatum: dag }, select: { id: true } })) dag = volgendeDag(dag);
+    while (await this.prisma.dagafsluiting.findFirst({ where: { boekdatum: dag }, select: { id: true } })) dag = plusDagen(dag, 1);
     return dag === vandaag ? null : dag;
   }
 

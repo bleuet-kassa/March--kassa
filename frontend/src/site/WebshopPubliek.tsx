@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  getWebshopProducten, getWebshopAfdelingen, getWebshopInstellingen, plaatsBestelling, getBestelStatus, getSiteInhoud,
-  type WebshopProduct, type WebshopAfdeling, type BestelStatus, type BetaalModus, type SiteInhoud,
+  getWebshopProducten, getWebshopAfdelingen, getWebshopInstellingen, getWebshopDagen, plaatsBestelling, getBestelStatus, getSiteInhoud,
+  type WebshopProduct, type WebshopAfdeling, type WebshopDag, type BestelStatus, type BetaalModus, type SiteInhoud,
 } from '../api/client';
 import { SiteVoet } from './SiteVoet';
-import { dagNaam, komendeAfhaaldagen, leesExtraAfhaaldagen, vandaagBrussel } from './afhaaldagen';
+import { dagNaam, vandaagBrussel } from './afhaaldagen';
 import './site.css';
 
 const euro = (n: number) => '€ ' + n.toFixed(2);
@@ -40,6 +40,9 @@ export function WebshopPubliek() {
   const [langWachten, setLangWachten] = useState(false);
   const [inhoud, setInhoud] = useState<SiteInhoud | null>(null);
   const [betalen, setBetalen] = useState<BetaalModus | null>(null);
+  // Afhaal- en leverdagen uit de webshopkalender (al vanaf het minimum aantal dagen vooraf).
+  const [dagen, setDagen] = useState<WebshopDag[]>([]);
+  const [dagenVooraf, setDagenVooraf] = useState(0);
   const [klant, setKlant] = useState({ naam: '', email: '', telefoon: '', adres: '' });
   const [leverwijze, setLeverwijze] = useState<'AFHALEN' | 'LEVEREN'>('AFHALEN');
   // Gewenste afhaal-/leverdatum (verplicht) en uur (optioneel); komt in de agenda van de winkel.
@@ -57,6 +60,7 @@ export function WebshopPubliek() {
     getWebshopAfdelingen().then(setAfdelingen).catch(() => {});
     getSiteInhoud().then(setInhoud).catch(() => {});
     getWebshopInstellingen().then((i) => setBetalen(i.betalen)).catch(() => {});
+    getWebshopDagen().then((d) => { setDagen(d.dagen); setDagenVooraf(d.dagenVooraf); }).catch(() => {});
   }, []);
 
   // Terug van Mollie: de bevestiging komt meestal meteen binnen, soms duurt het even.
@@ -105,16 +109,17 @@ export function WebshopPubliek() {
   const aantalItems = lijnen.reduce((s, l) => s + l.aantal, 0);
   const heeftAlcohol = lijnen.some((l) => l.p.isAlcohol);
 
-  // Afhalen kan enkel op dagen dat de winkel open is, of op een extra afhaaldag.
-  const afhaaldagen = useMemo(
-    () => komendeAfhaaldagen(inhoud?.openingsuren ?? [], leesExtraAfhaaldagen(inhoud?.teksten.extra_afhaaldagen)),
-    [inhoud],
-  );
-  const gekozenAfhaaldag = afhaaldagen.find((d) => d.iso === gewensteDag);
+  // Afhalen en leveren kan enkel op de dagen die de webshopkalender toelaat; leveren staat
+  // standaard uit en is er dus enkel als er leverdagen zijn.
+  const afhaaldagen = useMemo(() => dagen.filter((d) => d.afhalen), [dagen]);
+  const leverdagen = useMemo(() => dagen.filter((d) => d.leveren), [dagen]);
+  const kanLeveren = leverdagen.length > 0;
+  const keuzedagen = leverwijze === 'LEVEREN' ? leverdagen : afhaaldagen;
+  const gekozenDag = keuzedagen.find((d) => d.iso === gewensteDag);
 
   function kiesLeverwijze(lw: 'AFHALEN' | 'LEVEREN') {
     setLeverwijze(lw);
-    if (lw === 'AFHALEN' && gewensteDag && !afhaaldagen.some((d) => d.iso === gewensteDag)) setGewensteDag('');
+    if (gewensteDag && !(lw === 'LEVEREN' ? leverdagen : afhaaldagen).some((d) => d.iso === gewensteDag)) setGewensteDag('');
   }
 
   function stap(id: string, delta: number) {
@@ -167,7 +172,7 @@ export function WebshopPubliek() {
     if (!terug) return;
     setMandje(Object.fromEntries(terug.lijnen.filter((l) => !l.isStatiegeld).map((l) => [l.productId, l.aantal])));
     setKlant({ naam: terug.naam, email: terug.email, telefoon: terug.telefoon ?? '', adres: terug.adres ?? '' });
-    setLeverwijze(terug.leverwijze === 'LEVEREN' ? 'LEVEREN' : 'AFHALEN');
+    setLeverwijze(terug.leverwijze === 'LEVEREN' && kanLeveren ? 'LEVEREN' : 'AFHALEN');
     setGewensteDag(terug.gewensteDag);
     setGewensteTijd(terug.gewensteTijd ?? '');
     naarWinkel('afrekenen');
@@ -272,36 +277,35 @@ export function WebshopPubliek() {
                 <div className="form-veld"><label>E-mail</label><input value={klant.email} onChange={(e) => setKlant({ ...klant, email: e.target.value })} placeholder="hier krijg je de bevestiging" /></div>
                 <div className="form-veld"><label>Telefoon (optioneel)</label><input value={klant.telefoon} onChange={(e) => setKlant({ ...klant, telefoon: e.target.value })} /></div>
 
-                <h2 style={{ margin: '20px 0 12px' }}>Afhalen of leveren?</h2>
-                <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-                  {(['AFHALEN', 'LEVEREN'] as const).map((lw) => (
-                    <button key={lw} onClick={() => kiesLeverwijze(lw)}
-                      style={{ flex: 1, padding: 12, borderRadius: 10, cursor: 'pointer', border: leverwijze === lw ? '2px solid var(--brand)' : '1px solid var(--line)', background: leverwijze === lw ? 'var(--surface-2)' : 'var(--surface)', fontWeight: 600 }}>
-                      {lw === 'AFHALEN' ? 'Afhalen in de winkel' : 'Laten leveren'}
-                    </button>
-                  ))}
-                </div>
+                <h2 style={{ margin: '20px 0 12px' }}>{kanLeveren ? 'Afhalen of leveren?' : 'Afhalen in de winkel'}</h2>
+                {kanLeveren && (
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                    {(['AFHALEN', 'LEVEREN'] as const).map((lw) => (
+                      <button key={lw} onClick={() => kiesLeverwijze(lw)}
+                        style={{ flex: 1, padding: 12, borderRadius: 10, cursor: 'pointer', border: leverwijze === lw ? '2px solid var(--brand)' : '1px solid var(--line)', background: leverwijze === lw ? 'var(--surface-2)' : 'var(--surface)', fontWeight: 600 }}>
+                        {lw === 'AFHALEN' ? 'Afhalen in de winkel' : 'Laten leveren'}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {leverwijze === 'LEVEREN' && (
                   <div className="form-veld"><label>Leveradres</label><input value={klant.adres} onChange={(e) => setKlant({ ...klant, adres: e.target.value })} placeholder="straat, nr, postcode, gemeente" /></div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  {leverwijze === 'AFHALEN' ? (
-                    <div className="form-veld">
-                      <label htmlFor="afhaaldag">Wanneer kom je afhalen?</label>
-                      <select id="afhaaldag" value={gekozenAfhaaldag ? gewensteDag : ''} onChange={(e) => setGewensteDag(e.target.value)}>
-                        <option value="">Kies een dag</option>
-                        {afhaaldagen.map((d) => <option key={d.iso} value={d.iso}>{dagNaam(d.iso)}{d.extra ? ' (extra afhaaldag)' : ''}</option>)}
-                      </select>
-                    </div>
-                  ) : (
-                    <div className="form-veld"><label>Gewenste leverdatum</label><input type="date" min={vandaagIso} value={gewensteDag} onChange={(e) => setGewensteDag(e.target.value)} /></div>
-                  )}
                   <div className="form-veld">
-                    <label>{leverwijze === 'AFHALEN' && gekozenAfhaaldag?.van && gekozenAfhaaldag.tot ? `Uur (optioneel, ${gekozenAfhaaldag.van} tot ${gekozenAfhaaldag.tot})` : 'Uur (optioneel)'}</label>
+                    <label htmlFor="bestelDag">{leverwijze === 'LEVEREN' ? 'Wanneer mogen we leveren?' : 'Wanneer kom je afhalen?'}</label>
+                    <select id="bestelDag" value={gekozenDag ? gewensteDag : ''} onChange={(e) => setGewensteDag(e.target.value)}>
+                      <option value="">Kies een dag</option>
+                      {keuzedagen.map((d) => <option key={d.iso} value={d.iso}>{dagNaam(d.iso)}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-veld">
+                    <label>{leverwijze === 'AFHALEN' && gekozenDag?.van && gekozenDag.tot ? `Uur (optioneel, ${gekozenDag.van} tot ${gekozenDag.tot})` : 'Uur (optioneel)'}</label>
                     <input type="time" step={900} value={gewensteTijd} onChange={(e) => setGewensteTijd(e.target.value)}
-                      min={leverwijze === 'AFHALEN' ? gekozenAfhaaldag?.van ?? undefined : undefined} max={leverwijze === 'AFHALEN' ? gekozenAfhaaldag?.tot ?? undefined : undefined} />
+                      min={leverwijze === 'AFHALEN' ? gekozenDag?.van ?? undefined : undefined} max={leverwijze === 'AFHALEN' ? gekozenDag?.tot ?? undefined : undefined} />
                   </div>
                 </div>
+                {dagenVooraf > 0 && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: -4 }}>Bestel minstens {dagenVooraf} {dagenVooraf === 1 ? 'dag' : 'dagen'} op voorhand.</div>}
 
                 <h2 style={{ margin: '20px 0 8px' }}>Betaling</h2>
                 <p style={{ margin: 0 }}>Je betaalt nu online op de beveiligde betaalpagina van Mollie. Je bestelling is pas definitief als de betaling gelukt is.</p>
@@ -359,7 +363,7 @@ export function WebshopPubliek() {
           {scherm === 'catalogus' && (
             <>
               <span className="eyebrow">Webshop</span>
-              <h1 style={{ fontSize: 'clamp(2rem,4vw,2.8rem)', margin: '8px 0 6px' }}>Bestel online, haal af of laat leveren.</h1>
+              <h1 style={{ fontSize: 'clamp(2rem,4vw,2.8rem)', margin: '8px 0 6px' }}>{kanLeveren ? 'Bestel online, haal af of laat leveren.' : 'Bestel online, haal af in de winkel.'}</h1>
               <p className="lead" style={{ marginBottom: 20 }}>Een dagverse selectie uit onze winkel. Je betaalt veilig online bij het bestellen.</p>
               {betalen === 'UIT' && <div className="shop-melding"><b>Online bestellen opent binnenkort.</b> Je kan ons aanbod al bekijken.</div>}
               <div className="shop-melding">
