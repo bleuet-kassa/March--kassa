@@ -41,9 +41,17 @@ export type AfrekenInput = {
   factuur?: { bedrijfId?: string; klantId?: string; klant?: { naam: string; btwNummer?: string; email?: string; adres?: string; telefoon?: string } };
 };
 
+// Enkel voor interne aanroepen (webshop na een betaling); komt nooit uit een verzoek.
+export type AfrekenIntern = {
+  vastePrijzen?: Map<string, number>; // stukprijs per product zoals ze betaald werd (kan intussen gewijzigd zijn)
+  geenVoorraad?: boolean;             // testbetaling: de stock blijft ongemoeid
+};
+
 // Werk met centen om afrondingsfouten met kommagetallen te vermijden.
 const naarCent = (n: number) => Math.round(n * 100);
 const naarEuro = (c: number) => c / 100;
+// Lijntotaal in centen voor een stukprijs zonder korting of afronding (zoals in de webshop).
+export const lijnCent = (prijs: number, aantal: number) => Math.round(naarCent(prijs) * aantal);
 
 // Rondt een bedrag (in centen) naar boven af op een stap (bv. 5 cent of 100 =
 // hele euro) — op de grootte, zodat een retour (negatief) symmetrisch afrondt.
@@ -60,7 +68,7 @@ export class SalesService {
   // Rekent een verkoop af: schrijft de verkoop + lijnen weg, verlaagt de
   // winkelstock en berekent de BTW per lijn. Alles in één transactie zodat
   // een verkoop nooit half wordt bewaard.
-  async afrekenen(input: AfrekenInput) {
+  async afrekenen(input: AfrekenInput, intern: AfrekenIntern = {}) {
     const { lijnen, betaalwijze, betalingen, ontvangen, gebruikerId, kortingReden, kanaal, klantId, leverwijze, status, rekeningBedrijfId, rekeningLidId, idempotencyKey, factuur } = input;
     // Verkoopbrede korting (geldt op elke lijn, bovenop een eventuele lijnkorting).
     const verkoopKorting = Math.min(Math.max(Number(input.verkoopKortingPct) || 0, 0), 100);
@@ -129,7 +137,8 @@ export class SalesService {
       const isKg = product.eenheid === 'KG';
       const isCadeaubon = product.interneCode === 'CADEAU';
       const aanKassa = (kanaal ?? 'KASSA') === 'KASSA';
-      let stukCent = vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
+      const vast = intern.vastePrijzen?.get(product.id);
+      let stukCent = vast != null ? naarCent(vast) : vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
       // Afronding naar boven aan de kassa (geen extra bedrag; niet in de webshop):
       //  - cadeaubon: op hele euro (nooit centen)
       //  - stukproduct/diversen: op 5 cent, op de stukprijs
@@ -292,7 +301,7 @@ export class SalesService {
       // dat is een signaal dat de stock niet klopte, niet een blokkering).
       for (const l of lijnen) {
         // Diversen/cadeaubon (vrijePrijs) en statiegeld hebben geen voorraad — overslaan.
-        if (perId.get(l.productId)?.vrijePrijs || perId.get(l.productId)?.isStatiegeld) continue;
+        if (intern.geenVoorraad || perId.get(l.productId)?.vrijePrijs || perId.get(l.productId)?.isStatiegeld) continue;
         await tx.voorraad.upsert({
           where: {
             productId_locatieId: { productId: l.productId, locatieId: locatie.id },
@@ -407,6 +416,8 @@ export class SalesService {
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
     if (verkoop.geannuleerd) throw new BadRequestException('Deze verkoop is al geannuleerd.');
     if (verkoop.afgesloten) throw new BadRequestException('Deze verkoop zit al in een afgesloten dagafsluiting en kan niet meer geannuleerd worden.');
+    // Annuleren zonder geld terug zou de ontvangsten en Mollie uit elkaar laten lopen.
+    if (verkoop.betaald && verkoop.betaalRef?.startsWith('tr_')) throw new BadRequestException('Deze bestelling is online betaald: annuleren kan enkel via Terugbetalen op het scherm Bestellingen.');
 
     return this.prisma.$transaction(async (tx) => {
       // Voorraad terugboeken (spiegelbeeld van het afrekenen): diversen/vrijePrijs

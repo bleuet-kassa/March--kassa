@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { boekdatumVan, kassadag } from '../common/kassadag';
+import { boekdatumVan, kassadag, TELT_IN_ONTVANGSTEN } from '../common/kassadag';
 import { AANDUIDINGEN_IN_DAGAFSLUITING_VANAF, FACTUREN_IN_DAGAFSLUITING_VANAF } from './dagafsluiting.service';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -12,19 +12,21 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 export class RapportenService {
   constructor(private prisma: PrismaService) {}
 
-  // Bedrijfsaankopen die niet in de dagontvangsten van hun aankoopdag (zullen) staan, met
-  // de dag waarop ze in de dagafsluiting (zullen) tellen; telDag null = telt (nog) niet.
-  private async uitgesteldeBedrijfsaankopen() {
+  // Verkopen die niet in de dagontvangsten van hun verkoopdag (zullen) staan, met de dag waarop
+  // ze in de dagafsluiting (zullen) tellen; telDag null = telt (nog) niet. Dat zijn de
+  // bedrijfsaankopen op factuur en de webshopbestellingen betaald na de dagafsluiting.
+  private async uitgesteldeAankopen() {
     const rijen = await this.prisma.verkoop.findMany({
       where: {
-        kanaal: 'KASSA', geannuleerd: false, onderneming: { isImporteur: false },
+        geannuleerd: false, onderneming: { isImporteur: false },
         OR: [
-          { buitenDagontvangsten: true },
-          { afgesloten: false, betaalwijze: null, betalingen: { none: {} }, OR: [{ rekeningBedrijfId: { not: null } }, { klant: { btwNummer: { not: null } } }] },
+          { kanaal: 'KASSA', buitenDagontvangsten: true },
+          { kanaal: 'KASSA', afgesloten: false, betaalwijze: null, betalingen: { none: {} }, OR: [{ rekeningBedrijfId: { not: null } }, { klant: { btwNummer: { not: null } } }] },
+          { kanaal: 'WEBSHOP', betaalwijze: 'ONLINE', telDag: { not: null } },
         ],
       },
       select: {
-        id: true, datum: true, totaal: true, gefactureerd: true, gefactureerdOp: true, gefactureerdDagafsluitingId: true,
+        id: true, datum: true, totaal: true, gefactureerd: true, gefactureerdOp: true, gefactureerdDagafsluitingId: true, telDag: true,
         factuur: { select: { datum: true, bron: true, createdAt: true, dagafsluitingId: true } },
       },
     });
@@ -32,6 +34,7 @@ export class RapportenService {
     const afsluitingen = await this.prisma.dagafsluiting.findMany({ where: { id: { in: afsluitingIds } }, select: { id: true, boekdatum: true, vanaf: true, tot: true } });
     const boekdag = new Map(afsluitingen.map((a) => [a.id, boekdatumVan(a)]));
     const telDag = (v: (typeof rijen)[number]) => {
+      if (v.telDag) return v.telDag;
       const f = v.factuur;
       if (f?.dagafsluitingId) return boekdag.get(f.dagafsluitingId) ?? null;
       if (f) return f.bron === 'MAANDFACTUUR' && f.createdAt >= FACTUREN_IN_DAGAFSLUITING_VANAF ? kassadag(f.datum) : null;
@@ -48,14 +51,14 @@ export class RapportenService {
     const datumFilter: Prisma.DateTimeFilter = {};
     if (van) datumFilter.gte = new Date(van);
     if (tot) datumFilter.lte = new Date(tot);
-    const uitgesteld = await this.uitgesteldeBedrijfsaankopen();
+    const uitgesteld = await this.uitgesteldeAankopen();
     const inPeriode = (dag: string) => (!van || dag >= van.slice(0, 10)) && (!tot || dag <= tot.slice(0, 10));
     return {
-      kanaal: 'KASSA',
       onderneming: { isImporteur: false },
       geannuleerd: false,
       // Zonder betaalwijze expliciet meenemen: `not` alleen laat lege waarden weg.
       AND: [
+        TELT_IN_ONTVANGSTEN,
         { OR: [{ betaalwijze: null }, { betaalwijze: { not: 'EIGEN_REKENING' } }] },
         {
           OR: [
@@ -80,7 +83,8 @@ export class RapportenService {
              COALESCE(SUM(v."totaal"),0)::float8 AS omzetincl
       FROM "Verkoop" v
       JOIN "Onderneming" o ON o.id = v."ondernemingId"
-      WHERE v."kanaal" = 'KASSA' AND o."isImporteur" = false
+      WHERE (v."kanaal" = 'KASSA' OR (v."kanaal" = 'WEBSHOP' AND v."betaalwijze" = 'ONLINE'))
+        AND o."isImporteur" = false
         AND v."geannuleerd" = false
         AND (v."betaalwijze" IS DISTINCT FROM 'EIGEN_REKENING')
       GROUP BY 1, 2
@@ -93,7 +97,7 @@ export class RapportenService {
       m.aantal += aantal; m.omzet += bedrag;
       perMaand.set(`${jaar}-${maand}`, m);
     };
-    for (const v of await this.uitgesteldeBedrijfsaankopen()) {
+    for (const v of await this.uitgesteldeAankopen()) {
       verschuif(kassadag(v.datum), -1, -v.totaal);
       if (v.telDag) verschuif(v.telDag, 1, v.totaal);
     }
@@ -152,7 +156,7 @@ export class RapportenService {
     };
   }
 
-  // Digitaal apart overzicht: kassaverkopen (particulier) vs. facturen (B2B).
+  // Digitaal apart overzicht: kassaverkopen (particulier) vs. facturen (B2B) vs. webshop.
   async kassaVsFacturen(van?: string, tot?: string) {
     const verkopen = await this.prisma.verkoop.findMany({
       where: await this.verkopenInPeriode(van, tot),
@@ -160,14 +164,16 @@ export class RapportenService {
     });
     const kas = { aantal: 0, omzetIncl: 0 };
     const fac = { aantal: 0, omzetIncl: 0 };
+    const web = { aantal: 0, omzetIncl: 0 };
     for (const v of verkopen) {
-      const doel = v.klant?.btwNummer || v.rekeningBedrijfId ? fac : kas;
+      const doel = v.kanaal === 'WEBSHOP' ? web : v.klant?.btwNummer || v.rekeningBedrijfId ? fac : kas;
       doel.aantal++;
       doel.omzetIncl += Number(v.totaal);
     }
     return {
       kasticket: { aantal: kas.aantal, omzetIncl: r2(kas.omzetIncl) },
       facturen: { aantal: fac.aantal, omzetIncl: r2(fac.omzetIncl) },
+      webshop: { aantal: web.aantal, omzetIncl: r2(web.omzetIncl) },
     };
   }
 }

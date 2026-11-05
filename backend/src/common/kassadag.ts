@@ -1,3 +1,9 @@
+import { Prisma } from '@prisma/client';
+
+// Wat in de dagontvangsten en de omzet telt: kassaverkopen en webshopbestellingen die echt
+// online betaald zijn (testbetalingen en oudere bestellingen hebben die betaalwijze niet).
+export const TELT_IN_ONTVANGSTEN: Prisma.VerkoopWhereInput = { OR: [{ kanaal: 'KASSA' }, { kanaal: 'WEBSHOP', betaalwijze: 'ONLINE' }] };
+
 // Kalenderdag (YYYY-MM-DD) van een tijdstip in Brusselse tijd.
 export function kassadag(d: Date): string {
   const p = new Intl.DateTimeFormat('nl-BE', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);

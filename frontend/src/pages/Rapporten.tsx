@@ -89,6 +89,11 @@ export function Rapporten() {
             <div style={{ fontSize: 22, fontWeight: 700 }}>{euro(kf.facturen.omzetIncl)}</div>
             <div style={{ fontSize: 12, color: '#6b7280' }}>{kf.facturen.aantal} aankopen · incl. BTW</div>
           </div>
+          <div style={kaart}>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>Webshop (online betaald)</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{euro(kf.webshop.omzetIncl)}</div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>{kf.webshop.aantal} betalingen en terugbetalingen · incl. BTW</div>
+          </div>
         </div>
       )}
 

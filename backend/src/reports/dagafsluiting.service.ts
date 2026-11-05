@@ -6,7 +6,7 @@ import { PushService } from '../push/push.service';
 import { ScradaService } from '../scrada/scrada.service';
 import { ScradaDagboekService } from '../scrada/scrada.dagboek.service';
 import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
-import { kassadag, boekdatumVan } from '../common/kassadag';
+import { kassadag, boekdatumVan, TELT_IN_ONTVANGSTEN } from '../common/kassadag';
 
 // Verkoop met lijnen + product-categorie + klant + betalingen (voor het rapport).
 type VerkoopVol = Prisma.VerkoopGetPayload<{
@@ -66,9 +66,10 @@ export class DagafsluitingService {
     }));
   }
 
+  // Online betaald na de dagafsluiting: staat pas open vanaf de dag waarop het telt.
   private openVerkopen(locatieId: string, tx?: Prisma.TransactionClient) {
     return (tx ?? this.prisma).verkoop.findMany({
-      where: { locatieId, kanaal: 'KASSA', afgesloten: false, geannuleerd: false },
+      where: { locatieId, afgesloten: false, geannuleerd: false, AND: [TELT_IN_ONTVANGSTEN, { OR: [{ telDag: null }, { telDag: { lte: kassadag(new Date()) } }] }] },
       include: LIJN_INCLUDE,
       orderBy: { datum: 'asc' },
     });
@@ -77,12 +78,11 @@ export class DagafsluitingService {
   // Eén afsluiting = één kassadag. Staan er verkopen van meerdere dagen open (dag
   // vergeten af te sluiten), dan nemen we enkel de OUDSTE dag; de andere dagen
   // blijven open en worden daarna elk apart afgesloten (eigen nummer en datum).
-  private splitsOudsteDag<T extends { datum: Date }>(verkopen: T[]) {
+  private splitsOudsteDag<T extends { datum: Date; telDag?: string | null }>(verkopen: T[]) {
     if (!verkopen.length) return { boekdatum: kassadag(new Date()), dagVerkopen: verkopen, resterendeDagen: [] as string[] };
-    const boekdatum = kassadag(verkopen[0].datum);
-    const dagVerkopen = verkopen.filter((v) => kassadag(v.datum) === boekdatum);
-    const resterendeDagen = [...new Set(verkopen.filter((v) => kassadag(v.datum) !== boekdatum).map((v) => kassadag(v.datum)))].sort();
-    return { boekdatum, dagVerkopen, resterendeDagen };
+    const dagVan = (v: T) => v.telDag ?? kassadag(v.datum);
+    const [boekdatum, ...resterendeDagen] = [...new Set(verkopen.map(dagVan))].sort();
+    return { boekdatum, dagVerkopen: verkopen.filter((v) => dagVan(v) === boekdatum), resterendeDagen };
   }
 
   // BTW per lijn: eenheidsprijs is incl. BTW; btwBedrag is de BTW van de lijn.
@@ -661,7 +661,7 @@ export class DagafsluitingService {
       return [
         v.datum.toISOString(),
         v.scradaRef || v.id,
-        factuur ? 'Factuur (B2B)' : 'Kasticket',
+        factuur ? 'Factuur (B2B)' : v.kanaal === 'WEBSHOP' ? 'Webshop' : 'Kasticket',
         v.klant?.naam ?? 'Particulier',
         v.klant?.btwNummer ?? '',
         v.betaalwijze ?? '',

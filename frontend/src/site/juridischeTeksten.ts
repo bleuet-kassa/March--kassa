@@ -12,13 +12,13 @@ export const JURIDISCH: Record<JuridischSoort, { sleutel: string; titel: string;
     sleutel: 'juridisch_privacy',
     titel: 'Privacyverklaring',
     pad: '/privacy',
-    tekst: `Laatst bijgewerkt op 4 november 2026.
+    tekst: `Laatst bijgewerkt op 5 november 2026.
 
 ## Wie is verantwoordelijk voor je gegevens?
 {bedrijf}, {adres}, ondernemingsnummer {ondernemingsnummer}, is verantwoordelijk voor de persoonsgegevens die via deze website en webshop van Marché verwerkt worden. Met vragen over je gegevens kan je terecht bij {email} of {telefoon}.
 
 ## Welke gegevens we verwerken
-- Bij een bestelling: je naam, e-mailadres, eventueel je telefoonnummer, je leveradres als je laat leveren, wat je bestelt, het bedrag en de gewenste afhaal- of leverdatum.
+- Bij een bestelling: je naam, e-mailadres, eventueel je telefoonnummer, je leveradres als je laat leveren, wat je bestelt, het bedrag, de gewenste afhaal- of leverdatum en de status van je betaling. Je kaart- of bankgegevens krijgen wij niet te zien.
 - Bij een herroeping: je naam, e-mailadres, de gegevens van je bestelling en je eventuele toelichting.
 - Als je ons mailt of belt: wat je ons zelf meedeelt.
 - Bij elk bezoek: technische gegevens zoals je IP-adres. Die zijn nodig om de website te laten werken en misbruik tegen te gaan.
@@ -36,12 +36,14 @@ De website en de webshop gebruiken geen cookies voor statistieken of reclame en 
 ## Wie je gegevens te zien krijgt
 - Onze medewerkers die bestellingen behandelen.
 - Render, dat de website en de database voor ons host. De gegevens staan op servers in Frankfurt (Duitsland). Render is een Amerikaans bedrijf.
+- Mollie B.V. (Nederland), die je online betaling afhandelt. Op de betaalpagina geef je je betaalgegevens rechtstreeks aan Mollie.
 - Combell, voor ons domein en onze e-mail.
-- Scrada en onze boekhouder, als voor je bestelling een factuur wordt opgemaakt.
+- Scrada en onze boekhouder, voor onze boekhouding.
 - Overheidsdiensten, als de wet ons daartoe verplicht.
 
 ## Hoe lang we je gegevens bewaren
-- Bestellingen en facturen: zolang de boekhoud- en btw-regels dat vereisen, in principe 10 jaar.
+- Betaalde bestellingen en facturen: zolang de boekhoud- en btw-regels dat vereisen, in principe 10 jaar.
+- Bestellingen die niet betaald werden: we wissen ze na 30 dagen.
 - Herroepingen, vragen en klachten: zolang nodig om ze af te handelen en een eventueel geschil op te lossen.
 - Technische gegevens: niet langer dan nodig voor de beveiliging.
 
@@ -57,7 +59,7 @@ Passen we deze verklaring aan, dan vind je de nieuwe versie altijd op deze pagin
     sleutel: 'juridisch_voorwaarden',
     titel: 'Algemene voorwaarden',
     pad: '/voorwaarden',
-    tekst: `Laatst bijgewerkt op 4 november 2026.
+    tekst: `Laatst bijgewerkt op 5 november 2026.
 
 ## Wie we zijn
 De webshop Marché wordt uitgebaat door {bedrijf}, {adres}, ondernemingsnummer {ondernemingsnummer}, btw-nummer {btw}. Je bereikt ons via {email} of {telefoon}.
@@ -66,24 +68,24 @@ De webshop Marché wordt uitgebaat door {bedrijf}, {adres}, ondernemingsnummer {
 Deze voorwaarden gelden voor elke bestelling via de webshop. Je gaat ermee akkoord wanneer je bestelt. Je wettelijke rechten als consument blijven altijd gelden.
 
 ## Aanbod en prijzen
-Alle prijzen zijn in euro en inclusief btw. Foto's dienen als illustratie; een artikel kan er licht anders uitzien. De prijs die je ziet op het moment van je bestelling is de prijs die je betaalt. Bij artikelen per kilogram kan het afgewogen gewicht licht verschillen van wat je bestelde; je betaalt dan het effectieve gewicht.
+Alle prijzen zijn in euro en inclusief btw. Foto's dienen als illustratie; een artikel kan er licht anders uitzien. De prijs die je ziet op het moment van je bestelling is de prijs die je betaalt.
+
+Op sommige artikels staat statiegeld. Dat bedrag zie je bij het artikel en in je mandje, en het zit in het totaal. Je krijgt het terug als tegoedbon wanneer je het leeggoed naar de winkel brengt.
 
 ## Je bestelling
-Je bestelling is geplaatst zodra je op "Bestellen met betalingsverplichting" klikt en de bevestiging op het scherm ziet. Je ontvangt de bevestiging ook per e-mail. Is een artikel toch niet beschikbaar, dan nemen we contact met je op en betaal je dat artikel niet.
+Je bestelling is geplaatst zodra je op "Bestellen met betalingsverplichting" klikt en de betaling gelukt is. Zonder betaling is er geen bestelling. Je ziet de bevestiging op het scherm en ontvangt ze ook per e-mail. Is een artikel toch niet beschikbaar, dan nemen we contact met je op en betalen we dat artikel terug.
 
-Wil je iets wijzigen of annuleren? Neem dan zo snel mogelijk contact met ons op. Zolang we nog niet aan je bestelling begonnen zijn, kan dat kosteloos.
+Wil je iets wijzigen of annuleren? Neem dan zo snel mogelijk contact met ons op. Zolang we nog niet aan je bestelling begonnen zijn, betalen we je alles terug.
 
 ## Afhalen en leveren
-Je kiest zelf de datum waarop je afhaalt of waarop we leveren. Past die dag voor ons niet, bijvoorbeeld omdat de winkel gesloten is, dan spreken we samen een andere dag af.
+Afhalen kan op de dagen dat de winkel open is en op de extra afhaaldagen die je bij het bestellen kan kiezen. Bij leveren kies je zelf de datum. Past die dag voor ons niet, dan spreken we samen een andere dag af.
 
 [Vul in: in welke gemeenten je levert en wat een levering kost.]
 
-Haal je een bereid gerecht niet af en hoorden we niets van je, dan kunnen we je de kostprijs ervan aanrekenen.
+Haal je een bereid gerecht niet af en hoorden we niets van je, dan betalen we het niet terug.
 
 ## Betaling
-Je betaalt bij het afhalen in de winkel of bij de levering. Online betalen is momenteel niet mogelijk.
-
-[Vul in: hoe een klant kan betalen, in de winkel en bij levering.]
+Je betaalt online bij het bestellen, op de beveiligde betaalpagina van onze betaalpartner Mollie, met de betaalmethoden die je daar ziet. Betalen in de winkel of bij de levering kan niet. Terugbetalingen gebeuren via dezelfde betaalmethode.
 
 ## Allergenen
 Bij elk voedingsartikel vermelden we de allergenen. Staat er "vraag het ons", of heb je een allergie of intolerantie? Neem dan vóór je bestelt contact met ons op. In onze keuken en winkel werken we met veel verschillende ingrediënten, waardoor sporen van allergenen nooit helemaal uit te sluiten zijn.
@@ -109,7 +111,7 @@ Op deze voorwaarden is het Belgische recht van toepassing. Bij een geschil zijn 
     sleutel: 'juridisch_herroeping',
     titel: 'Herroepingsrecht',
     pad: '/herroeping',
-    tekst: `Deze regels gelden voor consumenten, dus niet voor aankopen voor je bedrijf. Laatst bijgewerkt op 4 november 2026.
+    tekst: `Deze regels gelden voor consumenten, dus niet voor aankopen voor je bedrijf. Laatst bijgewerkt op 5 november 2026.
 
 ## Hoe lang kan je herroepen?
 Je mag een online aankoop binnen 14 dagen herroepen, zonder een reden te geven. Die termijn loopt tot 14 dagen na de dag waarop jij, of iemand die je daarvoor aanduidt, het goed ontvangt. Komen de artikels van één bestelling apart toe, dan telt de dag waarop je het laatste ontvangt.
@@ -127,7 +129,7 @@ Het herroepingsrecht geldt niet voor:
 Gebruik de knop bovenaan deze pagina. Je mag je beslissing ook op een andere duidelijke manier meedelen aan {bedrijf}, {adres}, {email}, {telefoon}, bijvoorbeeld per e-mail of per brief. Daarvoor kan je het modelformulier hieronder gebruiken, maar dat hoeft niet. Je bent op tijd als je je beslissing meedeelt vóór de termijn afloopt.
 
 ## Wat gebeurt er daarna?
-Heb je al betaald, dan betalen we je alles terug, ook de standaardleveringskosten, uiterlijk 14 dagen nadat we je herroeping ontvingen. We gebruiken daarvoor hetzelfde betaalmiddel als jij, tenzij we iets anders afspreken. We mogen wachten met terugbetalen tot we de goederen terug hebben of tot je kan aantonen dat je ze teruggestuurd hebt.
+We betalen je alles terug, ook de standaardleveringskosten, uiterlijk 14 dagen nadat we je herroeping ontvingen. We gebruiken daarvoor hetzelfde betaalmiddel als jij, tenzij we iets anders afspreken. We mogen wachten met terugbetalen tot we de goederen terug hebben of tot je kan aantonen dat je ze teruggestuurd hebt.
 
 Breng de goederen terug naar de winkel of stuur ze ons terug, uiterlijk 14 dagen nadat je ons je herroeping meedeelde. De kosten van het terugsturen zijn voor jou. Je betaalt alleen voor waardevermindering als die komt doordat je de goederen meer gebruikte dan nodig was om ze te bekijken.
 

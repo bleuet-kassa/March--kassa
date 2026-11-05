@@ -34,7 +34,7 @@ export class AgendaService implements OnModuleInit {
   // Bestaande webshopbestellingen (bv. van vóór de agenda) alsnog in de agenda zetten.
   async onModuleInit() {
     try {
-      const open = await this.prisma.verkoop.findMany({ where: { kanaal: 'WEBSHOP', geannuleerd: false }, select: { id: true }, orderBy: { datum: 'desc' }, take: 500 });
+      const open = await this.prisma.verkoop.findMany({ where: { kanaal: 'WEBSHOP', geannuleerd: false, terugbetalingVanId: null }, select: { id: true }, orderBy: { datum: 'desc' }, take: 500 });
       let n = 0;
       for (const { id } of open) { if (await this.vanWebshop(id)) n++; }
       if (n) this.log.log(`Agenda: ${n} webshopbestelling(en) toegevoegd.`);
@@ -221,10 +221,11 @@ export class AgendaService implements OnModuleInit {
     const bestaand = await this.prisma.agendaItem.findUnique({ where: { id } });
     if (!bestaand) throw new NotFoundException('Agendapunt niet gevonden.');
     const data = this.valideer(input, false);
-    // Webshopbestelling annuleren boekt de stock terug; daarna kan ze niet meer heropend worden.
+    // Webshopbestelling annuleren boekt de stock terug (een betaalde bestelling moet via
+    // terugbetalen, dat weigert annuleer zelf); daarna kan ze niet meer heropend worden.
     if (bestaand.verkoopId && input.status && input.status !== bestaand.status) {
-      const v = await this.prisma.verkoop.findUnique({ where: { id: bestaand.verkoopId }, select: { geannuleerd: true } });
-      if (v?.geannuleerd && input.status !== 'GEANNULEERD') throw new BadRequestException('Een geannuleerde bestelling kan je niet heropenen; plaats een nieuwe bestelling.');
+      const v = await this.prisma.verkoop.findUnique({ where: { id: bestaand.verkoopId }, select: { geannuleerd: true, status: true } });
+      if ((v?.geannuleerd || v?.status === 'GEANNULEERD') && input.status !== 'GEANNULEERD') throw new BadRequestException('Een geannuleerde bestelling kan je niet heropenen; plaats een nieuwe bestelling.');
       if (v && !v.geannuleerd && input.status === 'GEANNULEERD') await this.sales.annuleer(bestaand.verkoopId, 'Webshopbestelling geannuleerd');
     }
     const a = await this.prisma.agendaItem.update({ where: { id }, data });
@@ -249,8 +250,8 @@ export class AgendaService implements OnModuleInit {
     const bestaat = await this.prisma.agendaItem.findUnique({ where: { verkoopId } });
     if (bestaat) return false;
     const v = await this.prisma.verkoop.findUnique({ where: { id: verkoopId }, include: { klant: true, lijnen: { include: { product: true } } } });
-    if (!v || v.kanaal !== 'WEBSHOP') return false;
-    const dag = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(v.datum); // YYYY-MM-DD
+    if (!v || v.kanaal !== 'WEBSHOP' || v.terugbetalingVanId) return false;
+    const dag =new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(v.datum); // YYYY-MM-DD
     const lever = v.leverwijze === 'LEVEREN' ? 'leveren' : 'afhalen';
     const artikels = v.lijnen.map((l) => `${Number(l.aantal)}× ${l.product.naam}`).join(', ');
     const status = v.geannuleerd || v.status === 'GEANNULEERD' ? 'GEANNULEERD' : ['KLAAR', 'AFGEHAALD', 'GELEVERD'].includes(v.status ?? '') ? 'KLAAR' : 'OPEN';
@@ -264,7 +265,7 @@ export class AgendaService implements OnModuleInit {
       data: {
         dag, soort: v.leverwijze === 'LEVEREN' ? 'LEVERING' : 'BESTELLING', bron: 'WEBSHOP', gelezen: false,
         afhaalDag, afhaalTijd: v.gewensteTijd ?? null,
-        titel: `Webshop: ${naam ?? 'klant'} · ${lever}${afhaalNl ? ' op ' + afhaalNl : ''}`,
+        titel: `${v.testBetaling ? 'TEST · ' : ''}Webshop: ${naam ?? 'klant'} · ${lever}${afhaalNl ? ' op ' + afhaalNl : ''}`,
         omschrijving: `${artikels}${adres && v.leverwijze === 'LEVEREN' ? ` · ${adres}` : ''}${v.betaald ? ' · online betaald' : ' · betalen bij ' + lever}`,
         klantNaam: naam, klantEmail: v.bestelEmail ?? v.klant?.email ?? null, klantTelefoon: v.bestelTelefoon ?? v.klant?.telefoon ?? null,
         bedrag: v.totaal, locatie: 'WINKEL', categorie: 'BOODSCHAPPEN', status, verkoopId: v.id, aangemaaktDoor: 'webshop',

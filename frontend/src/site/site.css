@@ -123,7 +123,8 @@ body { margin: 0; }
 .marche-site .shop-melding { color: var(--muted); font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; }
 .marche-site .form-veld { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .marche-site .form-veld label { font-size: .82rem; color: var(--muted); font-weight: 600; }
-.marche-site .form-veld input { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.marche-site .form-veld input, .marche-site .form-veld select { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); min-width: 0; }
+.marche-site .shop-statiegeld { color: var(--muted); font-size: 12px; font-weight: 400; }
 @media (max-width: 760px) { .marche-site .checkout-grid { grid-template-columns: 1fr !important; } }
 
 /* Sfeergalerij */

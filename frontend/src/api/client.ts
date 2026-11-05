@@ -425,6 +425,7 @@ export async function getCategorieRapport(van?: string, tot?: string): Promise<C
 export type KassaVsFacturen = {
   kasticket: { aantal: number; omzetIncl: number };
   facturen: { aantal: number; omzetIncl: number };
+  webshop: { aantal: number; omzetIncl: number };
 };
 export async function getKassaVsFacturen(van?: string, tot?: string): Promise<KassaVsFacturen> {
   const q = new URLSearchParams();
@@ -609,8 +610,15 @@ export type WebshopProduct = {
   allergenen: string | null; afdelingId: string | null; fotoUrl: string | null;
   afdeling: { id: string; naam: string; volgorde: number } | null;
   categorie: { id: string; naam: string } | null;
+  statiegeld: { id: string; naam: string; verkoopprijs: string } | null;
 };
 export type WebshopAfdeling = { id: string; naam: string; volgorde: number; aantal: number };
+
+// UIT = geen Mollie-sleutel (er kan niet besteld worden), TEST = testsleutel (geen echt geld).
+export type BetaalModus = 'UIT' | 'TEST' | 'LIVE';
+export async function getWebshopInstellingen(): Promise<{ betalen: BetaalModus }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/instellingen`));
+}
 
 export async function getWebshopProducten(afdelingId?: string): Promise<WebshopProduct[]> {
   const q = afdelingId ? `?afdelingId=${encodeURIComponent(afdelingId)}` : '';
@@ -620,19 +628,23 @@ export async function getWebshopAfdelingen(): Promise<WebshopAfdeling[]> {
   return (await fetch(`${BASE}/webshop/afdelingen`)).json();
 }
 
-// Een webshop-bestelling plaatsen (betalen bij afhaling/levering).
+// Een webshop-bestelling starten: de klant gaat daarna naar de betaalpagina van Mollie.
 export type BestellingKlant = { naam: string; email: string; telefoon?: string; adres?: string };
-export type BestellingBevestiging = {
-  id: string; bestelnummer: string; totaal: number; leverwijze: string; status: string;
-  gewensteDag?: string; gewensteTijd?: string | null;
-  lijnen: { naam: string; aantal: number; eenheidsprijs: number; totaal: number }[];
-  klant?: { naam: string; email: string };
-  bevestigingPerMail: boolean;
-};
-export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; gewensteDag: string; gewensteTijd?: string }): Promise<BestellingBevestiging> {
+export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; gewensteDag: string; gewensteTijd?: string }): Promise<{ betaalUrl: string }> {
   return jsonOrThrow(await fetch(`${BASE}/webshop/bestelling`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }));
+}
+// De klant komt terug van Mollie: hoe staat het met de betaling?
+export type BestelStatus = {
+  status: 'OPEN' | 'BETAALD' | 'MISLUKT' | 'FOUT'; // FOUT = betaald, maar de bestelling moet nog nagekeken worden
+  bestelnummer: string; totaal: number; leverwijze: string; gewensteDag: string; gewensteTijd: string | null;
+  lijnen: { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean }[];
+  naam: string; email: string; telefoon?: string | null; adres?: string | null;
+  bevestigingPerMail: boolean;
+};
+export async function getBestelStatus(sleutel: string): Promise<BestelStatus> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/bestelling/${encodeURIComponent(sleutel)}`));
 }
 // De herroepingsfunctie van de website.
 export type HerroepingBevestiging = { ok: boolean; ontvangenOp: string; bevestigingPerMail: boolean };
@@ -645,12 +657,21 @@ export async function plaatsHerroeping(input: { naam: string; email: string; bes
 // Beheer van webshop-bestellingen.
 export type WebshopOrder = {
   id: string; bestelnummer: string; datum: string; totaal: string; leverwijze: string | null; status: string | null; kortingReden: string | null;
-  mogelijkeKorting: string | null; // staat op de kortingslijst; niet automatisch toegepast
-  betaald: boolean; betaalRef: string | null; geannuleerd: boolean; gewensteDag?: string | null; gewensteTijd?: string | null;
+  betaald: boolean; betaalRef: string | null; testBetaling: boolean; geannuleerd: boolean; gewensteDag?: string | null; gewensteTijd?: string | null;
   bestelNaam: string | null; bestelEmail: string | null; bestelTelefoon: string | null; bestelAdres: string | null;
   klant: { naam: string; email: string | null; telefoon: string | null; adres: string | null } | null; // enkel nog bij oudere bestellingen
-  lijnen: { aantal: string; eenheidsprijs: string; product: { naam: string } }[];
+  lijnen: { productId: string; aantal: string; eenheidsprijs: string; product: { naam: string; eenheid: string; isStatiegeld: boolean } }[];
+  kanTerugbetalen: boolean; terugbetaald: number; terugPerProduct: Record<string, number>;
 };
+export async function terugbetaalBestelling(id: string, lijnen: { productId: string; aantal: number }[]): Promise<{ ok: boolean; bedrag: number; volledig: boolean; mollieStatus: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/bestellingen/${id}/terugbetalen`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lijnen }),
+  }));
+}
+export type MollieStatus = { modus: BetaalModus; methoden: string[]; trageMethoden: string[]; fout: string | null };
+export async function getMollieStatus(): Promise<MollieStatus> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/mollie-status`));
+}
 export async function getBestellingen(): Promise<WebshopOrder[]> {
   return (await fetch(`${BASE}/webshop/bestellingen`)).json();
 }

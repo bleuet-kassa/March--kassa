@@ -360,6 +360,28 @@ model Cadeaubon {
   createdAt     DateTime  @default(now())
 }
 
+// Webshopbestelling die wacht op de betaling via Mollie. Pas als ze betaald is, wordt ze
+// een Verkoop: tot dan raakt ze de stock, de agenda en de dagontvangsten niet.
+model WebshopBetaling {
+  id           String   @id @default(cuid())
+  sleutel      String   @unique // geheim, in de terugkeerlink van de klant
+  status       String   @default("OPEN") // OPEN | BETAALD | MISLUKT | FOUT (betaald maar niet verwerkt)
+  mollieId     String?  @unique
+  mollieStatus String?
+  lijnen       Json     // de bestelde lijnen met de prijs waartegen betaald wordt
+  totaal       Decimal  @db.Decimal(10, 2)
+  naam         String
+  email        String
+  telefoon     String?
+  adres        String?
+  leverwijze   String
+  gewensteDag  String
+  gewensteTijd String?
+  verkoopId    String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}
+
 // ---------------------------------------------------------------------------
 //  Verkopen (kassa + webshop) — onwijzigbaar bewaard (bewaarplicht 7 jaar)
 // ---------------------------------------------------------------------------
@@ -422,9 +444,15 @@ model Verkoop {
   bestelEmail    String?
   bestelTelefoon String?
   bestelAdres    String?
-  // online betaling (webshop, bv. Axepta)
+  bestelnummer   String?      // W-XXXXXXXX: zo kent de klant de bestelling, ook bij Mollie
+  // online betaling (webshop, via Mollie)
   betaald       Boolean       @default(false)
-  betaalRef     String?
+  betaalRef     String?       // Mollie: tr_... (betaling) of re_... (terugbetaling)
+  testBetaling  Boolean       @default(false) // betaald met een testsleutel: geen echt geld, telt nergens mee
+  // Negatieve verkoop: terugbetaling van deze webshopbestelling (telt op de dag van de terugbetaling).
+  terugbetalingVanId String?
+  // Online betaald na de dagafsluiting van die dag: telt op deze latere dag (YYYY-MM-DD).
+  telDag        String?
   // koppeling
   scradaStatus  ScradaStatus  @default(NIET_VERSTUURD)
   scradaRef     String?
