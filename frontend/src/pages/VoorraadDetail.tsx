@@ -8,6 +8,7 @@ const vandaag = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bruss
 export const datumNl = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 export const hoeveelheid = (n: number, eenheid: string) =>
   eenheid === 'KG' ? `${n.toLocaleString('nl-BE', { maximumFractionDigits: 3 })} kg` : n.toLocaleString('nl-BE', { maximumFractionDigits: 3 });
+const euroNl = (n: number | null) => (n == null ? '—' : '€ ' + n.toFixed(2).replace('.', ','));
 const REDEN: Record<string, string> = { THT_VERLOPEN: 'THT verlopen', BESCHADIGD: 'Beschadigd', ANDERE: 'Andere reden', TELLING: 'Telling' };
 type Modus = 'ontvangst' | 'afboeken' | 'tellen';
 
@@ -25,7 +26,7 @@ export function ThtLabel({ status, dagen }: { status: ThtStatus | null; dagen: n
 
 // Voorraad van één artikel: stand per locatie, ontvangen (met datum en THT), afboeken, tellen,
 // de ontvangsten met wat er nog van ligt, en het logboek. Op de productfiche en in Voorraad.
-export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true }: { productId: string; onGewijzigd?: () => void; metThtSchakelaar?: boolean }) {
+export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true }: { productId: string; onGewijzigd?: (a: VoorraadArtikel) => void; metThtSchakelaar?: boolean }) {
   const [a, setA] = useState<VoorraadArtikel | null>(null);
   const [fout, setFout] = useState('');
   const [melding, setMelding] = useState('');
@@ -50,7 +51,7 @@ export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true
   function gewijzigd(x: VoorraadArtikel, tekst: string) {
     setA(x); setMelding(tekst);
     setAantal(''); setTht(''); setAankoop(''); setOpmerking('');
-    onGewijzigd?.();
+    onGewijzigd?.(x); // bv. de productfiche neemt een nieuwe aankoop-/verkoopprijs over
     window.dispatchEvent(new Event('voorraad-gewijzigd')); // het belletje in de menubalk ververst
   }
 
@@ -59,7 +60,13 @@ export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true
     if (!aantal.trim()) { setFout(modus === 'tellen' ? 'Geef het getelde aantal.' : 'Geef het aantal.'); return; }
     setBezig(true);
     try {
-      if (modus === 'ontvangst') gewijzigd(await voorraadOntvangen({ productId, locatieId, aantal, ontvangenOp, tht: tht || undefined, aankoopprijs: aankoop || undefined, opmerking: opmerking || undefined }), 'Ontvangst bewaard.');
+      if (modus === 'ontvangst') {
+        const x = await voorraadOntvangen({ productId, locatieId, aantal, ontvangenOp, tht: tht || undefined, aankoopprijs: aankoop || undefined, opmerking: opmerking || undefined });
+        const p = x.prijsWijziging;
+        gewijzigd(x, p
+          ? `Ontvangst bewaard. Hogere aankoopprijs: ${euroNl(p.oudeInkoop)} → ${euroNl(p.inkoopprijs)}${p.verkoopprijs !== p.oudeVerkoop ? `; verkoopprijs ${euroNl(p.oudeVerkoop)} → ${euroNl(p.verkoopprijs)}` : ''}.`
+          : 'Ontvangst bewaard.');
+      }
       else if (modus === 'afboeken') gewijzigd(await voorraadAfboeken({ productId, locatieId, aantal, reden, opmerking: opmerking || undefined }), 'Afgeboekt.');
       else gewijzigd(await voorraadTellen({ productId, locatieId, geteld: aantal, opmerking: opmerking || undefined }), 'Telling bewaard.');
     } catch (e) {
@@ -71,7 +78,7 @@ export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true
 
   async function wisselTht(v: boolean) {
     setFout('');
-    try { setA(await zetThtNodig(productId, v)); onGewijzigd?.(); window.dispatchEvent(new Event('voorraad-gewijzigd')); }
+    try { const x = await zetThtNodig(productId, v); setA(x); onGewijzigd?.(x); window.dispatchEvent(new Event('voorraad-gewijzigd')); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
   }
 
@@ -98,6 +105,12 @@ export function VoorraadDetail({ productId, onGewijzigd, metThtSchakelaar = true
             <div style={{ fontWeight: 700, fontSize: 18 }}>{hoeveelheid(a.totaal, eenheid)}</div>
           </div>
         )}
+      </div>
+      <div style={{ fontSize: 13, color: '#374151', marginBottom: 6 }}>
+        Aankoopprijs {euroNl(a.product.inkoopprijs)} · verkoopprijs {euroNl(a.product.verkoopprijs)}
+        {a.product.factor != null
+          ? <> · factor {String(a.product.factor).replace('.', ',')} <span style={{ color: '#6b7280' }}>(een hogere aankoopprijs bij ontvangst laat de verkoopprijs meestijgen)</span></>
+          : <span style={{ color: '#6b7280' }}> · geen factor (een hogere aankoopprijs bij ontvangst wordt de nieuwe aankoopprijs)</span>}
       </div>
       {a.locaties.some((l) => l.aantal < 0) && (
         <div style={waarschuwing}>De voorraad staat onder nul: er werd meer verkocht dan ontvangen. Tel het artikel en zet de juiste stand.</div>

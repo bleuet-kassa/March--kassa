@@ -160,7 +160,8 @@ export function ProductForm({
   const [allergenen, setAllergenen] = useState(product?.allergenen ?? '');
   const [barcode, setBarcode] = useState(product?.barcode ?? prefillBarcode ?? '');
   const [verkoop, setVerkoop] = useState(product ? String(Number(product.verkoopprijs)) : '');
-  const [inkoop, setInkoop] = useState(product?.inkoopprijs != null ? String(Number(product.inkoopprijs)) : '');
+  const [inkoop, setInkoop] = useState(product?.inkoopprijs != null ? String(Number(product.inkoopprijs)).replace('.', ',') : '');
+  const [factor, setFactor] = useState(product?.factor != null ? String(Number(product.factor)).replace('.', ',') : '');
   const [btwId, setBtwId] = useState(product?.btwTariefId ?? meta.btwTarieven[0]?.id ?? '');
   const [afdId, setAfdId] = useState(
     product?.afdelingId
@@ -198,11 +199,25 @@ export function ProductForm({
   }
 
   const num = (s: string) => Number(s.replace(',', '.'));
+  // Vaste prijsfactor: verkoopprijs incl. BTW = aankoopprijs × factor, naar boven op 5 cent
+  // (zelfde berekening als de server).
+  const factorGetal = factor.trim() && num(factor) > 0 && num(factor) <= 20 ? num(factor) : null;
+  const inkoopGetal = inkoop.trim() && num(inkoop) > 0 ? num(inkoop) : null;
+  const berekend = factorGetal != null && inkoopGetal != null
+    ? Math.ceil(Math.round(inkoopGetal * factorGetal * 100 * 1000) / 1000 / 5 - 1e-9) * 5 / 100
+    : null;
+  const btwPct = Number(meta.btwTarieven.find((b) => b.id === btwId)?.percentage ?? 0);
+  const margePct = berekend != null && inkoopGetal != null && berekend > 0
+    ? Math.round(((berekend / (1 + btwPct / 100) - inkoopGetal) / (berekend / (1 + btwPct / 100))) * 100)
+    : null;
 
   async function opslaan() {
     setFout('');
     if (!naam.trim()) { setFout('Naam is verplicht.'); return; }
-    if (!verkoop || Number.isNaN(num(verkoop))) { setFout('Geef een geldige verkoopprijs.'); return; }
+    if (factor.trim() && factorGetal == null) { setFout('Geef een geldige factor (bv. 1,85) of laat het vak leeg.'); return; }
+    if (factorGetal != null && inkoopGetal == null) { setFout('Met een factor heb je een aankoopprijs nodig.'); return; }
+    if (berekend == null && (!verkoop || Number.isNaN(num(verkoop)))) { setFout('Geef een geldige verkoopprijs.'); return; }
+    if (inkoop.trim() && Number.isNaN(num(inkoop))) { setFout('Geef een geldige aankoopprijs.'); return; }
     if (!afdId && !isStatiegeldSoort) { setFout('Kies een afdeling.'); return; } // statiegeldsoorten staan in geen afdeling
     setBezig(true);
     const input: ProductInput = {
@@ -210,8 +225,9 @@ export function ProductForm({
       omschrijving: omschrijving.trim() || null,
       allergenen: allergenen.trim() || null,
       barcode: barcode.trim() || null,
-      verkoopprijs: num(verkoop),
-      inkoopprijs: inkoop ? num(inkoop) : null,
+      verkoopprijs: berekend ?? num(verkoop),
+      inkoopprijs: inkoop.trim() ? num(inkoop) : null,
+      factor: factorGetal, // leeg = geen factor (verkoopprijs met de hand)
       isAlcohol: alcohol,
       eenheid,
       webshopZichtbaar: webshop,
@@ -287,16 +303,29 @@ export function ProductForm({
         <button onClick={genereer} style={btnGrijs} title="Genereer een eigen in-store barcode">Genereer</button>
       </div>
 
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <label style={muted}>Verkoopprijs (incl. BTW) *</label>
-          <input value={verkoop} onChange={(e) => setVerkoop(e.target.value)} inputMode="decimal" style={inp} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={muted}>Inkoopprijs</label>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 120px' }}>
+          <label style={muted}>Aankoopprijs (zonder BTW)</label>
           <input value={inkoop} onChange={(e) => setInkoop(e.target.value)} inputMode="decimal" style={inp} />
         </div>
+        <div style={{ flex: '1 1 90px' }}>
+          <label style={muted} title="Verkoopprijs = aankoopprijs × factor (marge en BTW inbegrepen), naar boven afgerond op 5 cent">Factor</label>
+          <input value={factor} onChange={(e) => setFactor(e.target.value)} inputMode="decimal" placeholder="bv. 1,85" style={inp} />
+        </div>
+        <div style={{ flex: '1 1 120px' }}>
+          <label style={muted}>Verkoopprijs (incl. BTW) *</label>
+          {/* Met een factor rekent de kassa de verkoopprijs zelf uit; zonder factor tik je ze in. */}
+          <input value={berekend != null ? berekend.toFixed(2).replace('.', ',') : verkoop} onChange={(e) => setVerkoop(e.target.value)} disabled={berekend != null} inputMode="decimal"
+            style={{ ...inp, ...(berekend != null ? { background: '#f3f4f6', color: '#111827', fontWeight: 600 } : {}) }} />
+        </div>
       </div>
+      {factor.trim() && (
+        <div style={{ ...muted, marginTop: -4, marginBottom: 10 }}>
+          {berekend == null
+            ? (factorGetal == null ? 'Geef een factor zoals 1,85.' : 'Geef de aankoopprijs, dan rekent de factor de verkoopprijs uit.')
+            : <>Aankoopprijs × {factor.trim()} = € {berekend.toFixed(2).replace('.', ',')} (naar boven op 5 cent){margePct != null ? ` · marge ${margePct}% van de verkoopprijs zonder BTW` : ''}. Komt er later een hogere aankoopprijs binnen, dan stijgt de verkoopprijs vanzelf mee.</>}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ flex: 1 }}>
@@ -419,7 +448,15 @@ export function ProductForm({
         <div style={{ marginTop: 20, borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
           <h3 style={{ margin: '0 0 8px' }}>Voorraad</h3>
           {/* THT nodig staat hierboven in het formulier: niet nog eens in het voorraadblok. */}
-          <VoorraadDetail productId={product.id} metThtSchakelaar={false} />
+          <VoorraadDetail productId={product.id} metThtSchakelaar={false}
+            onGewijzigd={(x) => {
+              // Hogere aankoopprijs bij een ontvangst: het formulier hierboven neemt de nieuwe prijzen
+              // over, anders zou "Wijzigingen opslaan" ze terugzetten.
+              if (x.prijsWijziging) {
+                setInkoop(String(x.product.inkoopprijs ?? '').replace('.', ','));
+                setVerkoop(String(x.product.verkoopprijs));
+              }
+            }} />
         </div>
       )}
     </div>

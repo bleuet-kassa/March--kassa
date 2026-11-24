@@ -7,6 +7,7 @@ const pdfParse = require('pdf-parse');
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
 import { StockService } from '../stock/stock.service';
+import { verwerkAankoopprijs } from '../common/prijsfactor';
 
 // Eén herkende factuurregel (uit de PDF), nog te controleren door de gebruiker.
 export type FactuurRegel = {
@@ -34,6 +35,7 @@ export type VerwerkRegel = {
   leverancierId?: string | null;
   categorieId?: string | null;
   productId?: string | null; // gekozen bestaand product; leeg = nieuw aanmaken
+  factor?: number | string | null; // vaste prijsfactor voor een nieuw artikel (verkoop = aankoop × factor)
 };
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5';
@@ -208,17 +210,15 @@ export class FacturenService {
       let productId = r.productId || null;
 
       if (productId) {
-        // Bestaand product: inkoop-/verkoopprijs bijwerken (optioneel).
-        await this.prisma.product.update({
-          where: { id: productId },
-          data: {
-            inkoopprijs: new Prisma.Decimal(r.inkoopprijs),
-            verkoopprijs: new Prisma.Decimal(r.verkoopprijs),
-          },
-        });
+        // Bestaand product: de prijs gaat naar de hoogste (klantregel). De aankoopprijs zakt nooit
+        // vanzelf; met een factor stijgt de verkoopprijs mee, anders enkel als er een hogere
+        // verkoopprijs voorgesteld wordt.
+        const inkoop = Number(r.inkoopprijs);
+        if (Number.isFinite(inkoop) && inkoop > 0) await verwerkAankoopprijs(this.prisma, productId, inkoop, Number(r.verkoopprijs) || null);
         bijgeboekt++;
       } else {
-        // Nieuw product aanmaken (auto-barcode via de productenservice).
+        // Nieuw product aanmaken (auto-barcode via de productenservice). Met een factor rekent de
+        // server de verkoopprijs zelf uit (aankoop × factor, naar boven op 5 cent).
         const p = await this.products.create({
           naam: r.naam,
           verkoopprijs: r.verkoopprijs,
@@ -227,6 +227,7 @@ export class FacturenService {
           btwTariefId: r.btwTariefId,
           leverancierId: r.leverancierId ?? null,
           categorieId: r.categorieId ?? null,
+          factor: r.factor ?? null,
         });
         productId = p.id;
         nieuw++;

@@ -506,6 +506,7 @@ export type ProductVol = Product & {
   isStatiegeld?: boolean;
   statiegeldProductId?: string | null;
   thtNodig?: boolean; // THT verplicht bij ontvangst
+  factor?: string | null; // vaste prijsfactor: verkoopprijs = aankoopprijs × factor
 };
 
 // Statiegeldsoorten (vaste bedragen, 0% BTW) — aan te maken vanuit kassa en beheer.
@@ -538,6 +539,7 @@ export type ProductInput = {
   leverancierId?: string | null;
   statiegeldProductId?: string | null; // statiegeldsoort die bij dit artikel hoort
   thtNodig?: boolean; // THT verplicht bij ontvangst
+  factor?: number | null; // vaste prijsfactor (leeg = verkoopprijs met de hand)
 };
 
 // --- Voorraad: ontvangen met datum en THT, afboeken, tellen, centrale lijst, THT-alarm ---
@@ -556,7 +558,12 @@ export type VoorraadLot = {
   status: ThtStatus | null; dagenTotTht: number | null;
 };
 export type VoorraadArtikel = {
-  product: { id: string; naam: string; eenheid: string; thtNodig: boolean; heeftVoorraad: boolean; afdeling: string | null };
+  product: {
+    id: string; naam: string; eenheid: string; thtNodig: boolean; heeftVoorraad: boolean; afdeling: string | null;
+    inkoopprijs: number | null; verkoopprijs: number; factor: number | null;
+  };
+  // Na een ontvangst met een hogere aankoopprijs: wat er veranderde.
+  prijsWijziging?: { oudeInkoop: number | null; inkoopprijs: number; oudeVerkoop: number; verkoopprijs: number } | null;
   locaties: (VoorraadLocatie & { aantal: number; zonderOntvangst: number })[];
   totaal: number;
   loten: VoorraadLot[];

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleDes
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
+import { verwerkAankoopprijs } from '../common/prijsfactor';
 
 const DATUM = /^\d{4}-\d{2}-\d{2}$/;
 const isDatum = (d: string) => DATUM.test(d) && !Number.isNaN(Date.parse(`${d}T12:00:00Z`)) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d;
@@ -127,25 +128,30 @@ export class VoorraadService implements OnModuleInit, OnModuleDestroy {
     if (p.thtNodig && !tht) throw new BadRequestException(`Geef de THT van ${p.naam}.`);
     if (tht && !isDatum(tht)) throw new BadRequestException('Geef een geldige THT-datum.');
     if (tht && tht < ontvangenOp) throw new BadRequestException('De THT ligt vóór de ontvangstdatum. Kijk de datum na.');
-    let aankoopprijs: Prisma.Decimal | null = null;
+    let aankoop: number | null = null;
     if (input?.aankoopprijs != null && String(input.aankoopprijs).trim() !== '') {
       const a = Number(String(input.aankoopprijs).replace(',', '.'));
       if (!Number.isFinite(a) || a < 0 || a > 100000) throw new BadRequestException('Geef een geldige aankoopprijs.');
-      aankoopprijs = new Prisma.Decimal(Math.round(a * 100) / 100);
+      aankoop = Math.round(a * 100) / 100;
     }
     const locatie = await this.locatie(input?.locatieId);
     const opmerking = String(input?.opmerking ?? '').trim().slice(0, 200) || null;
-    await this.prisma.$transaction([
-      this.prisma.voorraadontvangst.create({
-        data: { productId: p.id, locatieId: locatie.id, aantal: new Prisma.Decimal(aantal), ontvangenOp, tht, aankoopprijs, bron: input?.bron === 'FACTUUR' ? 'FACTUUR' : 'MANUEEL', opmerking, door: door ?? null },
-      }),
-      this.prisma.voorraad.upsert({
+    const prijs = await this.prisma.$transaction(async (tx) => {
+      await tx.voorraadontvangst.create({
+        data: { productId: p.id, locatieId: locatie.id, aantal: new Prisma.Decimal(aantal), ontvangenOp, tht, aankoopprijs: aankoop != null ? new Prisma.Decimal(aankoop) : null, bron: input?.bron === 'FACTUUR' ? 'FACTUUR' : 'MANUEEL', opmerking, door: door ?? null },
+      });
+      await tx.voorraad.upsert({
         where: { productId_locatieId: { productId: p.id, locatieId: locatie.id } },
         create: { productId: p.id, locatieId: locatie.id, aantal: new Prisma.Decimal(aantal) },
         update: { aantal: { increment: aantal } },
-      }),
-    ]);
-    return this.artikel(p.id);
+      });
+      // Hogere aankoopprijs: wordt de nieuwe aankoopprijs; met een factor stijgt de verkoopprijs mee.
+      return aankoop != null && aankoop > 0 ? verwerkAankoopprijs(tx, p.id, aankoop) : null;
+    });
+    return {
+      ...(await this.artikel(p.id)),
+      prijsWijziging: prijs?.gewijzigd ? { oudeInkoop: prijs.oudeInkoop, inkoopprijs: prijs.inkoopprijs, oudeVerkoop: prijs.oudeVerkoop, verkoopprijs: prijs.verkoopprijs } : null,
+    };
   }
 
   // Afboeken: weggegooid (THT verlopen), beschadigd, ... De voorraad gaat omlaag; wat er nog ligt
@@ -202,7 +208,7 @@ export class VoorraadService implements OnModuleInit, OnModuleDestroy {
   async artikel(productId: string) {
     const p = await this.prisma.product.findUnique({
       where: { id: String(productId ?? '') },
-      select: { id: true, naam: true, eenheid: true, thtNodig: true, vrijePrijs: true, isStatiegeld: true, afdeling: { select: { naam: true } }, categorie: { select: { afdeling: { select: { naam: true } } } } },
+      select: { id: true, naam: true, eenheid: true, thtNodig: true, vrijePrijs: true, isStatiegeld: true, inkoopprijs: true, verkoopprijs: true, factor: true, afdeling: { select: { naam: true } }, categorie: { select: { afdeling: { select: { naam: true } } } } },
     });
     if (!p) throw new NotFoundException('Artikel niet gevonden.');
     const [locaties, voorraad, loten, correcties, inst] = await Promise.all([
@@ -223,7 +229,10 @@ export class VoorraadService implements OnModuleInit, OnModuleDestroy {
     });
     const naamVan = new Map(locaties.map((l) => [l.id, l.naam]));
     return {
-      product: { id: p.id, naam: p.naam, eenheid: p.eenheid, thtNodig: p.thtNodig, heeftVoorraad: !p.vrijePrijs && !p.isStatiegeld, afdeling: p.afdeling?.naam ?? p.categorie?.afdeling?.naam ?? null },
+      product: {
+        id: p.id, naam: p.naam, eenheid: p.eenheid, thtNodig: p.thtNodig, heeftVoorraad: !p.vrijePrijs && !p.isStatiegeld, afdeling: p.afdeling?.naam ?? p.categorie?.afdeling?.naam ?? null,
+        inkoopprijs: p.inkoopprijs != null ? Number(p.inkoopprijs) : null, verkoopprijs: Number(p.verkoopprijs), factor: p.factor != null ? Number(p.factor) : null,
+      },
       locaties: perLocatie,
       totaal: r3(perLocatie.reduce((s, l) => s + l.aantal, 0)),
       loten: loten.map((x) => {

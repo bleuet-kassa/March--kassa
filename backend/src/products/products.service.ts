@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { Prisma, Eenheid } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { genereerBarcode } from '../common/barcode';
+import { leesFactor, prijsUitFactor } from '../common/prijsfactor';
 
 // Gegevens om een product aan te maken of te bewerken (vanuit het beheerscherm).
 export type ProductInput = {
@@ -22,7 +23,17 @@ export type ProductInput = {
   leverancierId?: string | null;
   statiegeldProductId?: string | null; // de statiegeldsoort die bij dit artikel hoort
   thtNodig?: boolean; // THT verplicht bij ontvangst (niet meegestuurd = ongewijzigd / standaard aan)
+  // Vaste prijsfactor (niet meegestuurd = ongewijzigd; leeg = geen). Met factor en aankoopprijs
+  // rekent de server de verkoopprijs zelf uit: aankoop × factor, naar boven op 5 cent.
+  factor?: number | string | null;
 };
+
+// De verkoopprijs volgens de factor als die er is (en een aankoopprijs), anders de ingegeven prijs.
+function verkoopMetFactor(input: ProductInput, factor: number | null) {
+  return factor != null && input.inkoopprijs != null && Number(input.inkoopprijs) > 0
+    ? prijsUitFactor(Number(input.inkoopprijs), factor)
+    : Number(input.verkoopprijs);
+}
 
 @Injectable()
 export class ProductsService {
@@ -107,13 +118,15 @@ export class ProductsService {
     await this.controleerUniek(input.barcode, input.interneCode, null);
     const barcode = input.barcode?.trim() || (await this.nieuweBarcode());
     const afdelingId = await this.bepaalAfdeling(input);
+    const factor = leesFactor(input.factor);
     return this.prisma.product.create({
       data: {
         naam: input.naam,
         omschrijving: this.omschrijving(input.omschrijving),
         barcode,
         interneCode: input.interneCode || null,
-        verkoopprijs: new Prisma.Decimal(input.verkoopprijs),
+        verkoopprijs: new Prisma.Decimal(verkoopMetFactor(input, factor)),
+        factor: factor != null ? new Prisma.Decimal(factor) : null,
         inkoopprijs: input.inkoopprijs != null ? new Prisma.Decimal(input.inkoopprijs) : null,
         isAlcohol: input.isAlcohol ?? false,
         eenheid: input.eenheid ?? Eenheid.STUK,
@@ -172,6 +185,8 @@ export class ProductsService {
     await this.findOne(id);
     await this.controleerUniek(input.barcode, input.interneCode, id);
     const afdelingId = await this.bepaalAfdeling(input);
+    // Factor meegestuurd: bewaren en de verkoopprijs daarmee uitrekenen. Niet meegestuurd: ongewijzigd.
+    const factor = input.factor !== undefined ? leesFactor(input.factor) : undefined;
     return this.prisma.product.update({
       where: { id },
       data: {
@@ -181,7 +196,8 @@ export class ProductsService {
         // Niet meegestuurd = ongewijzigd: het productformulier kent deze velden niet, en de
         // kassaknoppen (DIV6, CADEAU, PRIJSKG…) hangen aan de interne code.
         ...(input.interneCode !== undefined ? { interneCode: input.interneCode || null } : {}),
-        verkoopprijs: new Prisma.Decimal(input.verkoopprijs),
+        verkoopprijs: new Prisma.Decimal(factor !== undefined ? verkoopMetFactor(input, factor) : Number(input.verkoopprijs)),
+        ...(factor !== undefined ? { factor: factor != null ? new Prisma.Decimal(factor) : null } : {}),
         inkoopprijs: input.inkoopprijs != null ? new Prisma.Decimal(input.inkoopprijs) : null,
         isAlcohol: input.isAlcohol ?? false,
         eenheid: input.eenheid ?? Eenheid.STUK,

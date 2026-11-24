@@ -195,6 +195,9 @@ model Product {
   webshopFilters ProductFilter[] // filters in de webshop waar dit artikel onder valt
   // THT verplicht bij elke ontvangst (uit voor non-food, wijn en groenten, per artikel te kiezen).
   thtNodig     Boolean  @default(true)
+  // Vaste prijsfactor: verkoopprijs incl. btw = aankoopprijs × factor (naar boven op 5 cent).
+  // Leeg = de verkoopprijs wordt met de hand bepaald.
+  factor       Decimal? @db.Decimal(6, 3)
   ontvangsten  Voorraadontvangst[]
   correcties   Voorraadcorrectie[]
   createdAt    DateTime @default(now())
