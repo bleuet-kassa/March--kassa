@@ -463,6 +463,10 @@ export async function createCadeaubon(input: { nummer?: string; bedrag: number; 
 export async function bonInwisselen(id: string): Promise<Cadeaubon> {
   return jsonOrThrow(await fetch(`${BASE}/cadeaubonnen/${id}/inwisselen`, { method: 'POST' }));
 }
+// Enkel een beheerder (de server controleert dat ook).
+export async function verwijderCadeaubon(id: string): Promise<{ ok: true; nummer: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/cadeaubonnen/${id}`, { method: 'DELETE' }));
+}
 
 // --- Beheer: producten, meta, voorraad ---
 export type Afdeling = { id: string; naam: string; volgorde: number };

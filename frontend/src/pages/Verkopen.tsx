@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getVerkopen, getTicket, annuleerVerkoop, wijzigVerkoopBetaalwijze, verwijderVerkoop,
   type VerkoopKort, type Ticket, type Betaalwijze,
 } from '../api/client';
-import { getVerkoper } from '../auth';
+import { useVerwijderSneltoets } from '../verwijderSneltoets';
 import { TicketWeergave } from './Kassa';
 
 const euro = (n: number) => '€ ' + n.toFixed(2);
@@ -35,33 +35,8 @@ export function Verkopen() {
   const [fout, setFout] = useState('');
   const [betaalRij, setBetaalRij] = useState<string | null>(null);
   const [bezig, setBezig] = useState(false);
-  // Enkel een ingelogde beheerder mag verkopen verwijderen.
-  const rol = getVerkoper()?.rol;
-  const isBeheerder = rol === 'BEHEER' || rol === 'BEHEERDER';
-  // De "Verwijderen"-knop is verborgen tot de sneltoetsreeks "D", "+", "Enter"
-  // na elkaar wordt ingedrukt (en enkel voor een beheerder). Daarna blijft hij
-  // zichtbaar zolang dit scherm openstaat (bij het verlaten van het tabblad wordt
-  // de component ontladen en reset dit vanzelf).
-  const [toonVerwijder, setToonVerwijder] = useState(false);
-  const stap = useRef(0); // 0 = wacht op D, 1 = D gehad (wacht op +), 2 = + gehad (wacht op Enter)
-  useEffect(() => {
-    if (!isBeheerder) return; // geen sneltoets voor niet-beheerders
-    function opToets(e: KeyboardEvent) {
-      const doel = e.target as HTMLElement | null;
-      const tag = doel?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // niet tijdens typen
-      if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // modifiers breken de reeks niet af
-      // "+" komt afhankelijk van toetsenbord/lay-out binnen als '+', '=' (Shift+=),
-      // of via de code Equal/NumpadAdd — we aanvaarden ze allemaal.
-      const isPlus = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd' || e.code === 'Equal';
-      if (stap.current === 0 && (e.key === 'd' || e.key === 'D')) { stap.current = 1; return; }
-      if (stap.current === 1 && isPlus) { stap.current = 2; return; }
-      if (stap.current === 2 && e.key === 'Enter') { setToonVerwijder(true); stap.current = 0; return; }
-      stap.current = 0; // elke andere toets begint de reeks opnieuw
-    }
-    window.addEventListener('keydown', opToets);
-    return () => window.removeEventListener('keydown', opToets);
-  }, [isBeheerder]);
+  // Enkel een ingelogde beheerder mag verkopen verwijderen: de knop verschijnt na D, +, Enter.
+  const { isBeheerder, toonVerwijder } = useVerwijderSneltoets();
 
   async function laad() {
     setFout('');

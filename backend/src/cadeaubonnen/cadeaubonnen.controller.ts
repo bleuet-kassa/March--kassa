@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { CadeaubonnenService, NieuweBon } from './cadeaubonnen.service';
+import { Rollen } from '../auth/auth.guard';
 
 @Controller('cadeaubonnen')
 export class CadeaubonnenController {
@@ -27,5 +28,13 @@ export class CadeaubonnenController {
   @Post(':id/inwisselen')
   inwisselen(@Param('id') id: string) {
     return this.bonnen.inwisselen(id);
+  }
+
+  // DELETE /cadeaubonnen/:id -> bon uit het register verwijderen. Enkel een ingelogde beheerder
+  // (zoals verkopen verwijderen); op het scherm verborgen achter de toetsen D, +, Enter.
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Delete(':id')
+  verwijder(@Param('id') id: string) {
+    return this.bonnen.verwijder(id);
   }
 }

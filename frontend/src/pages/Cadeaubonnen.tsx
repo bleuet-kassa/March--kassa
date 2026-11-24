@@ -1,9 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
-  getCadeaubonnen, getNieuwBonNummer, createCadeaubon, bonInwisselen,
+  getCadeaubonnen, getNieuwBonNummer, createCadeaubon, bonInwisselen, verwijderCadeaubon,
   type Cadeaubon,
 } from '../api/client';
 import { getVerkoper } from '../auth';
+import { useVerwijderSneltoets } from '../verwijderSneltoets';
 
 const euro = (n: number | string) => '€ ' + Number(n).toFixed(2);
 
@@ -46,6 +47,20 @@ export function Cadeaubonnen() {
     setFout('');
     try { await bonInwisselen(id); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Inwisselen mislukt'); }
+    await laad();
+  }
+
+  // Verwijderen: enkel een beheerder, na de toetsen D, +, Enter (zoals bij Verkopen).
+  const { toonVerwijder } = useVerwijderSneltoets();
+  async function verwijder(b: Cadeaubon) {
+    const extra = [
+      b.soort === 'CADEAUBON' && b.verkoopId ? 'Deze bon werd aan de kassa verkocht; de verkoop zelf blijft staan.' : '',
+      b.ingewisseld ? 'Let op: deze bon is al ingewisseld.' : '',
+    ].filter(Boolean).join('\n');
+    if (!window.confirm(`${b.soort === 'TEGOED' ? 'Tegoedbon' : 'Cadeaubon'} ${b.nummer} (${euro(b.bedrag)}) DEFINITIEF uit het register verwijderen?${extra ? '\n\n' + extra : ''}\n\nDit kan niet ongedaan gemaakt worden.`)) return;
+    setFout('');
+    try { await verwijderCadeaubon(b.id); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
     await laad();
   }
 
@@ -109,8 +124,9 @@ export function Cadeaubonnen() {
                     : <span style={{ color: '#166534' }}>geldig</span>}
               </td>
               <td style={{ padding: 6, color: '#6b7280' }}>{b.gebruiker?.naam ?? ''}</td>
-              <td style={{ padding: 6, textAlign: 'right' }}>
+              <td style={{ padding: 6, textAlign: 'right', whiteSpace: 'nowrap' }}>
                 {!b.ingewisseld && !b.geannuleerd && <button onClick={() => inwisselen(b.id)} style={btnMini}>Inwisselen</button>}
+                {toonVerwijder && <button onClick={() => verwijder(b)} title="Bon definitief verwijderen (enkel beheerder)" style={{ ...btnMini, marginLeft: 6, color: '#b91c1c', borderColor: '#fecaca' }}>Verwijderen</button>}
               </td>
             </tr>
           ))}

@@ -60,4 +60,13 @@ export class CadeaubonnenService {
       data: { ingewisseld: true, ingewisseldOp: new Date() },
     });
   }
+
+  // Bon definitief uit het register (bv. een vergissing of dubbel ingegeven). De verkoop
+  // waaruit hij eventueel kwam, blijft staan.
+  async verwijder(id: string) {
+    const bon = await this.prisma.cadeaubon.findUnique({ where: { id } });
+    if (!bon) throw new NotFoundException('Cadeaubon niet gevonden.');
+    await this.prisma.cadeaubon.delete({ where: { id } });
+    return { ok: true, nummer: bon.nummer };
+  }
 }
