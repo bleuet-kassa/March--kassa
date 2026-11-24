@@ -197,9 +197,6 @@ export function Kassa() {
       setFactuurKlanten(factuurKlanten.map((x) => (x.id === klantId ? { ...x, email: bij.email } : x)));
     } catch (e) { setFout(e instanceof Error ? e.message : 'E-mail bewaren mislukt'); }
   }
-  // Prijs/kg-flow: eerst prijs per kg, dan gewicht.
-  const [prijsKgStap, setPrijsKgStap] = useState<null | 'prijs' | 'gewicht'>(null);
-  const [prijsKgWaarde, setPrijsKgWaarde] = useState(0);
   // Meerdere tickets tegelijk open; elk een eigen mandje + verkoper.
   const [bonnen, setBonnen] = useState<Bon[]>(() => [maakBon()]);
   const [actiefId, setActiefId] = useState<string>('');
@@ -338,30 +335,6 @@ export function Kassa() {
     setFout('');
     setVrijProduct(sp);
   }
-  // Prijs/kg: lijn = prijs per kg (stukprijs) × gewicht (aantal).
-  function voegPrijsKgToe(prijsPerKg: number, gewicht: number) {
-    const p = speciaal.find((s) => s.interneCode === 'PRIJSKG');
-    if (!p) return;
-    setLijnen((l) => [
-      ...l,
-      {
-        key: genKey(),
-        productId: p.id,
-        naam: `Prijs/kg (${gewicht.toFixed(3)} kg)`,
-        prijs: prijsPerKg, // prijs/kg ongewijzigd; het gewogen lijntotaal wordt op 5 cent afgerond
-        btwPercentage: Number(p.btwTarief.percentage),
-        isAlcohol: false,
-        aantal: gewicht,
-        kortingPct: 0,
-        vrijBedrag: true,
-        vastAantal: true,
-        retour: retourModus,
-      },
-    ]);
-    setPrijsKgStap(null);
-    setPrijsKgWaarde(0);
-  }
-
   // Bevestigd bedrag uit het klavier -> vrij-bedrag-lijn toevoegen.
   function voegVrijBedragToe(sp: SpeciaalProduct, bedrag: number, aantal = 1) {
     setLijnen((l) => [
@@ -906,7 +879,7 @@ export function Kassa() {
         </div>
         {retourModus && (
           <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontWeight: 600 }}>
-            Retour-modus: elk artikel dat je toevoegt (scannen, tegel, diversen, prijs/kg) wordt <u>afgetrokken</u>. Zet uit om terug gewoon te verkopen.
+            Retour-modus: elk artikel dat je toevoegt (scannen of tegel) wordt <u>afgetrokken</u>. Zet uit om terug gewoon te verkopen.
           </div>
         )}
         <input
@@ -919,21 +892,9 @@ export function Kassa() {
         />
         {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
 
-        {/* Volgorde: diversen (6/12/21) -> prijs/kg -> cadeaubon -> nieuw artikel */}
+        {/* Volgorde: cadeaubon -> leeggoed -> nieuw artikel. De knoppen Diversen (per btw-voet)
+            en Prijs/kg zijn weg (klantvraag 2026-11-24): alles gaat via een eigen artikel. */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-          {speciaal
-            .filter((sp) => (sp.interneCode ?? '').startsWith('DIV'))
-            .sort((a, b) => Number(a.btwTarief.percentage) - Number(b.btwTarief.percentage))
-            .map((sp) => (
-              <button key={sp.id} onClick={() => voegVrijBedrag(sp)} style={diversenKnop}>
-                {sp.naam}
-              </button>
-            ))}
-          {speciaal.some((sp) => sp.interneCode === 'PRIJSKG') && (
-            <button onClick={() => { setPrijsKgWaarde(0); setPrijsKgStap('prijs'); }} style={{ ...diversenKnop, background: '#fefce8', borderColor: '#fde68a', color: '#854d0e' }}>
-              Prijs/kg
-            </button>
-          )}
           {speciaal.filter((sp) => sp.interneCode === 'CADEAU').map((sp) => (
             <button key={sp.id} onClick={() => voegVrijBedrag(sp)} style={diversenKnop}>
               {sp.naam}
@@ -1549,26 +1510,6 @@ export function Kassa() {
           />
         );
       })()}
-
-      {prijsKgStap === 'prijs' && (
-        <BedragModal
-          titel="Prijs per kg"
-          subtitel="Geef de prijs per kilo (incl. BTW)"
-          bevestigLabel="Volgende"
-          onBevestig={(p) => { setPrijsKgWaarde(p); setPrijsKgStap('gewicht'); }}
-          onSluit={() => setPrijsKgStap(null)}
-        />
-      )}
-      {prijsKgStap === 'gewicht' && (
-        <BedragModal
-          titel="Gewicht"
-          subtitel={`€ ${prijsKgWaarde.toFixed(2)} / kg`}
-          bevestigLabel="Toevoegen"
-          eenheid="kg"
-          onBevestig={(g) => voegPrijsKgToe(prijsKgWaarde, g)}
-          onSluit={() => setPrijsKgStap(null)}
-        />
-      )}
 
       {onbekendeBarcode && (
         <div
