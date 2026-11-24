@@ -43,15 +43,22 @@ export function Cadeaubonnen() {
   }
 
   async function inwisselen(id: string) {
-    await bonInwisselen(id);
+    setFout('');
+    try { await bonInwisselen(id); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Inwisselen mislukt'); }
     await laad();
   }
 
-  const openBedrag = lijst.filter((b) => !b.ingewisseld).reduce((s, b) => s + Number(b.bedrag), 0);
+  // Openstaand = nog te besteden: niet ingewisseld en niet vervallen.
+  const openBedrag = lijst.filter((b) => !b.ingewisseld && !b.geannuleerd).reduce((s, b) => s + Number(b.bedrag), 0);
 
   return (
     <div style={{ maxWidth: 820 }}>
       <h2>Cadeaubonnen</h2>
+      <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>
+        Een cadeaubon die je aan de kassa verkoopt, komt hier vanzelf bij, met het nummer dat de kassa toonde.
+        Registreer hier enkel bonnen die je buiten de kassa uitgaf.
+      </p>
 
       <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14, marginBottom: 16, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
@@ -72,13 +79,14 @@ export function Cadeaubonnen() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <input value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek op nummer…" style={{ ...inp, maxWidth: 220, marginBottom: 0 }} />
-        <span style={{ fontSize: 13, color: '#6b7280' }}>Openstaand (niet ingewisseld): <strong>{euro(openBedrag)}</strong></span>
+        <span style={{ fontSize: 13, color: '#6b7280' }}>Openstaand (niet ingewisseld of vervallen): <strong>{euro(openBedrag)}</strong></span>
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: 12, color: '#666' }}>
             <th style={{ padding: 6 }}>Nummer</th>
+            <th style={{ padding: 6 }}>Soort</th>
             <th style={{ padding: 6 }}>Uitgifte</th>
             <th style={{ padding: 6, textAlign: 'right' }}>Bedrag</th>
             <th style={{ padding: 6 }}>Status</th>
@@ -88,22 +96,25 @@ export function Cadeaubonnen() {
         </thead>
         <tbody>
           {lijst.map((b) => (
-            <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', opacity: b.ingewisseld ? 0.6 : 1 }}>
+            <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', opacity: b.ingewisseld || b.geannuleerd ? 0.6 : 1 }}>
               <td style={{ padding: 6, fontFamily: 'monospace' }}>{b.nummer}</td>
+              <td style={{ padding: 6, color: '#6b7280' }}>{b.soort === 'TEGOED' ? 'Tegoedbon' : b.verkoopId ? 'Kassa' : 'Manueel'}</td>
               <td style={{ padding: 6 }}>{new Date(b.datumUitgifte).toLocaleDateString('nl-BE')}</td>
               <td style={{ padding: 6, textAlign: 'right' }}>{euro(b.bedrag)}</td>
               <td style={{ padding: 6 }}>
-                {b.ingewisseld
-                  ? <span style={{ color: '#6b7280' }}>ingewisseld {b.ingewisseldOp ? new Date(b.ingewisseldOp).toLocaleDateString('nl-BE') : ''}</span>
-                  : <span style={{ color: '#166534' }}>geldig</span>}
+                {b.geannuleerd
+                  ? <span style={{ color: '#b91c1c' }} title="De verkoop van deze bon werd geannuleerd of verwijderd">vervallen {b.geannuleerdOp ? new Date(b.geannuleerdOp).toLocaleDateString('nl-BE') : ''}</span>
+                  : b.ingewisseld
+                    ? <span style={{ color: '#6b7280' }}>ingewisseld {b.ingewisseldOp ? new Date(b.ingewisseldOp).toLocaleDateString('nl-BE') : ''}</span>
+                    : <span style={{ color: '#166534' }}>geldig</span>}
               </td>
               <td style={{ padding: 6, color: '#6b7280' }}>{b.gebruiker?.naam ?? ''}</td>
               <td style={{ padding: 6, textAlign: 'right' }}>
-                {!b.ingewisseld && <button onClick={() => inwisselen(b.id)} style={btnMini}>Inwisselen</button>}
+                {!b.ingewisseld && !b.geannuleerd && <button onClick={() => inwisselen(b.id)} style={btnMini}>Inwisselen</button>}
               </td>
             </tr>
           ))}
-          {lijst.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: '#999' }}>Nog geen cadeaubonnen.</td></tr>}
+          {lijst.length === 0 && <tr><td colSpan={7} style={{ padding: 16, color: '#999' }}>Nog geen cadeaubonnen.</td></tr>}
         </tbody>
       </table>
     </div>

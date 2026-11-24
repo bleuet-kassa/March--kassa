@@ -127,6 +127,8 @@ export type Ticket = {
   }[];
   btwOverzicht: { percentage: number; maatstaf: number; btw: number }[];
   tegoedbon?: { nummer: string; bedrag: number } | null; // terugbetaling als tegoedbon (bv. leeggoed)
+  cadeaubonnen?: { nummer: string; bedrag: number; geannuleerd?: boolean }[]; // verkochte cadeaubonnen (nummer op de bon schrijven)
+  cadeaubonVolgt?: boolean; // offline verkochte cadeaubon: het nummer komt pas na de synchronisatie
 };
 
 export async function getProductByBarcode(barcode: string): Promise<Product> {
@@ -438,6 +440,9 @@ export async function getKassaVsFacturen(van?: string, tot?: string): Promise<Ka
 export type Cadeaubon = {
   id: string; nummer: string; bedrag: string; datumUitgifte: string;
   ingewisseld: boolean; ingewisseldOp: string | null;
+  soort: string; // CADEAUBON of TEGOED
+  verkoopId: string | null; // verkocht aan de kassa (of tegoedbon uit een terugbetaling)
+  geannuleerd: boolean; geannuleerdOp: string | null; // vervallen: de verkoop werd geannuleerd
   gebruiker: { naam: string } | null;
 };
 export async function getCadeaubonnen(zoek = ''): Promise<Cadeaubon[]> {

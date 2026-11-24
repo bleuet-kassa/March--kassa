@@ -355,10 +355,15 @@ model Cadeaubon {
   ingewisseldOp DateTime?
   // CADEAUBON (verkocht) of TEGOED (tegoedbon uit een terugbetaling, bv. leeggoed/statiegeld).
   soort         String    @default("CADEAUBON")
-  verkoopId     String?   // de verkoop (terugbetaling) waaruit de tegoedbon ontstond
+  verkoopId     String?   // de verkoop waaruit de bon ontstond (cadeaubon verkocht aan de kassa, of tegoedbon)
+  // Vervallen omdat die verkoop geannuleerd of verwijderd werd: niet meer inwisselbaar.
+  geannuleerd   Boolean   @default(false)
+  geannuleerdOp DateTime?
   gebruiker     Gebruiker? @relation(fields: [gebruikerId], references: [id])
   gebruikerId   String?
   createdAt     DateTime  @default(now())
+
+  @@index([verkoopId])
 }
 
 // Webshopkalender: per dag afhalen en leveren aan of uit. Null = de standaard: afhalen op

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { volgendCadeaubonnummer, voorgesteldCadeaubonnummer } from '../common/cadeaubonnummer';
 
 export type NieuweBon = {
   nummer?: string;
@@ -13,16 +14,16 @@ export type NieuweBon = {
 export class CadeaubonnenService {
   constructor(private prisma: PrismaService) {}
 
-  // Volgend automatisch nummer: CB00001, CB00002, ...
-  async volgendNummer(): Promise<string> {
-    const n = (await this.prisma.cadeaubon.count()) + 1;
-    return 'CB' + String(n).padStart(5, '0');
+  // Voorstel voor het volgende automatische nummer (CB00001, CB00002, ...): dezelfde teller als
+  // de kassa, zodat een bon die hier ingegeven wordt nooit botst met een bon van de kassa.
+  volgendNummer(): Promise<string> {
+    return voorgesteldCadeaubonnummer(this.prisma);
   }
 
   async nieuw(input: NieuweBon) {
     const bedrag = Number(input.bedrag);
     if (!(bedrag > 0)) throw new BadRequestException('Geef een geldig bedrag.');
-    const nummer = input.nummer?.trim() || (await this.volgendNummer());
+    const nummer = input.nummer?.trim() || (await volgendCadeaubonnummer(this.prisma));
     try {
       return await this.prisma.cadeaubon.create({
         data: {
@@ -52,6 +53,7 @@ export class CadeaubonnenService {
   async inwisselen(id: string) {
     const bon = await this.prisma.cadeaubon.findUnique({ where: { id } });
     if (!bon) throw new NotFoundException('Cadeaubon niet gevonden.');
+    if (bon.geannuleerd) throw new BadRequestException(`Cadeaubon ${bon.nummer} is vervallen: de verkoop ervan werd geannuleerd.`);
     if (bon.ingewisseld) return bon;
     return this.prisma.cadeaubon.update({
       where: { id },

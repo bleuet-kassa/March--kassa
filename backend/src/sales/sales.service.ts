@@ -8,6 +8,7 @@ import { Betaalwijze, GebruikerRol, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { VerkoopfacturenService } from '../verkoopfacturen/verkoopfacturen.service';
+import { volgendCadeaubonnummer } from '../common/cadeaubonnummer';
 
 // Wettelijke cash-limiet in België: max. €3.000 contant per transactie.
 const CASH_LIMIET = 3000;
@@ -87,7 +88,7 @@ export class SalesService {
         where: { idempotencyKey },
         include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
       });
-      if (bestaande) return this.metTicket(bestaande, ontvangen);
+      if (bestaande) return this.metTicket(bestaande, ontvangen, await this.tegoedbonVan(bestaande.id), await this.cadeaubonnenVan(bestaande.id));
     }
 
     // De kassa is (voorlopig) enkel voor de winkel: bepaal de winkel-
@@ -114,6 +115,8 @@ export class SalesService {
     const perId = new Map(producten.map((p) => [p.id, p]));
 
     let totaalCent = 0;
+    // Verkochte cadeaubonnen (bedrag in centen, één per stuk): komen met een nummer in het register.
+    const teMakenBonnen: number[] = [];
     const lijnData = lijnen.map((l) => {
       const product = perId.get(l.productId);
       if (!product) {
@@ -126,16 +129,18 @@ export class SalesService {
       }
       // verkoopprijs is de consumentenprijs INCL. BTW.
       const pct = Number(product.btwTarief.percentage);
+      const isCadeaubon = product.interneCode === 'CADEAU';
       // korting per lijn (0-100%): verlaagt de effectieve stukprijs.
       // Statiegeld: vast bedrag — nooit korting (lijn noch verkoopbreed) en geen afronding.
+      // Cadeaubon: ook nooit korting (anders verkoop je geld met korting); de bon is het betaalde bedrag waard.
       const isStatiegeld = product.isStatiegeld;
-      const korting = isStatiegeld ? 0 : Math.min(Math.max(Number(l.kortingPct) || 0, 0), 100);
-      const lijnVerkoopKorting = isStatiegeld ? 0 : verkoopKorting;
+      const geenKorting = isStatiegeld || isCadeaubon;
+      const korting = geenKorting ? 0 : Math.min(Math.max(Number(l.kortingPct) || 0, 0), 100);
+      const lijnVerkoopKorting = geenKorting ? 0 : verkoopKorting;
       // "Diversen"/vrij-bedrag: enkel producten met vrijePrijs mogen een eigen
       // bedrag meesturen (kassier tikt het in). Anders altijd de vaste prijs.
       const vrij = product.vrijePrijs && Number(l.bedrag) > 0;
       const isKg = product.eenheid === 'KG';
-      const isCadeaubon = product.interneCode === 'CADEAU';
       const aanKassa = (kanaal ?? 'KASSA') === 'KASSA';
       const vast = intern.vastePrijzen?.get(product.id);
       let stukCent = vast != null ? naarCent(vast) : vrij ? naarCent(Number(l.bedrag)) : naarCent(Number(product.verkoopprijs));
@@ -146,6 +151,13 @@ export class SalesService {
       if (aanKassa && isCadeaubon) stukCent = naarBoven(stukCent, 100);
       else if (aanKassa && !isKg && !isStatiegeld) stukCent = naarBoven(stukCent, 5);
       const aantal = l.aantal; // bedrag is de stukprijs; aantal telt (ook bij diversen)
+      // Verkochte cadeaubon: per stuk één bon met een eigen nummer. Een retour (negatief aantal)
+      // maakt geen bon; een bon laten vervallen gebeurt in het cadeaubonregister.
+      if (isCadeaubon && Number(aantal) > 0) {
+        if (!Number.isInteger(Number(aantal))) throw new BadRequestException('Een cadeaubon verkoop je per stuk.');
+        if (stukCent <= 0) throw new BadRequestException('Geef het bedrag van de cadeaubon.');
+        for (let i = 0; i < Number(aantal); i++) teMakenBonnen.push(stukCent);
+      }
       // Eerst de lijnkorting, dan de verkoopbrede korting (gestapeld).
       const naLijnKortingCent = stukCent * (1 - korting / 100);
       const effUnitCent = Math.round(naLijnKortingCent * (1 - lijnVerkoopKorting / 100));
@@ -315,6 +327,15 @@ export class SalesService {
         });
       }
 
+      // Verkochte cadeaubonnen meteen in het register, in dezelfde transactie: lukt het niet, dan
+      // is er ook geen verkoop (en een tweede keer dezelfde verkoop geeft geen tweede bon).
+      for (const cent of teMakenBonnen) {
+        const nummer = await volgendCadeaubonnummer(tx);
+        await tx.cadeaubon.create({
+          data: { nummer, bedrag: new Prisma.Decimal(naarEuro(cent)), soort: 'CADEAUBON', verkoopId: v.id, gebruikerId: gebruikerId ?? null },
+        });
+      }
+
       return v;
     });
 
@@ -333,7 +354,23 @@ export class SalesService {
       try { await this.maakTegoedbon(verkoop.id, tegoedBedrag, gebruikerId); }
       catch (e) { console.warn(`Tegoedbon voor verkoop ${verkoop.id} niet aangemaakt: ${e instanceof Error ? e.message : e}`); }
     }
-    return this.metTicket(verkoop, ontvangen, await this.tegoedbonVan(verkoop.id));
+    return this.metTicket(verkoop, ontvangen, await this.tegoedbonVan(verkoop.id), await this.cadeaubonnenVan(verkoop.id));
+  }
+
+  // De cadeaubonnen die met deze verkoop verkocht werden (voor op het ticket en de pop-up aan de kassa).
+  private async cadeaubonnenVan(verkoopId: string) {
+    const bonnen = await this.prisma.cadeaubon.findMany({ where: { verkoopId, soort: 'CADEAUBON' }, orderBy: { nummer: 'asc' } });
+    return bonnen.map((b) => ({ nummer: b.nummer, bedrag: Number(b.bedrag), geannuleerd: b.geannuleerd }));
+  }
+
+  // Een verkoop annuleren of verwijderen laat haar bonnen vervallen. Is er al een ingewisseld,
+  // dan kan het niet meer: dat geld is al uitgegeven in de winkel.
+  private async bonnenVanVerkoopMogenVervallen(verkoopId: string) {
+    const bonnen = await this.prisma.cadeaubon.findMany({ where: { verkoopId, geannuleerd: false } });
+    const gebruikt = bonnen.filter((b) => b.ingewisseld);
+    if (gebruikt.length) {
+      throw new BadRequestException(`Deze verkoop bevat ${gebruikt.length === 1 ? 'een bon die' : 'bonnen die'} al ingewisseld ${gebruikt.length === 1 ? 'is' : 'zijn'} (${gebruikt.map((b) => b.nummer).join(', ')}). Annuleren of verwijderen kan daarom niet meer.`);
+    }
   }
 
   // Tegoedbon TB00001… in het cadeaubon-register (soort TEGOED), gekoppeld aan de verkoop.
@@ -418,8 +455,9 @@ export class SalesService {
     if (verkoop.afgesloten) throw new BadRequestException('Deze verkoop zit al in een afgesloten dagafsluiting en kan niet meer geannuleerd worden.');
     // Annuleren zonder geld terug zou de ontvangsten en Mollie uit elkaar laten lopen.
     if (verkoop.betaald && verkoop.betaalRef?.startsWith('tr_')) throw new BadRequestException('Deze bestelling is online betaald: annuleren kan enkel via Terugbetalen op het scherm Bestellingen.');
+    await this.bonnenVanVerkoopMogenVervallen(id);
 
-    return this.prisma.$transaction(async (tx) => {
+    const bij = await this.prisma.$transaction(async (tx) => {
       // Voorraad terugboeken (spiegelbeeld van het afrekenen): diversen/vrijePrijs
       // hebben geen voorraad. Het teken van l.aantal (negatief bij retour) klopt vanzelf.
       for (const l of verkoop.lijnen) {
@@ -431,13 +469,15 @@ export class SalesService {
           update: { aantal: { increment: Number(l.aantal) } },
         });
       }
-      const bij = await tx.verkoop.update({
+      // Cadeau- en tegoedbonnen uit deze verkoop vervallen (niet meer inwisselbaar).
+      await tx.cadeaubon.updateMany({ where: { verkoopId: id, geannuleerd: false }, data: { geannuleerd: true, geannuleerdOp: new Date() } });
+      return tx.verkoop.update({
         where: { id },
         data: { geannuleerd: true, geannuleerdOp: new Date(), geannuleerdReden: reden ?? null },
         include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
       });
-      return this.metTicket(bij);
     });
+    return this.metTicket(bij, undefined, await this.tegoedbonVan(id), await this.cadeaubonnenVan(id));
   }
 
   // Verifieert dat het opgegeven wachtwoord van een (actieve) beheerder is.
@@ -484,8 +524,11 @@ export class SalesService {
       include: { lijnen: { include: { product: true } } },
     });
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
+    await this.bonnenVanVerkoopMogenVervallen(id);
 
     return this.prisma.$transaction(async (tx) => {
+      // Cadeau- en tegoedbonnen uit deze verkoop vervallen; ze blijven zichtbaar in het register.
+      await tx.cadeaubon.updateMany({ where: { verkoopId: id, geannuleerd: false }, data: { geannuleerd: true, geannuleerdOp: new Date() } });
       // Voorraad terugboeken, maar enkel als de verkoop nog NIET geannuleerd was
       // (bij een annulatie is de stock al teruggeboekt — anders zou hij dubbel tellen).
       if (!verkoop.geannuleerd) {
@@ -513,7 +556,7 @@ export class SalesService {
       include: { lijnen: { include: { product: true } }, gebruiker: true, betalingen: true },
     });
     if (!verkoop) throw new NotFoundException('Verkoop niet gevonden.');
-    return this.metTicket(verkoop, undefined, await this.tegoedbonVan(verkoop.id));
+    return this.metTicket(verkoop, undefined, await this.tegoedbonVan(verkoop.id), await this.cadeaubonnenVan(verkoop.id));
   }
 
   // Bouwt het ticket-overzicht: BTW gegroepeerd per tarief + wisselgeld.
@@ -523,6 +566,7 @@ export class SalesService {
     }>,
     ontvangen?: number,
     tegoedbon: { nummer: string; bedrag: number } | null = null,
+    cadeaubonnen: { nummer: string; bedrag: number; geannuleerd: boolean }[] = [],
   ) {
     const perTarief = new Map<
       string,
@@ -563,8 +607,8 @@ export class SalesService {
     const lijnen = verkoop.lijnen.map((l) => {
       const aantal = Number(l.aantal);
       const finalLineTotal = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * aantal; // beide kortingen
-      // Statiegeld krijgt nooit de verkoopbrede korting -> ook niet terugrekenen.
-      const metSaleKorting = saleKorting > 0 && !l.product.isStatiegeld;
+      // Statiegeld en cadeaubonnen krijgen nooit de verkoopbrede korting -> ook niet terugrekenen.
+      const metSaleKorting = saleKorting > 0 && !l.product.isStatiegeld && l.product.interneCode !== 'CADEAU';
       const naLijnTotal = metSaleKorting ? finalLineTotal / saleFactor : finalLineTotal; // vóór verkoopkorting
       const lineKorting = l.kortingPct != null ? Number(l.kortingPct) : 0;
       const origineelTotaal = lineKorting > 0 ? r2(naLijnTotal / (1 - lineKorting / 100)) : null;
@@ -599,6 +643,7 @@ export class SalesService {
       lijnen,
       btwOverzicht,
       tegoedbon, // tegoedbon uit een terugbetaling (nummer + bedrag), anders null
+      cadeaubonnen, // verkochte cadeaubonnen (nummer + bedrag), om op de bon te schrijven
     };
   }
 }

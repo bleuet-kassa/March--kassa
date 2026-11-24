@@ -51,6 +51,7 @@ type Lijn = {
   vastAantal?: boolean; // aantal/gewicht ligt vast (bv. prijs/kg) — niet wijzigbaar
   retour?: boolean; // terugname/correctie: deze lijn wordt afgetrokken (negatief)
   statiegeld?: boolean; // statiegeldlijn: vast bedrag, geen korting, geen afronding
+  cadeaubon?: boolean; // verkochte cadeaubon: nooit korting, per stuk; krijgt een nummer in het register
 };
 
 // Het "getekende" aantal: bij een retour telt de lijn negatief mee, zodat ze
@@ -155,6 +156,8 @@ export function Kassa() {
   const [fout, setFout] = useState('');
   const [bezig, setBezig] = useState(false);
   const [ticket, setTicket] = useState<TicketData | null>(null);
+  // Net verkochte cadeaubonnen: pop-up met het nummer om op de bon te schrijven (moet bevestigd worden).
+  const [bonPopup, setBonPopup] = useState<{ nummer: string; bedrag: number }[] | null>(null);
   // Tegel-kassa: producten + afdelingen, gekozen afdeling/categorie, weegmodal.
   const [producten, setProducten] = useState<ProductVol[]>(getCachedProducten());
   const [afdelingen, setAfdelingen] = useState<Afdeling[]>([]);
@@ -350,6 +353,7 @@ export function Kassa() {
         kortingPct: 0,
         vrijBedrag: true,
         retour: retourModus,
+        cadeaubon: sp.interneCode === 'CADEAU',
       },
     ]);
     setVrijProduct(null);
@@ -526,10 +530,12 @@ export function Kassa() {
 
   // Direct een aantal invoeren (handig voor gewichten, bv. 0,750 kg).
   function zetAantal(key: string, waarde: string) {
-    const n = Number(waarde.replace(',', '.'));
-    if (Number.isNaN(n)) return;
+    const ingetikt = Number(waarde.replace(',', '.'));
+    if (Number.isNaN(ingetikt)) return;
     setLijnen((l) => {
       const x0 = l.find((x) => x.key === key);
+      // Cadeaubonnen per stuk: elke bon krijgt een eigen nummer.
+      const n = x0?.cadeaubon ? Math.max(1, Math.floor(ingetikt)) : ingetikt;
       const nieuw = l.map((x) => (x.key === key ? { ...x, aantal: n } : x));
       return x0 ? pasStatiegeldAan(nieuw, productVanLijn(x0), n - x0.aantal, !!x0.retour) : nieuw;
     });
@@ -575,7 +581,9 @@ export function Kassa() {
     : undefined;
   // Lijnkorting (enkel op deze lijn). De nettoprijs is de stukprijs ná lijnkorting;
   // de verkoopbrede korting komt daar bovenop op het subtotaal.
-  const lijnKorting = (l: Lijn) => (l.statiegeld ? 0 : Math.min(100, Math.max(l.kortingPct || 0, 0))); // statiegeld: nooit korting
+  // Statiegeld en cadeaubonnen: nooit korting (zelfde regel als de server).
+  const geenKorting = (l: Lijn) => !!(l.statiegeld || l.cadeaubon);
+  const lijnKorting = (l: Lijn) => (geenKorting(l) ? 0 : Math.min(100, Math.max(l.kortingPct || 0, 0)));
   const nettoPrijs = (l: Lijn) => l.prijs * (1 - lijnKorting(l) / 100);
   // Weeglijn (prijs/kg × gewicht): het gewogen lijntotaal wordt op 5 cent afgerond.
   const isWeegLijn = (l: Lijn) => (!!l.vrijBedrag && !!l.vastAantal) || producten.find((p) => p.id === l.productId)?.eenheid === 'KG';
@@ -590,8 +598,8 @@ export function Kassa() {
     () => lijnen.reduce((s, l) => s + lijnBedrag(l), 0),
     [lijnen],
   );
-  // Statiegeld valt buiten de verkoopbrede korting (vast bedrag).
-  const statiegeldSub = useMemo(() => lijnen.filter((l) => l.statiegeld).reduce((s, l) => s + lijnBedrag(l), 0), [lijnen]);
+  // Statiegeld en cadeaubonnen vallen buiten de verkoopbrede korting (vast bedrag).
+  const statiegeldSub = useMemo(() => lijnen.filter(geenKorting).reduce((s, l) => s + lijnBedrag(l), 0), [lijnen]);
   const totaal = Math.round(((subtotaal - statiegeldSub) * saleFactor + statiegeldSub) * 100) / 100;
 
   // BTW-uitsplitsing per tarief (na lijnkorting, dan geschaald met de
@@ -599,8 +607,8 @@ export function Kassa() {
   const btwOverzicht = useMemo(() => {
     const per = new Map<number, { maatstaf: number; btw: number }>();
     for (const l of lijnen) {
-      // Alles behalve statiegeld schaalt mee met de verkoopbrede korting (hieronder ×saleFactor).
-      const bruto = l.statiegeld && saleFactor > 0 ? lijnBedrag(l) / saleFactor : lijnBedrag(l);
+      // Alles behalve statiegeld en cadeaubonnen schaalt mee met de verkoopbrede korting (hieronder ×saleFactor).
+      const bruto = geenKorting(l) && saleFactor > 0 ? lijnBedrag(l) / saleFactor : lijnBedrag(l);
       const excl = bruto / (1 + l.btwPercentage / 100);
       const rij = per.get(l.btwPercentage) ?? { maatstaf: 0, btw: 0 };
       rij.maatstaf += excl;
@@ -709,6 +717,8 @@ export function Kassa() {
         maatstaf: Math.round(b.maatstaf * 100) / 100,
         btw: Math.round(b.btw * 100) / 100,
       })),
+      // Het cadeaubonnummer komt van de server: pas na de synchronisatie in het register.
+      cadeaubonVolgt: lijnen.some((l) => l.cadeaubon && tekenAantal(l) > 0),
     };
   }
 
@@ -728,6 +738,11 @@ export function Kassa() {
     }
     if (bon.gesplitst && !splitOk) { setFout(`De gesplitste betalingen komen niet overeen met het te betalen bedrag (verschil € ${splitVerschil.toFixed(2)}).`); return; }
     if (bon.factuur && !bon.opRekening && !bon.factuurBedrijfId && !bon.factuurKlantId && !bon.factuurNaam?.trim()) { setFout('Kies voor de factuur/rekening een bestaande klant, of vul minstens de naam in.'); return; }
+    // Het nummer van een cadeaubon komt van de server: zonder internet kan je er geen verkopen.
+    if (lijnen.some((l) => l.cadeaubon && tekenAantal(l) > 0) && typeof navigator !== 'undefined' && !navigator.onLine) {
+      setFout('De kassa is offline. Een cadeaubon verkopen kan pas als de verbinding terug is: het nummer komt van de server.');
+      return;
+    }
     // Factuur/rekening op naam: bestaand bedrijf, bewaarde klant, of nieuwe klant (BTW-nummer optioneel).
     //  - "Factuur"-vinkje (ticket meteen betaald): klant via het factuurvenster.
     //  - "Op rekening" met klant/nieuwe klant (geen bedrijf): rekening in de kassa, later betalen.
@@ -777,6 +792,8 @@ export function Kassa() {
     try {
       const t = await afrekenen(payload);
       setTicket(t);
+      const verkocht = (t.cadeaubonnen ?? []).filter((b) => !b.geannuleerd);
+      if (verkocht.length) setBonPopup(verkocht);
       sluitVerkochtBon(gesloten);
     } catch (e) {
       if (isNetwerkfout(e)) {
@@ -803,12 +820,20 @@ export function Kassa() {
 
   function nieuweVerkoop() {
     setTicket(null);
+    setBonPopup(null);
     setCatId(null);
     setFout('');
   }
 
   if (ticket) {
-    return <TicketWeergave ticket={ticket} onNieuw={nieuweVerkoop} />;
+    return (
+      <>
+        {/* Met een cadeaubon: eerst het nummer tonen en laten bevestigen, dan pas afdrukken
+            (het nummer staat ook op het ticket). */}
+        <TicketWeergave ticket={ticket} onNieuw={nieuweVerkoop} autoPrint={!bonPopup} />
+        {bonPopup && <CadeaubonPopup bonnen={bonPopup} onOk={() => setBonPopup(null)} />}
+      </>
+    );
   }
 
   // QR-code als betaalwijze: actief sinds de backend-herstart die ze in de
@@ -1047,12 +1072,12 @@ export function Kassa() {
                   )}
                 </td>
                 <td style={{ padding: '8px 4px', textAlign: 'center' }}>
-                  <button
+                  {geenKorting(l) ? <span title="Geen korting op statiegeld of een cadeaubon" style={{ color: '#9ca3af' }}>—</span> : <button
                     onClick={() => setKortingLijn(l.key)}
                     style={{ minWidth: 46, padding: '4px 6px', borderRadius: 6, cursor: 'pointer', border: l.kortingPct ? '2px solid #7c3aed' : '1px solid #cbd5e1', background: l.kortingPct ? '#f5f3ff' : '#fff', color: l.kortingPct ? '#6d28d9' : '#374151', fontWeight: 600, fontSize: 13 }}
                   >
                     {l.kortingPct ? `${l.kortingPct}%` : '−%'}
-                  </button>
+                  </button>}
                 </td>
                 <td style={{ padding: '8px 4px', textAlign: 'right', color: l.retour ? '#b91c1c' : undefined, fontWeight: l.retour ? 700 : undefined }}>€ {lijnBedrag(l).toFixed(2)}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -1763,6 +1788,30 @@ const overlayStyle: CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
 };
 
+// Na het afrekenen van een cadeaubon: het nummer groot op het scherm, zodat de medewerker het
+// op de bon kan schrijven. Sluit enkel met de knop (niet per ongeluk door ernaast te tikken).
+function CadeaubonPopup({ bonnen, onOk }: { bonnen: { nummer: string; bedrag: number }[]; onOk: () => void }) {
+  const meer = bonnen.length > 1;
+  return (
+    <div style={overlayStyle} role="dialog" aria-modal="true" aria-labelledby="cadeaubon-titel">
+      <div style={{ background: '#fff', borderRadius: 14, padding: '22px 26px', width: 'min(440px, 92vw)', boxShadow: '0 10px 30px rgba(0,0,0,.25)', textAlign: 'center' }}>
+        <div id="cadeaubon-titel" style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{meer ? 'Cadeaubonnen verkocht' : 'Cadeaubon verkocht'}</div>
+        <div style={{ color: '#374151', marginBottom: 14 }}>Schrijf {meer ? 'deze nummers elk op hun bon' : 'dit nummer op de cadeaubon'}:</div>
+        {bonnen.map((b) => (
+          <div key={b.nummer} style={{ border: '2px dashed #111', borderRadius: 10, padding: '10px 12px', margin: '8px 0' }}>
+            <div style={{ fontFamily: 'monospace', fontSize: 34, fontWeight: 800, letterSpacing: 2 }}>{b.nummer}</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>€ {b.bedrag.toFixed(2)}</div>
+          </div>
+        ))}
+        <div style={{ fontSize: 13, color: '#6b7280', margin: '10px 0 14px' }}>{meer ? 'De bonnen staan' : 'De bon staat'} in het cadeaubonregister en {meer ? 'de nummers staan' : 'het nummer staat'} ook op het ticket.</div>
+        <button onClick={onOk} autoFocus style={{ width: '100%', padding: 14, fontSize: 17, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+          OK, genoteerd
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Weegflow: het gewicht komt (later) van de gekoppelde weegschaal; nu vult de
 // medewerker het in of bevestigt de waarde. "Klopt dit?" vóór toevoegen.
 function WeegModal({
@@ -1886,6 +1935,7 @@ export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop',
       {ticket.offline && (
         <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13 }}>
           ⚠ Offline bewaard — wordt automatisch verstuurd zodra er weer verbinding is.
+          {ticket.cadeaubonVolgt && <div style={{ marginTop: 4, fontWeight: 700 }}>Cadeaubon: het nummer krijg je pas als de verbinding terug is. Zoek het dan op bij Cadeaubons (bovenaan de lijst).</div>}
         </div>
       )}
       <div className="ticket-print" style={{ border: '1px solid #ddd', borderRadius: 8, padding: 20, fontFamily: 'monospace' }}>
@@ -1972,6 +2022,13 @@ export function TicketWeergave({ ticket, onNieuw, nieuwLabel = 'Nieuwe verkoop',
             <div style={{ fontSize: 11, marginTop: 4 }}>Geldig als betaalmiddel in de winkel. Bewaar dit ticket; niet inwisselbaar voor geld.</div>
           </div>
         )}
+        {(ticket.cadeaubonnen ?? []).map((b) => (
+          <div key={b.nummer} style={{ margin: '10px 0', padding: 10, border: '2px dashed #111', textAlign: 'center' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>CADEAUBON{b.geannuleerd ? ' — VERVALLEN' : ''}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>€ {b.bedrag.toFixed(2)}</div>
+            <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{b.nummer}</div>
+          </div>
+        ))}
         <hr />
         <div style={{ textAlign: 'center', fontSize: 11, color: '#555', marginTop: 6, lineHeight: 1.5 }}>
           <div>Onderbossenaarstraat 1, Maarkedal</div>
