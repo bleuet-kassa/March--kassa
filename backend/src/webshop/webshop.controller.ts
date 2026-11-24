@@ -1,6 +1,8 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { WebshopService, type BestellingInput, type HerroepingInput } from './webshop.service';
+import { WebshopService, WEBSHOP_WHERE, type BestellingInput, type HerroepingInput } from './webshop.service';
+import { LeveringService, type LeverInstellingen, type Leveradres } from './levering.service';
+import { FiltersService } from './filters.service';
 import { Publiek, Recht, Rollen } from '../auth/auth.guard';
 
 // Achter Cloudflare/Render is de echte bezoeker enkel zichtbaar via deze header.
@@ -9,7 +11,76 @@ const bezoeker = (req: Request) => String(req.headers['cf-connecting-ip'] ?? req
 // Publieke (niet-ingelogde) webshop-endpoints + beheer van bestellingen.
 @Controller('webshop')
 export class WebshopController {
-  constructor(private readonly webshop: WebshopService) {}
+  constructor(private readonly webshop: WebshopService, private readonly levering: LeveringService, private readonly filters: FiltersService) {}
+
+  // Publiek: de zoekfilters die de zaak zelf aanmaakte (enkel met artikels die online staan).
+  @Publiek()
+  @Get('filters')
+  publiekeFilters() {
+    return this.filters.publiek(WEBSHOP_WHERE);
+  }
+
+  // Beheer van de zoekfilters en welke artikels eronder vallen.
+  @Recht('webshop', 'website')
+  @Get('filters/beheer')
+  filtersBeheer() {
+    return this.filters.beheer();
+  }
+
+  @Recht('webshop', 'website')
+  @Post('filters')
+  maakFilter(@Body() body: { naam: string }) {
+    return this.filters.maak(body);
+  }
+
+  @Recht('webshop', 'website')
+  @Patch('filters/:id')
+  wijzigFilter(@Param('id') id: string, @Body() body: { naam?: string; omhoog?: boolean; omlaag?: boolean }) {
+    return this.filters.wijzig(id, body ?? {});
+  }
+
+  @Recht('webshop', 'website')
+  @Delete('filters/:id')
+  verwijderFilter(@Param('id') id: string) {
+    return this.filters.verwijder(id);
+  }
+
+  @Recht('webshop', 'website')
+  @Put('filters/:id/producten/:productId')
+  zetFilterProduct(@Param('id') id: string, @Param('productId') productId: string, @Body() body: { aan: boolean }) {
+    return this.filters.zetProduct(id, productId, body?.aan);
+  }
+
+  // Publiek: wat een levering naar dit adres kost (de klant ziet het nog voor de betaling).
+  // Een adres uit de cache kost niets: daarvoor enkel een ruime rem. Een nieuw adres opzoeken
+  // bij OpenStreetMap wel, dus daarvoor een strengere rem per bezoeker.
+  @Publiek()
+  @Post('leverkost')
+  leverkost(@Body() body: { lijnen: BestellingInput['lijnen']; adres: Partial<Leveradres> }, @Req() req: Request) {
+    const wie = bezoeker(req);
+    this.webshop.rem(`lever:${wie}`, 200);
+    return this.webshop.leverkost(body, () => this.webshop.rem(`adres:${wie}`, 15));
+  }
+
+  // Leverkosten instellen: vertrekadres, kilometerprijs of forfait, en uitzonderingsregels.
+  @Recht('webshop', 'website')
+  @Get('levering')
+  async leverInstellingen() {
+    const inst = await this.levering.instellingen();
+    return { ...inst, klaar: this.levering.klaar(inst) };
+  }
+
+  @Recht('webshop', 'website')
+  @Put('levering')
+  zetLeverInstellingen(@Body() body: Partial<LeverInstellingen>) {
+    return this.levering.zetInstellingen(body);
+  }
+
+  @Recht('webshop', 'website')
+  @Post('levering/test')
+  testLevering(@Body() body: { adres: Partial<Leveradres>; bedrag: number }) {
+    return this.levering.test(body);
+  }
 
   @Publiek()
   @Get('producten')

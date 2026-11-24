@@ -611,8 +611,51 @@ export type WebshopProduct = {
   afdeling: { id: string; naam: string; volgorde: number } | null;
   categorie: { id: string; naam: string } | null;
   statiegeld: { id: string; naam: string; verkoopprijs: string } | null;
+  webshopFilters: { filterId: string }[];
 };
 export type WebshopAfdeling = { id: string; naam: string; volgorde: number; aantal: number };
+
+// Zoekfilters die de zaak zelf aanmaakt (bv. "Vegetarisch") en aan artikels toekent.
+export type WebshopFilter = { id: string; naam: string };
+export async function getWebshopFilters(): Promise<WebshopFilter[]> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters`));
+}
+export type FilterBeheer = WebshopFilter & { volgorde: number; productIds: string[] };
+export async function getFiltersBeheer(): Promise<FilterBeheer[]> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters/beheer`));
+}
+export async function maakFilter(naam: string): Promise<WebshopFilter> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naam }) }));
+}
+export async function wijzigFilter(id: string, input: { naam?: string; omhoog?: boolean; omlaag?: boolean }): Promise<FilterBeheer[]> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function verwijderFilter(id: string): Promise<{ ok: boolean }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters/${id}`, { method: 'DELETE' }));
+}
+export async function zetFilterProduct(id: string, productId: string, aan: boolean): Promise<{ ok: boolean }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/filters/${id}/producten/${productId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aan }) }));
+}
+
+// Leverkosten: per km in vogelvlucht of een forfait, met maximaal 4 uitzonderingsregels.
+export type Leveradres = { straat: string; postcode: string; gemeente: string };
+export type LeverRegel = { actief: boolean; naam: string; vanafBedrag: number | null; vanafKm: number | null; totKm: number | null; soort: 'KM' | 'FORFAIT' | 'NIET'; bedrag: number | null };
+export type LeverInstellingen = {
+  vertrekadres: Leveradres | null; vertrekpunt: { lat: number; lon: number } | null;
+  standaard: { soort: 'KM' | 'FORFAIT'; bedrag: number | null }; regels: LeverRegel[];
+};
+export async function berekenLeverkost(lijnen: { productId: string; aantal: number }[], adres: Leveradres): Promise<{ km: number; bedrag: number; regel: string | null; subtotaal: number; totaal: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/leverkost`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lijnen, adres }) }));
+}
+export async function getLeverInstellingen(): Promise<LeverInstellingen & { klaar: boolean }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/levering`));
+}
+export async function zetLeverInstellingen(input: LeverInstellingen): Promise<LeverInstellingen> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/levering`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function testLevering(adres: Leveradres, bedrag: number): Promise<{ ok: boolean; km?: number; bedrag?: number; regel?: string | null; melding?: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/levering/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adres, bedrag }) }));
+}
 
 // Dagen waarop een klant kan afhalen of laten leveren (vanaf het minimum aantal dagen vooraf).
 // van/tot = openingsuren, enkel op gewone open dagen.
@@ -651,17 +694,25 @@ export async function getWebshopAfdelingen(): Promise<WebshopAfdeling[]> {
 }
 
 // Een webshop-bestelling starten: de klant gaat daarna naar de betaalpagina van Mollie.
-export type BestellingKlant = { naam: string; email: string; telefoon?: string; adres?: string };
-export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; gewensteDag: string; gewensteTijd?: string }): Promise<{ betaalUrl: string }> {
-  return jsonOrThrow(await fetch(`${BASE}/webshop/bestelling`, {
+export type BestellingKlant = { naam: string; email: string; telefoon?: string } & Partial<Leveradres>; // leveradres enkel bij leveren
+// De server rekent nooit iets anders aan dan het totaal dat de klant zag; wijkt het af, dan
+// antwoordt hij met 409 en deze fout.
+export class TotaalGewijzigd extends Error {}
+export async function plaatsBestelling(input: { lijnen: { productId: string; aantal: number }[]; klant: BestellingKlant; leverwijze: 'AFHALEN' | 'LEVEREN'; gewensteDag: string; gewensteTijd?: string; verwachtTotaal: number }): Promise<{ betaalUrl: string }> {
+  const res = await fetch(`${BASE}/webshop/bestelling`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-  }));
+  });
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null);
+    throw new TotaalGewijzigd(body?.message ?? 'Het totaal is intussen gewijzigd. Kijk je bestelling na en bestel opnieuw.');
+  }
+  return jsonOrThrow(res);
 }
 // De klant komt terug van Mollie: hoe staat het met de betaling?
 export type BestelStatus = {
   status: 'OPEN' | 'BETAALD' | 'MISLUKT' | 'FOUT'; // FOUT = betaald, maar de bestelling moet nog nagekeken worden
   bestelnummer: string; totaal: number; leverwijze: string; gewensteDag: string; gewensteTijd: string | null;
-  lijnen: { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean }[];
+  lijnen: { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean; isLevering?: boolean }[];
   naam: string; email: string; telefoon?: string | null; adres?: string | null;
   bevestigingPerMail: boolean;
 };
@@ -682,7 +733,7 @@ export type WebshopOrder = {
   betaald: boolean; betaalRef: string | null; testBetaling: boolean; geannuleerd: boolean; gewensteDag?: string | null; gewensteTijd?: string | null;
   bestelNaam: string | null; bestelEmail: string | null; bestelTelefoon: string | null; bestelAdres: string | null;
   klant: { naam: string; email: string | null; telefoon: string | null; adres: string | null } | null; // enkel nog bij oudere bestellingen
-  lijnen: { productId: string; aantal: string; eenheidsprijs: string; product: { naam: string; eenheid: string; isStatiegeld: boolean } }[];
+  lijnen: { productId: string; aantal: string; eenheidsprijs: string; product: { naam: string; eenheid: string; isStatiegeld: boolean; interneCode: string | null } }[];
   kanTerugbetalen: boolean; terugbetaald: number; terugPerProduct: Record<string, number>;
 };
 export async function terugbetaalBestelling(id: string, lijnen: { productId: string; aantal: number }[]): Promise<{ ok: boolean; bedrag: number; volledig: boolean; mollieStatus: string }> {

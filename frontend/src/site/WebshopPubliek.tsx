@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  getWebshopProducten, getWebshopAfdelingen, getWebshopInstellingen, getWebshopDagen, plaatsBestelling, getBestelStatus, getSiteInhoud,
-  type WebshopProduct, type WebshopAfdeling, type WebshopDag, type BestelStatus, type BetaalModus, type SiteInhoud,
+  getWebshopProducten, getWebshopAfdelingen, getWebshopInstellingen, getWebshopDagen, getWebshopFilters, berekenLeverkost, plaatsBestelling, getBestelStatus, getSiteInhoud,
+  TotaalGewijzigd, type WebshopProduct, type WebshopAfdeling, type WebshopDag, type WebshopFilter, type Leveradres, type BestelStatus, type BetaalModus, type SiteInhoud,
 } from '../api/client';
 import { SiteVoet } from './SiteVoet';
 import { dagNaam, vandaagBrussel } from './afhaaldagen';
@@ -16,6 +16,17 @@ const WACHT_POGINGEN = 40; // zo lang vragen we na of de betaling binnen is (om 
 const lijnBedrag = (prijs: number, aantal: number) => Math.round(Math.round(prijs * 100) * aantal) / 100;
 // Stukartikels dragen hun statiegeld automatisch mee, zoals aan de kassa.
 const statiegeldVan = (p: WebshopProduct) => (p.eenheid === 'KG' ? null : p.statiegeld);
+
+// Zoeken zonder hoofdletters en accenten ("creme" vindt ook "crème").
+const zoekbaar = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+// Met een muis toont zweven de volledige omschrijving; op een aanraakscherm doet een tik dat.
+// Op het moment zelf nagaan: een 2-in-1 kan tussendoor van laptop naar tablet wisselen.
+const kanZweven = () => typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover)').matches;
+// Leveradres zoals de server het bewaart ("straat nr, 9000 Gent") terug in de velden zetten.
+function adresUit(tekst: string | null | undefined): Leveradres {
+  const m = /^(.*), (\d{4}) (.+)$/.exec(tekst ?? '');
+  return m ? { straat: m[1], postcode: m[2], gemeente: m[3] } : { straat: tekst ?? '', postcode: '', gemeente: '' };
+}
 
 // Afdelingen zonder voeding: daar hoeft geen allergeneninformatie bij.
 const GEEN_VOEDING = ['Onderhoudsproducten', 'Private hygiëne', 'Lifestyle'];
@@ -43,7 +54,21 @@ export function WebshopPubliek() {
   // Afhaal- en leverdagen uit de webshopkalender (al vanaf het minimum aantal dagen vooraf).
   const [dagen, setDagen] = useState<WebshopDag[]>([]);
   const [dagenVooraf, setDagenVooraf] = useState(0);
-  const [klant, setKlant] = useState({ naam: '', email: '', telefoon: '', adres: '' });
+  // Zoeken en filteren in de catalogus; de filters maakt de zaak zelf aan in de kassa.
+  const [zoek, setZoek] = useState('');
+  const [filters, setFilters] = useState<WebshopFilter[]>([]);
+  const [gekozenFilters, setGekozenFilters] = useState<string[]>([]);
+  const [infoOpen, setInfoOpen] = useState(''); // volledige omschrijving open (aanraakscherm)
+  const [klant, setKlant] = useState({ naam: '', email: '', telefoon: '' });
+  const [adres, setAdres] = useState<Leveradres>({ straat: '', postcode: '', gemeente: '' });
+  // Leverkost (of de melding waarom leveren niet kan) hoort bij precies één mandje en één adres:
+  // "voor" onthoudt welke. Verandert er iets, dan telt ze niet meer tot de server opnieuw rekende.
+  const [levering, setLevering] = useState<{ voor: string; km: number; bedrag: number; regel: string | null } | null>(null);
+  const [leverMelding, setLeverMelding] = useState<{ voor: string; tekst: string } | null>(null);
+  const [leverBezig, setLeverBezig] = useState(false);
+  const [adresBevestigd, setAdresBevestigd] = useState(false); // klant verliet de adresvelden (of adres teruggezet)
+  const gevraagdVoor = useRef('');  // voor welk mandje + adres de laatste vraag vertrok
+  const vraagNr = useRef(0);        // enkel het antwoord op de laatste vraag telt
   const [leverwijze, setLeverwijze] = useState<'AFHALEN' | 'LEVEREN'>('AFHALEN');
   // Gewenste afhaal-/leverdatum (verplicht) en uur (optioneel); komt in de agenda van de winkel.
   const vandaagIso = vandaagBrussel();
@@ -61,6 +86,7 @@ export function WebshopPubliek() {
     getSiteInhoud().then(setInhoud).catch(() => {});
     getWebshopInstellingen().then((i) => setBetalen(i.betalen)).catch(() => {});
     getWebshopDagen().then((d) => { setDagen(d.dagen); setDagenVooraf(d.dagenVooraf); }).catch(() => {});
+    getWebshopFilters().then(setFilters).catch(() => {});
   }, []);
 
   // Terug van Mollie: de bevestiging komt meestal meteen binnen, soms duurt het even.
@@ -87,7 +113,19 @@ export function WebshopPubliek() {
   }, [sleutel]);
 
   const prodById = useMemo(() => Object.fromEntries(producten.map((p) => [p.id, p])), [producten]);
-  const zichtbaar = useMemo(() => producten.filter((p) => !afd || p.afdelingId === afd), [producten, afd]);
+  // Afdeling, gekozen filters (allemaal) en zoektekst (in naam, omschrijving, afdeling, categorie
+  // en de namen van de filters: wie "vegetarisch" typt, vindt ook wat onder die filter valt).
+  const zichtbaar = useMemo(() => {
+    const woorden = zoekbaar(zoek).split(/\s+/).filter(Boolean);
+    const filterNaam = Object.fromEntries(filters.map((f) => [f.id, f.naam]));
+    return producten.filter((p) => {
+      if (afd && p.afdelingId !== afd) return false;
+      if (!gekozenFilters.every((f) => p.webshopFilters.some((x) => x.filterId === f))) return false;
+      const tekst = zoekbaar([p.naam, p.omschrijving, p.afdeling?.naam, p.categorie?.naam, ...p.webshopFilters.map((x) => filterNaam[x.filterId])].filter(Boolean).join(' '));
+      return woorden.every((w) => tekst.includes(w));
+    });
+  }, [producten, afd, gekozenFilters, zoek, filters]);
+  const wisZoeken = () => { setZoek(''); setGekozenFilters([]); setAfd(''); };
   const lijnen = useMemo(
     () => Object.entries(mandje).map(([id, aantal]) => ({ p: prodById[id], aantal })).filter((x) => x.p),
     [mandje, prodById],
@@ -108,6 +146,48 @@ export function WebshopPubliek() {
     + statiegeldLijnen.reduce((s, l) => s + lijnBedrag(l.prijs, l.aantal), 0);
   const aantalItems = lijnen.reduce((s, l) => s + l.aantal, 0);
   const heeftAlcohol = lijnen.some((l) => l.p.isAlcohol);
+
+  // Leverkost: de server rekent ze uit voor dit mandje en dit adres. Een antwoord telt enkel
+  // zolang mandje (en prijzen) en adres hetzelfde zijn; daarna vragen we vanzelf opnieuw.
+  const adresVolledig = adres.straat.trim().length >= 3 && /^\d{4}$/.test(adres.postcode.trim()) && adres.gemeente.trim().length >= 2;
+  const offerteSleutel = JSON.stringify([mandje, totaal.toFixed(2), adres.straat.trim(), adres.postcode.trim(), adres.gemeente.trim()]);
+  const geldigeLevering = leverwijze === 'LEVEREN' && levering?.voor === offerteSleutel ? levering : null;
+  const geldigeMelding = leverwijze === 'LEVEREN' && leverMelding?.voor === offerteSleutel ? leverMelding.tekst : '';
+  const leverkost = geldigeLevering ? geldigeLevering.bedrag : 0;
+  const teBetalen = Math.round((totaal + leverkost) * 100) / 100;
+
+  async function berekenLevering(opnieuw = false) {
+    if (leverwijze !== 'LEVEREN' || !adresVolledig || !lijnen.length) return;
+    const voor = offerteSleutel;
+    if (!opnieuw && gevraagdVoor.current === voor) return; // al gevraagd (of nog bezig) voor precies dit
+    gevraagdVoor.current = voor;
+    const nr = ++vraagNr.current;
+    setLeverBezig(true);
+    try {
+      const r = await berekenLeverkost(lijnen.map((l) => ({ productId: l.p.id, aantal: l.aantal })), { straat: adres.straat.trim(), postcode: adres.postcode.trim(), gemeente: adres.gemeente.trim() });
+      if (nr !== vraagNr.current) return; // intussen een nieuwere vraag: dit antwoord is verouderd
+      setLevering({ voor, km: r.km, bedrag: r.bedrag, regel: r.regel });
+      setLeverMelding(null);
+    } catch (e) {
+      if (nr !== vraagNr.current) return;
+      gevraagdVoor.current = ''; // na een fout mag dezelfde vraag opnieuw
+      setLevering(null);
+      setLeverMelding({ voor, tekst: e instanceof Error ? e.message : 'De leverkost kon niet berekend worden.' });
+    } finally {
+      if (nr === vraagNr.current) setLeverBezig(false);
+    }
+  }
+  function wijzigAdres(veld: keyof Leveradres, waarde: string) {
+    setAdres((a) => ({ ...a, [veld]: waarde }));
+    setAdresBevestigd(false); // pas opzoeken als de klant het veld verlaat, niet bij elke toets
+  }
+  // Opnieuw rekenen als mandje, adres of afhalen/leveren verandert (eens het adres ingevuld is).
+  useEffect(() => {
+    if (leverwijze !== 'LEVEREN' || !adresBevestigd || !adresVolledig || !lijnen.length) return;
+    const t = window.setTimeout(() => { void berekenLevering(); }, 400);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerteSleutel, leverwijze, adresBevestigd]);
 
   // Afhalen en leveren kan enkel op de dagen die de webshopkalender toelaat; leveren staat
   // standaard uit en is er dus enkel als er leverdagen zijn.
@@ -148,7 +228,7 @@ export function WebshopPubliek() {
     const meld = (m: string) => { setFout(m); window.scrollTo({ top: 0, behavior: 'smooth' }); };
     if (!lijnen.length) { meld('Je winkelmandje is leeg.'); return; }
     if (!klant.naam.trim() || !klant.email.trim()) { meld('Vul je naam en e-mail in.'); return; }
-    if (leverwijze === 'LEVEREN' && !klant.adres.trim()) { meld('Vul een leveradres in.'); return; }
+    if (leverwijze === 'LEVEREN' && (!geldigeLevering || leverBezig)) { meld(geldigeMelding || 'Vul je volledige leveradres in, dan berekenen we de leverkost.'); return; }
     if (!gewensteDag) { meld(`Kies een ${leverwijze === 'LEVEREN' ? 'lever' : 'afhaal'}datum.`); return; }
     if (gewensteDag < vandaagIso) { meld('De gekozen datum ligt in het verleden.'); return; }
     if (heeftAlcohol && !leeftijdOk) { meld('Bevestig dat je oud genoeg bent voor alcohol.'); return; }
@@ -157,11 +237,21 @@ export function WebshopPubliek() {
     try {
       const { betaalUrl } = await plaatsBestelling({
         lijnen: lijnen.map((l) => ({ productId: l.p.id, aantal: l.aantal })),
-        klant: { naam: klant.naam.trim(), email: klant.email.trim(), telefoon: klant.telefoon.trim() || undefined, adres: klant.adres.trim() || undefined },
+        klant: {
+          naam: klant.naam.trim(), email: klant.email.trim(), telefoon: klant.telefoon.trim() || undefined,
+          ...(leverwijze === 'LEVEREN' ? { straat: adres.straat.trim(), postcode: adres.postcode.trim(), gemeente: adres.gemeente.trim() } : {}),
+        },
         leverwijze, gewensteDag, gewensteTijd: gewensteTijd || undefined,
+        verwachtTotaal: teBetalen, // de server weigert als dat niet meer klopt
       });
       window.location.href = betaalUrl; // de beveiligde betaalpagina van Mollie
     } catch (e) {
+      if (e instanceof TotaalGewijzigd) {
+        // Prijzen of leverkost veranderden intussen: alles opnieuw ophalen en rekenen, dan ziet
+        // de klant het juiste totaal voor die opnieuw bestelt.
+        getWebshopProducten().then(setProducten).catch(() => {});
+        void berekenLevering(true);
+      }
       meld(e instanceof Error ? e.message : 'Bestellen mislukt');
       setBezig(false);
     }
@@ -170,8 +260,12 @@ export function WebshopPubliek() {
   // Betaling niet gelukt: mandje en gegevens terugzetten, dan kan de klant het meteen opnieuw proberen.
   function opnieuwProberen() {
     if (!terug) return;
-    setMandje(Object.fromEntries(terug.lijnen.filter((l) => !l.isStatiegeld).map((l) => [l.productId, l.aantal])));
-    setKlant({ naam: terug.naam, email: terug.email, telefoon: terug.telefoon ?? '', adres: terug.adres ?? '' });
+    setMandje(Object.fromEntries(terug.lijnen.filter((l) => !l.isStatiegeld && !l.isLevering).map((l) => [l.productId, l.aantal])));
+    setKlant({ naam: terug.naam, email: terug.email, telefoon: terug.telefoon ?? '' });
+    setAdres(adresUit(terug.adres));
+    // Het adres staat er weer: de leverkost wordt vanzelf opnieuw berekend.
+    setLevering(null); setLeverMelding(null); gevraagdVoor.current = '';
+    setAdresBevestigd(!!terug.adres);
     setLeverwijze(terug.leverwijze === 'LEVEREN' && kanLeveren ? 'LEVEREN' : 'AFHALEN');
     setGewensteDag(terug.gewensteDag);
     setGewensteTijd(terug.gewensteTijd ?? '');
@@ -258,7 +352,7 @@ export function WebshopPubliek() {
                   <span>Betaald</span><span>{euro(terug.totaal)}</span>
                 </div>
                 <div style={{ color: 'var(--muted)', marginTop: 6 }}>
-                  {terug.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'} op {dagNaam(terug.gewensteDag)}{terug.gewensteTijd ? ` om ${terug.gewensteTijd}` : ''} · {terug.lijnen.filter((l) => !l.isStatiegeld).length} artikel(s)
+                  {terug.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'} op {dagNaam(terug.gewensteDag)}{terug.gewensteTijd ? ` om ${terug.gewensteTijd}` : ''} · {terug.lijnen.filter((l) => !l.isStatiegeld && !l.isLevering).length} artikel(s)
                 </div>
               </div>
               <div className="actions" style={{ marginTop: 24 }}>
@@ -269,7 +363,7 @@ export function WebshopPubliek() {
           )}
 
           {scherm === 'afrekenen' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr .9fr', gap: 28, alignItems: 'start' }} className="checkout-grid">
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, .9fr)', gap: 28, alignItems: 'start' }} className="checkout-grid">
               <div>
                 <button className="btn btn-ghost" onClick={() => setScherm('catalogus')} style={{ marginBottom: 16 }}>← Verder winkelen</button>
                 <h2 style={{ marginBottom: 12 }}>Jouw gegevens</h2>
@@ -289,9 +383,27 @@ export function WebshopPubliek() {
                   </div>
                 )}
                 {leverwijze === 'LEVEREN' && (
-                  <div className="form-veld"><label>Leveradres</label><input value={klant.adres} onChange={(e) => setKlant({ ...klant, adres: e.target.value })} placeholder="straat, nr, postcode, gemeente" /></div>
+                  <>
+                    <div className="form-veld"><label htmlFor="lever-straat">Straat en huisnummer</label><input id="lever-straat" value={adres.straat} autoComplete="address-line1" onChange={(e) => wijzigAdres('straat', e.target.value)} onBlur={() => setAdresBevestigd(true)} /></div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2fr)', gap: 10 }}>
+                      <div className="form-veld"><label htmlFor="lever-postcode">Postcode</label><input id="lever-postcode" value={adres.postcode} inputMode="numeric" maxLength={4} autoComplete="postal-code" onChange={(e) => wijzigAdres('postcode', e.target.value)} onBlur={() => setAdresBevestigd(true)} /></div>
+                      <div className="form-veld"><label htmlFor="lever-gemeente">Gemeente</label><input id="lever-gemeente" value={adres.gemeente} autoComplete="address-level2" onChange={(e) => wijzigAdres('gemeente', e.target.value)} onBlur={() => setAdresBevestigd(true)} /></div>
+                    </div>
+                    <div aria-live="polite" style={{ fontSize: 13, marginTop: -4, marginBottom: 8, color: geldigeMelding && !leverBezig ? '#991b1b' : 'var(--muted)' }}>
+                      {leverBezig ? 'Leverkost berekenen…'
+                        : geldigeMelding || (geldigeLevering
+                          ? `Leverkost: ${geldigeLevering.bedrag > 0 ? euro(geldigeLevering.bedrag) : 'gratis'} (${geldigeLevering.km.toString().replace('.', ',')} km in vogelvlucht vanaf de winkel${geldigeLevering.regel ? `, ${geldigeLevering.regel}` : ''}).`
+                          : adresVolledig ? '' : 'Vul je volledige adres in, dan zie je meteen de leverkost.')}
+                      {!leverBezig && !geldigeLevering && adresVolledig && (
+                        <button type="button" onClick={() => { setAdresBevestigd(true); void berekenLevering(true); }}
+                          style={{ background: 'none', border: 'none', padding: 0, marginLeft: geldigeMelding ? 6 : 0, color: 'var(--brand)', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
+                          {geldigeMelding ? 'Opnieuw berekenen' : 'Leverkost berekenen'}
+                        </button>
+                      )}
+                    </div>
+                  </>
                 )}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
                   <div className="form-veld">
                     <label htmlFor="bestelDag">{leverwijze === 'LEVEREN' ? 'Wanneer mogen we leveren?' : 'Wanneer kom je afhalen?'}</label>
                     <select id="bestelDag" value={gekozenDag ? gewensteDag : ''} onChange={(e) => setGewensteDag(e.target.value)}>
@@ -325,9 +437,16 @@ export function WebshopPubliek() {
                   <span>Ik ga akkoord met de <Link to="/voorwaarden" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>algemene voorwaarden</Link> en heb de <Link to="/privacy" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>privacyverklaring</Link> gelezen.</span>
                 </label>
 
-                <button className="btn btn-primary" onClick={bestel} disabled={bezig} style={{ marginTop: 18, width: '100%', justifyContent: 'center', fontSize: 17 }}>
-                  {bezig ? 'Bezig…' : `Bestellen met betalingsverplichting · ${euro(totaal)}`}
+                <button className="btn btn-primary" onClick={bestel} disabled={bezig || (leverwijze === 'LEVEREN' && (!geldigeLevering || leverBezig))} style={{ marginTop: 18, width: '100%', justifyContent: 'center', fontSize: 17 }}>
+                  {bezig ? 'Bezig…' : `Bestellen met betalingsverplichting · ${euro(teBetalen)}`}
                 </button>
+                {leverwijze === 'LEVEREN' && !geldigeLevering && (
+                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+                    {leverBezig ? 'Even geduld: we berekenen de leverkost.'
+                      : geldigeMelding ? 'Pas je adres aan of kies afhalen in de winkel.'
+                      : 'Eerst je leveradres en de leverkost, dan kan je bestellen.'}
+                  </div>
+                )}
               </div>
 
               <div className="panel">
@@ -352,10 +471,26 @@ export function WebshopPubliek() {
                     <span>{l.aantal} × {l.naam}</span><span>{euro(lijnBedrag(l.prijs, l.aantal))}</span>
                   </div>
                 ))}
+                {geldigeLevering && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', fontSize: 14 }}>
+                    <span>Levering ({geldigeLevering.km.toString().replace('.', ',')} km){geldigeLevering.regel ? ` · ${geldigeLevering.regel}` : ''}</span>
+                    <span>{geldigeLevering.bedrag > 0 ? euro(geldigeLevering.bedrag) : 'gratis'}</span>
+                  </div>
+                )}
+                {leverwijze === 'LEVEREN' && !geldigeLevering && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', fontSize: 14, color: 'var(--muted)' }}>
+                    <span>Levering</span><span>{leverBezig ? 'berekenen…' : 'nog niet berekend'}</span>
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18, marginTop: 12 }}>
-                  <span>Totaal</span><span>{euro(totaal)}</span>
+                  <span>Totaal</span><span>{euro(teBetalen)}</span>
                 </div>
                 {statiegeldLijnen.length > 0 && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>Statiegeld krijg je terug als je het leeggoed naar de winkel brengt.</div>}
+                {geldigeLevering && (
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                    Adres opgezocht met gegevens van <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>© OpenStreetMap-bijdragers</a>.
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -372,10 +507,31 @@ export function WebshopPubliek() {
 
               {producten.length === 0 && <p style={{ color: 'var(--muted)' }}>Er staan momenteel geen producten online.</p>}
 
+              {producten.length > 0 && (
+                <input type="search" className="shop-zoek" value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek in de webshop…" aria-label="Zoek in de webshop" />
+              )}
+
               {afdelingen.length > 0 && (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
                   <button onClick={() => setAfd('')} className="chip" style={chip(afd === '')}>Alles</button>
                   {afdelingen.map((a) => <button key={a.id} onClick={() => setAfd(a.id)} style={chip(afd === a.id)}>{a.naam}</button>)}
+                </div>
+              )}
+              {filters.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }} aria-label="Filters">
+                  {filters.map((f) => {
+                    const aan = gekozenFilters.includes(f.id);
+                    return (
+                      <button key={f.id} aria-pressed={aan} onClick={() => setGekozenFilters((g) => (aan ? g.filter((x) => x !== f.id) : [...g, f.id]))} style={chip(aan)}>
+                        {aan ? '✓ ' : ''}{f.naam}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {(zoek || gekozenFilters.length > 0 || afd) && (
+                <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 14 }}>
+                  {zichtbaar.length} {zichtbaar.length === 1 ? 'artikel' : 'artikels'} gevonden · <button onClick={wisZoeken} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--brand)', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>alles tonen</button>
                 </div>
               )}
 
@@ -385,13 +541,27 @@ export function WebshopPubliek() {
                   const statiegeld = statiegeldVan(p);
                   return (
                     <div className="shop-card" key={p.id}>
-                      <div className="shop-foto">
-                        {p.fotoUrl ? <img src={p.fotoUrl} alt={p.naam} /> : <span className="shop-foto-leeg">🛒</span>}
+                      {/* Volledige omschrijving over foto en tekst (niet over prijs en knop):
+                          bij de muis erover, op een telefoon met een tik. */}
+                      <div className={`shop-kop${infoOpen === p.id ? ' info-open' : ''}`} onClick={() => !kanZweven() && p.omschrijving && setInfoOpen(infoOpen === p.id ? '' : p.id)}>
+                        <div className="shop-foto">
+                          {p.fotoUrl ? <img src={p.fotoUrl} alt={p.naam} /> : <span className="shop-foto-leeg">🛒</span>}
+                          {p.omschrijving && <span className="shop-info" aria-hidden="true">i</span>}
+                        </div>
+                        <div className="shop-tekst">
+                          <div className="shop-naam">{p.naam}{p.isAlcohol && ' 🍷'}</div>
+                          {p.omschrijving && <div className="shop-omschrijving">{p.omschrijving}</div>}
+                          {allergeenTekst(p) && <div className="shop-allergenen">{allergeenTekst(p)}</div>}
+                        </div>
+                        {p.omschrijving && (
+                          <div className="shop-omschrijving-vol" aria-hidden="true">
+                            <b>{p.naam}</b>
+                            {p.omschrijving}
+                            {allergeenTekst(p) && <small>{allergeenTekst(p)}</small>}
+                          </div>
+                        )}
                       </div>
-                      <div className="shop-body">
-                        <div className="shop-naam">{p.naam}{p.isAlcohol && ' 🍷'}</div>
-                        {p.omschrijving && <div className="shop-omschrijving">{p.omschrijving}</div>}
-                        {allergeenTekst(p) && <div className="shop-allergenen">{allergeenTekst(p)}</div>}
+                      <div className="shop-voet">
                         <div className="shop-prijs">
                           {euro(Number(p.verkoopprijs))}{p.eenheid === 'KG' ? ' /kg' : ''}
                           {statiegeld && <span className="shop-statiegeld"> + {euro(Number(statiegeld.verkoopprijs))} statiegeld</span>}
@@ -409,6 +579,7 @@ export function WebshopPubliek() {
                   );
                 })}
               </div>
+              {producten.length > 0 && zichtbaar.length === 0 && <p style={{ color: 'var(--muted)' }}>Geen artikels gevonden. Probeer een ander woord of minder filters.</p>}
             </>
           )}
         </div>

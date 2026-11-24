@@ -16,9 +16,19 @@ const bedragVan = (euro: number) => ({ currency: 'EUR', value: euro.toFixed(2) }
 // wij krijgen enkel het resultaat. Instellen met MOLLIE_API_KEY op Render: test_... is de
 // testmodus (geen echt geld, telt nergens mee), live_... zijn echte betalingen.
 // Zonder sleutel kan er niet besteld worden: er wordt altijd vooraf digitaal betaald.
+// Enkel de gewone (standaard) API-sleutel van het websiteprofiel werkt. Een "advanced" access
+// token (access_...) is voor gegevens van de hele organisatie en vraagt bij elke betaling een
+// profiel-id; dat gebruiken we niet en geven we niet meer rechten dan nodig.
 @Injectable()
 export class MollieService {
-  private sleutel() { return process.env.MOLLIE_API_KEY?.trim() || null; }
+  private ruw() { return process.env.MOLLIE_API_KEY?.trim() || null; }
+  private sleutel() { const s = this.ruw(); return s && /^(live|test)_\w+$/.test(s) ? s : null; }
+
+  // Uitleg voor de beheerder als er wel iets ingevuld is, maar niet de juiste soort sleutel.
+  sleutelFout(): string | null {
+    if (!this.ruw() || this.sleutel()) return null;
+    return 'MOLLIE_API_KEY op Render is geen gewone API-sleutel. Vul de Live API key (begint met live_) of de Test API key (begint met test_) van je websiteprofiel in, geen access token.';
+  }
 
   geconfigureerd() { return !!this.sleutel(); }
   modus(): 'UIT' | 'TEST' | 'LIVE' {

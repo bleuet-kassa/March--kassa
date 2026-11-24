@@ -253,7 +253,11 @@ export class AgendaService implements OnModuleInit {
     if (!v || v.kanaal !== 'WEBSHOP' || v.terugbetalingVanId) return false;
     const dag =new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(v.datum); // YYYY-MM-DD
     const lever = v.leverwijze === 'LEVEREN' ? 'leveren' : 'afhalen';
-    const artikels = v.lijnen.map((l) => `${Number(l.aantal)}× ${l.product.naam}`).join(', ');
+    // De leverkost (aparte lijn per btw-tarief) is geen artikel om klaar te zetten: apart vermelden.
+    const isLeverkost = (l: (typeof v.lijnen)[number]) => !!l.product.interneCode?.startsWith('LEVERKOST-');
+    const leverkost = v.lijnen.filter(isLeverkost).reduce((s, l) => s + Number(l.aantal) * Number(l.eenheidsprijs), 0);
+    const artikels = v.lijnen.filter((l) => !isLeverkost(l)).map((l) => `${Number(l.aantal)}× ${l.product.naam}`).join(', ')
+      + (leverkost > 0 ? ` · leverkost € ${leverkost.toFixed(2).replace('.', ',')}` : '');
     const status = v.geannuleerd || v.status === 'GEANNULEERD' ? 'GEANNULEERD' : ['KLAAR', 'AFGEHAALD', 'GELEVERD'].includes(v.status ?? '') ? 'KLAAR' : 'OPEN';
     const afhaalDag = v.gewensteDag ?? null;
     const afhaalNl = afhaalDag ? `${afhaalDag.slice(8, 10)}/${afhaalDag.slice(5, 7)}${v.gewensteTijd ? ' ' + v.gewensteTijd : ''}` : null;

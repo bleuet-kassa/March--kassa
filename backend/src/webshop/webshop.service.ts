@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, HttpException, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, HttpException, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { WebshopBetaling } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,22 +7,24 @@ import { AgendaService } from '../agenda/agenda.service';
 import { MailService } from '../mail/mail.service';
 import { kassadag } from '../common/kassadag';
 import { MollieBetaling, MollieService } from './mollie.service';
+import { Leveradres, LeveringService } from './levering.service';
 
 // Publieke webshop-catalogus. Toont ENKEL producten die actief zijn én
 // als "toon in webshop" gemarkeerd staan. Een product offline zetten aan de
 // kassa (actief=false) haalt het dus automatisch uit de webshop.
 // Vrije bedragen (diversen, cadeaubon), statiegeldsoorten en artikelen zonder prijs zijn nooit bestelbaar.
-const WEBSHOP_WHERE = { actief: true, webshopZichtbaar: true, vrijePrijs: false, isStatiegeld: false, verkoopprijs: { gt: 0 } };
+export const WEBSHOP_WHERE = { actief: true, webshopZichtbaar: true, vrijePrijs: false, isStatiegeld: false, verkoopprijs: { gt: 0 } };
 
 export type BestellingInput = {
   lijnen: { productId: string; aantal: number }[];
-  klant: { naam: string; email: string; telefoon?: string; adres?: string };
+  klant: { naam: string; email: string; telefoon?: string } & Partial<Leveradres>; // leveradres enkel bij leveren
   leverwijze: 'AFHALEN' | 'LEVEREN';
   gewensteDag?: string;  // gewenste afhaal-/leverdatum (YYYY-MM-DD), verplicht
   gewensteTijd?: string; // gewenst uur (HH:MM), optioneel
+  verwachtTotaal?: number; // het totaal dat de klant naast de bestelknop zag
 };
 export type HerroepingInput = { naam: string; email: string; bestelling: string; toelichting?: string };
-type BetaalLijn = { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean };
+type BetaalLijn = { productId: string; naam: string; aantal: number; eenheidsprijs: number; totaal: number; isStatiegeld: boolean; btw: number; isLevering?: boolean };
 // Een dag in de webshopkalender, zoals hij voor de klant geldt. van/tot enkel op gewone open dagen.
 type KalenderDag = { iso: string; winkelOpen: boolean; afhalen: boolean; leveren: boolean; van: string | null; tot: string | null; afhalenAangepast: boolean; leverenAangepast: boolean };
 
@@ -66,7 +68,7 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
   private readonly pogingen = new Map<string, number[]>();
   private timer?: NodeJS.Timeout;
 
-  constructor(private prisma: PrismaService, private sales: SalesService, private agenda: AgendaService, private mail: MailService, private mollie: MollieService) {}
+  constructor(private prisma: PrismaService, private sales: SalesService, private agenda: AgendaService, private mail: MailService, private mollie: MollieService, private levering: LeveringService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => { void this.controleerOpenBetalingen(); }, CONTROLE_MS);
@@ -77,10 +79,10 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
 
   // Rem per bezoeker tegen geautomatiseerd misbruik van de publieke formulieren. Eén
   // server, dus bijhouden in het geheugen volstaat.
-  rem(bezoeker: string) {
+  rem(bezoeker: string, max = REM_MAX) {
     const nu = Date.now();
     const recent = (this.pogingen.get(bezoeker) ?? []).filter((t) => nu - t < REM_MS);
-    if (recent.length >= REM_MAX) throw new HttpException('Te veel pogingen na elkaar. Probeer het over enkele minuten opnieuw of bel ons.', 429);
+    if (recent.length >= max) throw new HttpException('Te veel pogingen na elkaar. Probeer het over enkele minuten opnieuw of bel ons.', 429);
     if (this.pogingen.size > 5000) this.pogingen.clear();
     this.pogingen.set(bezoeker, [...recent, nu]);
   }
@@ -93,7 +95,7 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
   // Voor het personeel: staat de koppeling goed, en welke betaalmethoden staan aan?
   async mollieStatus() {
     const modus = this.mollie.modus();
-    if (modus === 'UIT') return { modus, methoden: [], trageMethoden: [], fout: null };
+    if (modus === 'UIT') return { modus, methoden: [], trageMethoden: [], fout: this.mollie.sleutelFout() };
     try {
       const methoden = await this.mollie.methoden();
       return {
@@ -115,6 +117,7 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
         afdeling: { select: { id: true, naam: true, volgorde: true } },
         categorie: { select: { id: true, naam: true } },
         statiegeld: { select: { id: true, naam: true, verkoopprijs: true } },
+        webshopFilters: { select: { filterId: true } },
       },
       orderBy: [{ naam: 'asc' }],
     });
@@ -145,14 +148,17 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
     const ids = [...new Set(invoer.map((l) => String(l?.productId ?? '')))];
     const producten = await this.prisma.product.findMany({
       where: { ...WEBSHOP_WHERE, id: { in: ids } },
-      select: { id: true, naam: true, eenheid: true, verkoopprijs: true, statiegeld: { select: { id: true, naam: true, verkoopprijs: true } } },
+      select: {
+        id: true, naam: true, eenheid: true, verkoopprijs: true, btwTarief: { select: { percentage: true } },
+        statiegeld: { select: { id: true, naam: true, verkoopprijs: true, btwTarief: { select: { percentage: true } } } },
+      },
     });
     const perId = new Map(producten.map((p) => [p.id, p]));
     const samen = new Map<string, Omit<BetaalLijn, 'totaal'>>();
-    const tel = (productId: string, naam: string, prijs: number, aantal: number, isStatiegeld: boolean) => {
+    const tel = (productId: string, naam: string, prijs: number, aantal: number, isStatiegeld: boolean, btw: number) => {
       const bestaand = samen.get(productId);
       if (bestaand) bestaand.aantal = Math.round((bestaand.aantal + aantal) * 1000) / 1000;
-      else samen.set(productId, { productId, naam, eenheidsprijs: prijs, aantal, isStatiegeld });
+      else samen.set(productId, { productId, naam, eenheidsprijs: prijs, aantal, isStatiegeld, btw });
     };
     for (const l of invoer) {
       const p = perId.get(String(l?.productId ?? ''));
@@ -162,15 +168,70 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
       if (p.eenheid !== 'KG' && !Number.isInteger(aantal)) throw new BadRequestException(`${p.naam} bestel je per stuk.`);
       const hoeveel = p.eenheid === 'KG' ? Math.round(aantal * 1000) / 1000 : aantal;
       if (hoeveel <= 0) throw new BadRequestException(`Ongeldig aantal voor ${p.naam}.`);
-      tel(p.id, p.naam, Number(p.verkoopprijs), hoeveel, false);
-      if (p.statiegeld && p.eenheid !== 'KG') tel(p.statiegeld.id, p.statiegeld.naam, Number(p.statiegeld.verkoopprijs), hoeveel, true);
+      tel(p.id, p.naam, Number(p.verkoopprijs), hoeveel, false, Number(p.btwTarief.percentage));
+      if (p.statiegeld && p.eenheid !== 'KG') tel(p.statiegeld.id, p.statiegeld.naam, Number(p.statiegeld.verkoopprijs), hoeveel, true, Number(p.statiegeld.btwTarief.percentage));
     }
     const lijnen: BetaalLijn[] = [...samen.values()].map((l) => {
       if (!l.isStatiegeld && l.aantal > MAX_AANTAL) throw new BadRequestException(`Ongeldig aantal voor ${l.naam}.`);
       return { ...l, totaal: lijnCent(l.eenheidsprijs, l.aantal) / 100 };
     });
     const totaalCent = [...samen.values()].reduce((s, l) => s + lijnCent(l.eenheidsprijs, l.aantal), 0);
-    return { lijnen, totaal: totaalCent / 100 };
+    // Het bestelbedrag voor de leverregels ("vanaf € 250"): enkel de artikels, statiegeld krijg je terug.
+    const artikelsCent = [...samen.values()].filter((l) => !l.isStatiegeld).reduce((s, l) => s + lijnCent(l.eenheidsprijs, l.aantal), 0);
+    return { lijnen, totaal: totaalCent / 100, artikels: artikelsCent / 100 };
+  }
+
+  // Leverkost als lijn(en) op de bestelling. Als bijkomende kost volgt ze het btw-tarief van de
+  // artikels; bij verschillende tarieven verdeeld naar verhouding (statiegeld telt niet mee).
+  private async leverLijnen(lijnen: BetaalLijn[], bedrag: number, km: number): Promise<BetaalLijn[]> {
+    const totaalCent = Math.round(bedrag * 100);
+    if (totaalCent <= 0) return [];
+    const perTarief = new Map<number, number>();
+    for (const l of lijnen) if (!l.isStatiegeld) perTarief.set(l.btw, (perTarief.get(l.btw) ?? 0) + lijnCent(l.eenheidsprijs, l.aantal));
+    const basis = [...perTarief.values()].reduce((s, c) => s + c, 0);
+    const tarieven = [...perTarief.entries()].filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]); // grootste eerst
+    if (!basis || !tarieven.length) return [];
+    let rest = totaalCent;
+    const delen = tarieven.map(([pct, c], i) => {
+      const deel = i === tarieven.length - 1 ? rest : Math.round((totaalCent * c) / basis);
+      rest -= deel;
+      return [pct, deel] as const;
+    });
+    const uit: BetaalLijn[] = [];
+    for (const [pct, deel] of delen) {
+      if (deel <= 0) continue;
+      uit.push({ productId: await this.leverProduct(pct), naam: `Levering (${km.toString().replace('.', ',')} km)`, aantal: 1, eenheidsprijs: deel / 100, totaal: deel / 100, isStatiegeld: false, btw: pct, isLevering: true });
+    }
+    return uit;
+  }
+
+  // Een product per btw-tarief voor de leverkost: vrij bedrag (geen stock) en niet actief, zodat
+  // het nergens in de kassa of de webshop verschijnt. Wordt aangemaakt als het nog niet bestaat.
+  private async leverProduct(pct: number): Promise<string> {
+    const interneCode = `LEVERKOST-${pct}`;
+    const bestaand = await this.prisma.product.findUnique({ where: { interneCode }, select: { id: true } });
+    if (bestaand) return bestaand.id;
+    const tarief = await this.prisma.btwTarief.findFirst({ where: { percentage: pct } });
+    if (!tarief) throw new BadRequestException(`Geen btw-tarief van ${pct}% gevonden voor de leverkost.`);
+    const categorie = (await this.prisma.categorie.findFirst({ where: { naam: { equals: 'Levering', mode: 'insensitive' } } }))
+      ?? (await this.prisma.categorie.create({ data: { naam: 'Levering' } }));
+    try {
+      const p = await this.prisma.product.create({ data: { naam: `Leverkost ${pct}%`, interneCode, verkoopprijs: 0, vrijePrijs: true, actief: false, webshopZichtbaar: false, btwTariefId: tarief.id, categorieId: categorie.id } });
+      return p.id;
+    } catch {
+      const p = await this.prisma.product.findUnique({ where: { interneCode }, select: { id: true } }); // tegelijk aangemaakt
+      if (!p) throw new BadRequestException('Het leverkostproduct kon niet aangemaakt worden.');
+      return p.id;
+    }
+  }
+
+  // Publiek: wat de levering naar dit adres kost voor dit mandje (voor de klant betaalt).
+  // opMisser = de rem per bezoeker, enkel als het adres echt opgezocht moet worden.
+  async leverkost(input: { lijnen: BestellingInput['lijnen']; adres: Partial<Leveradres> }, opMisser?: () => void) {
+    const adres = LeveringService.leesAdres(input?.adres, 'het leveradres');
+    const { totaal: subtotaal, artikels } = await this.stelMandjeSamen(input?.lijnen);
+    const { km, bedrag, regel } = await this.levering.offerte(adres, artikels, opMisser);
+    return { km, bedrag, regel, subtotaal, totaal: (Math.round(subtotaal * 100) + Math.round(bedrag * 100)) / 100 };
   }
 
   // --- Webshopkalender ---------------------------------------------------------------
@@ -221,10 +282,11 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
     const vandaag = brusselVandaag();
     const nu = brusselUur();
     const dagen = await this.kalenderDagen(plusDagen(vandaag, dagenVooraf), DAGEN_VOORUIT);
+    const leverenIngesteld = this.levering.klaar(await this.levering.instellingen()); // zonder leverkosten geen levering
     return {
       dagenVooraf,
       dagen: dagen
-        .map((d) => ({ ...d, afhalen: d.afhalen && !(d.iso === vandaag && d.tot && nu >= d.tot) })) // vandaag al dicht (bij 0 dagen vooraf)
+        .map((d) => ({ ...d, leveren: d.leveren && leverenIngesteld, afhalen: d.afhalen && !(d.iso === vandaag && d.tot && nu >= d.tot) })) // vandaag al dicht (bij 0 dagen vooraf)
         .filter((d) => d.afhalen || d.leveren)
         .map(({ iso, afhalen, leveren, van, tot }) => ({ iso, afhalen, leveren, van, tot })),
     };
@@ -294,12 +356,30 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
     const naam = veld(input.klant?.naam, 'Je naam', 120);
     const email = veld(input.klant?.email, 'Je e-mailadres', 200).toLowerCase();
     const telefoon = veld(input.klant?.telefoon, 'Je telefoonnummer', 40);
-    const adres = input.leverwijze === 'LEVEREN' ? veld(input.klant?.adres, 'Het leveradres', 300) : '';
     if (!naam || !email) throw new BadRequestException('Naam en e-mail zijn vereist.');
     if (!EMAIL.test(email)) throw new BadRequestException('Geef een geldig e-mailadres.');
-    if (input.leverwijze === 'LEVEREN' && !adres) throw new BadRequestException('Geef een leveradres op.');
+    const leveradres = input.leverwijze === 'LEVEREN' ? LeveringService.leesAdres(input.klant, 'het leveradres') : null;
+    const adres = leveradres ? `${leveradres.straat}, ${leveradres.postcode} ${leveradres.gemeente}` : '';
     const { gewensteDag, gewensteTijd } = await this.controleerDatum(input);
-    const { lijnen, totaal } = await this.stelMandjeSamen(input.lijnen);
+    const mandje = await this.stelMandjeSamen(input.lijnen);
+    // Leveren: de leverkost komt erbij, berekend zoals de klant ze in het mandje zag.
+    let lijnen = mandje.lijnen;
+    let totaal = mandje.totaal;
+    let leverkost: number | null = null;
+    if (leveradres) {
+      const { km, bedrag } = await this.levering.offerte(leveradres, mandje.artikels);
+      lijnen = [...mandje.lijnen, ...(await this.leverLijnen(mandje.lijnen, bedrag, km))];
+      totaal = (Math.round(mandje.totaal * 100) + Math.round(bedrag * 100)) / 100;
+      leverkost = bedrag;
+    }
+    // Nooit iets anders aanrekenen dan wat naast de bestelknop stond: veranderde intussen een
+    // prijs of de leverkost (bv. nieuwe instellingen), dan eerst opnieuw laten nakijken.
+    if (input.verwachtTotaal !== undefined && input.verwachtTotaal !== null) {
+      const verwacht = Number(input.verwachtTotaal);
+      if (!Number.isFinite(verwacht) || Math.round(verwacht * 100) !== Math.round(totaal * 100)) {
+        throw new ConflictException(`Het totaal is intussen gewijzigd naar ${euro(totaal)}${leverkost !== null ? ` (leverkost ${leverkost > 0 ? euro(leverkost) : 'gratis'})` : ''}. Kijk je bestelling na en bestel opnieuw.`);
+      }
+    }
 
     await this.prisma.webshopBetaling.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - BEWAAR_POGING_MS) } } });
     const sleutel = randomBytes(24).toString('hex');
@@ -452,12 +532,18 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, ontvangenOp, bevestigingPerMail: this.mail.geconfigureerd() };
   }
 
-  private bestelMail(b: { bestelnummer: string; totaal: number; leverwijze: string; gewensteDag: string; gewensteTijd: string | null; lijnen: { naam: string; aantal: number; totaal: number }[] }) {
+  private bestelMail(b: { bestelnummer: string; totaal: number; leverwijze: string; gewensteDag: string; gewensteTijd: string | null; lijnen: { naam: string; aantal: number; totaal: number; isLevering?: boolean }[] }) {
     const dag = new Date(`${b.gewensteDag}T12:00:00Z`).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const site = siteUrl();
+    // De leverkost staat per btw-tarief op aparte lijnen; voor de klant is dat één bedrag.
+    const levering = b.lijnen.filter((l) => l.isLevering);
+    const rijen = [
+      ...b.lijnen.filter((l) => !l.isLevering).map((l) => ({ aantal: `${l.aantal} ×`, naam: l.naam, totaal: l.totaal })),
+      ...(levering.length ? [{ aantal: '', naam: levering[0].naam, totaal: levering.reduce((s, l) => s + l.totaal, 0) }] : []),
+    ];
     return [
       `<p>Bedankt voor je bestelling bij Marché. We ontvingen je betaling.</p><p><b>Bestelnummer:</b> ${b.bestelnummer}</p>`,
-      `<table cellpadding="4" style="border-collapse:collapse">${b.lijnen.map((l) => `<tr><td>${l.aantal} ×</td><td>${esc(l.naam)}</td><td align="right">${euro(l.totaal)}</td></tr>`).join('')}`,
+      `<table cellpadding="4" style="border-collapse:collapse">${rijen.map((l) => `<tr><td>${l.aantal}</td><td>${esc(l.naam)}</td><td align="right">${euro(l.totaal)}</td></tr>`).join('')}`,
       `<tr><td colspan="2"><b>Betaald (incl. btw)</b></td><td align="right"><b>${euro(b.totaal)}</b></td></tr></table>`,
       `<p><b>${b.leverwijze === 'LEVEREN' ? 'Levering' : 'Afhalen in de winkel'}:</b> ${esc(dag)}${b.gewensteTijd ? ` om ${b.gewensteTijd}` : ''}</p>`,
       `<p><a href="${site}/voorwaarden">Algemene voorwaarden</a> · <a href="${site}/herroeping">Herroepingsrecht en modelformulier</a> · <a href="${site}/privacy">Privacyverklaring</a></p>`,
@@ -480,7 +566,7 @@ export class WebshopService implements OnModuleInit, OnModuleDestroy {
       where: { kanaal: 'WEBSHOP', terugbetalingVanId: null },
       include: {
         klant: { select: { naam: true, email: true, telefoon: true, adres: true } },
-        lijnen: { select: { productId: true, aantal: true, eenheidsprijs: true, product: { select: { naam: true, eenheid: true, isStatiegeld: true } } } },
+        lijnen: { select: { productId: true, aantal: true, eenheidsprijs: true, product: { select: { naam: true, eenheid: true, isStatiegeld: true, interneCode: true } } } },
       },
       orderBy: { datum: 'desc' },
       take: 500,

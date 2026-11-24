@@ -111,12 +111,37 @@ body { margin: 0; }
 /* Webshop */
 .marche-site .shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
 .marche-site .shop-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
-.marche-site .shop-foto { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+.marche-site .shop-foto { position: relative; aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
 .marche-site .shop-foto img { width: 100%; height: 100%; object-fit: cover; }
 .marche-site .shop-foto-leeg { font-size: 34px; opacity: .5; }
-.marche-site .shop-body { padding: 12px; display: flex; flex-direction: column; flex: 1; }
+/* Kop (foto + tekst) groeit mee, zodat prijs en knop in een rij op één lijn onderaan staan. */
+.marche-site .shop-kop { position: relative; flex: 1; display: flex; flex-direction: column; }
+.marche-site .shop-tekst { padding: 12px 12px 0; }
+.marche-site .shop-voet { padding: 4px 12px 12px; }
 .marche-site .shop-naam { font-weight: 600; }
-.marche-site .shop-omschrijving { color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 2px; white-space: pre-line; }
+/* Omschrijving: kort op de kaart (2 regels); volledig over foto en tekst bij de muis erover of na een tik. */
+.marche-site .shop-omschrijving { color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.marche-site .shop-omschrijving-vol {
+  position: absolute; inset: 0; padding: 12px 14px; overflow-y: auto; white-space: pre-line;
+  background: #0d1e37; color: #fff; font-size: 13px; line-height: 1.45;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .4) transparent;
+  opacity: 0; pointer-events: none; transition: opacity .12s ease;
+}
+.marche-site .shop-omschrijving-vol b { display: block; margin-bottom: 4px; }
+.marche-site .shop-omschrijving-vol small { display: block; margin-top: 8px; font-size: 12px; opacity: .8; }
+.marche-site .shop-kop.info-open .shop-omschrijving-vol { opacity: 1; pointer-events: auto; }
+/* Even wachten, zodat de tekst niet opflitst als de muis alleen maar over de kaarten schuift. */
+@media (hover: hover) {
+  .marche-site .shop-card:hover .shop-omschrijving-vol { opacity: 1; pointer-events: auto; transition-delay: .2s; }
+}
+/* Met het toetsenbord door de artikels: ook dan de volledige omschrijving tonen. */
+.marche-site .shop-card:has(:focus-visible) .shop-omschrijving-vol { opacity: 1; }
+.marche-site .shop-info {
+  position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255, 255, 255, .9); color: var(--brand); font-size: 13px; font-weight: 700; font-style: italic;
+  display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+.marche-site .shop-zoek { width: 100%; max-width: 420px; padding: 10px 12px; font-size: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); margin-bottom: 12px; box-sizing: border-box; }
 /* margin-top auto: prijs en knop staan onderaan de kaart, dus op één lijn binnen de rij */
 .marche-site .shop-prijs { color: var(--brand); font-weight: 700; margin-top: auto; padding-top: 2px; }
 .marche-site .shop-allergenen { color: var(--muted); font-size: 12px; line-height: 1.35; margin: 4px 0 6px; }
@@ -125,7 +150,7 @@ body { margin: 0; }
 .marche-site .form-veld label { font-size: .82rem; color: var(--muted); font-weight: 600; }
 .marche-site .form-veld input, .marche-site .form-veld select { padding: 10px; font-size: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); min-width: 0; }
 .marche-site .shop-statiegeld { color: var(--muted); font-size: 12px; font-weight: 400; }
-@media (max-width: 760px) { .marche-site .checkout-grid { grid-template-columns: 1fr !important; } }
+@media (max-width: 760px) { .marche-site .checkout-grid { grid-template-columns: minmax(0, 1fr) !important; } }
 
 /* Sfeergalerij */
 .marche-site .galerij { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }

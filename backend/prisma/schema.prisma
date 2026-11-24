@@ -190,6 +190,7 @@ model Product {
   statiegeld   Product? @relation("ProductStatiegeld", fields: [statiegeldProductId], references: [id], onDelete: SetNull)
   statiegeldProductId String?
   metStatiegeld Product[] @relation("ProductStatiegeld")
+  webshopFilters ProductFilter[] // filters in de webshop waar dit artikel onder valt
   createdAt    DateTime @default(now())
 
   btwTarief    BtwTarief   @relation(fields: [btwTariefId], references: [id])
@@ -367,6 +368,35 @@ model Webshopdag {
   afhalen   Boolean?
   leveren   Boolean?
   updatedAt DateTime @default(now()) @updatedAt
+}
+
+// Zoekfilters van de webshop (bv. "Vegetarisch", "Feestmenu"): zelf aan te maken in de kassa
+// en toe te kennen aan artikels. Klanten kunnen er in de webshop op filteren.
+model Webshopfilter {
+  id        String          @id @default(cuid())
+  naam      String          @unique
+  volgorde  Int             @default(0)
+  producten ProductFilter[]
+  createdAt DateTime        @default(now())
+}
+
+model ProductFilter {
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  filter    Webshopfilter @relation(fields: [filterId], references: [id], onDelete: Cascade)
+  filterId  String
+
+  @@id([productId, filterId])
+}
+
+// Adressen die voor de leverkost opgezocht werden (OpenStreetMap). Zo wordt hetzelfde adres niet
+// opnieuw opgevraagd en krijgt het altijd dezelfde prijs; na 90 dagen gewist.
+model Adrescache {
+  sleutel   String   @id // straat|postcode|gemeente, genormaliseerd
+  gevonden  Boolean
+  lat       Float?
+  lon       Float?
+  createdAt DateTime @default(now())
 }
 
 // Webshopbestelling die wacht op de betaling via Mollie. Pas als ze betaald is, wordt ze

@@ -9,11 +9,13 @@ const kleur: Record<string, string> = {
   NIEUW: '#b45309', IN_BEHANDELING: '#2563eb', KLAAR: '#16a34a', AFGEHAALD: '#6b7280', GELEVERD: '#6b7280', GEANNULEERD: '#b91c1c',
 };
 const restVan = (o: WebshopOrder, l: WebshopOrder['lijnen'][number]) => Math.round((Number(l.aantal) - (o.terugPerProduct[l.productId] ?? 0)) * 1000) / 1000;
+// Leverkost staat als aparte lijn(en) in de verkoop (per btw-tarief), maar is geen artikel om klaar te zetten.
+const isLeverkost = (l: WebshopOrder['lijnen'][number]) => !!l.product.interneCode?.startsWith('LEVERKOST-');
 
 // Geeft weer of online betalen aan staat, zodat je de Mollie-koppeling hier kan nakijken.
 function MollieMelding({ m }: { m: MollieStatus }) {
   const stijl: CSSProperties = { fontSize: 13, padding: '8px 12px', borderRadius: 8, margin: '10px 0', background: '#f3f4f6', color: '#374151' };
-  if (m.modus === 'UIT') return <div style={{ ...stijl, background: '#fef3c7', color: '#92400e' }}>Online betalen staat uit: zet <code>MOLLIE_API_KEY</code> op Render. Tot dan kan er niet besteld worden.</div>;
+  if (m.modus === 'UIT') return <div style={{ ...stijl, background: '#fef3c7', color: '#92400e' }}>{m.fout ?? <>Online betalen staat uit: zet <code>MOLLIE_API_KEY</code> op Render. Tot dan kan er niet besteld worden.</>}</div>;
   if (m.fout) return <div style={{ ...stijl, background: '#fee2e2', color: '#991b1b' }}>Mollie geeft een fout: {m.fout}</div>;
   return (
     <div style={stijl}>
@@ -111,6 +113,8 @@ export function Bestellingen() {
         const adres = o.bestelAdres ?? o.klant?.adres;
         const geannuleerd = o.geannuleerd || o.status === 'GEANNULEERD';
         const nogTerug = o.kanTerugbetalen && o.lijnen.some((l) => restVan(o, l) > 0);
+        const artikels = o.lijnen.filter((l) => !isLeverkost(l));
+        const leverkost = o.lijnen.filter(isLeverkost).reduce((s, l) => s + Number(l.aantal) * Number(l.eenheidsprijs), 0);
         return (
         <div key={o.id} style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -139,10 +143,11 @@ export function Bestellingen() {
             <div style={{ fontSize: 13, color: '#374151', marginTop: 8 }}>📍 {adres}</div>
           )}
           <div style={{ marginTop: 10, fontSize: 14, color: '#374151' }}>
-            {o.lijnen.map((l, i) => (
-              <span key={i}>{Number(l.aantal)}× {l.product.naam}{i < o.lijnen.length - 1 ? ' · ' : ''}</span>
+            {artikels.map((l, i) => (
+              <span key={i}>{Number(l.aantal)}× {l.product.naam}{i < artikels.length - 1 ? ' · ' : ''}</span>
             ))}
           </div>
+          {leverkost > 0 && <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>Leverkost {euro(leverkost)} (zit in het totaal)</div>}
           {o.kortingReden && <div style={{ fontSize: 13, color: '#0d4589', marginTop: 6 }}>Korting: {o.kortingReden}</div>}
           {o.terugbetaald > 0 && <div style={{ fontSize: 13, color: '#b91c1c', marginTop: 6 }}>{euro(o.terugbetaald)} terugbetaald</div>}
           {nogTerug && isAdmin && terugId !== o.id && (

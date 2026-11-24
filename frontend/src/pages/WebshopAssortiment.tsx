@@ -5,6 +5,8 @@ import {
 } from '../api/client';
 import { ProductForm } from './Beheer';
 import { WebshopKalender } from './WebshopKalender';
+import { WebshopLevering } from './WebshopLevering';
+import { WebshopFilters } from './WebshopFilters';
 
 // Webshop-assortiment: snel producten in/uit de webshop zetten (dagelijks werk)
 // en manueel nieuwe producten toevoegen per afdeling. Enkel actieve producten
@@ -18,7 +20,7 @@ export function WebshopAssortiment() {
   const [enkelOnline, setEnkelOnline] = useState(false);
   const [bezigId, setBezigId] = useState('');
   const [form, setForm] = useState<{ product: ProductVol | null } | null>(null);
-  const [tab, setTab] = useState<'assortiment' | 'kalender'>('assortiment');
+  const [tab, setTab] = useState<'assortiment' | 'kalender' | 'levering' | 'filters'>('assortiment');
 
   async function laadMeta() { setMeta(await getMeta()); }
   async function laadProducten() { setProducten(await getProductenBeheer(zoek)); }
@@ -65,20 +67,22 @@ export function WebshopAssortiment() {
     );
   }
 
-  // Twee onderdelen: wat er online staat, en op welke dagen klanten kunnen afhalen of laten leveren.
+  // Onderdelen: wat er online staat, de afhaal- en leverdagen, de leverkosten en de zoekfilters.
   const tabs = (
-    <div style={{ display: 'flex', gap: 6, margin: '10px 0' }}>
-      {([['assortiment', 'Assortiment'], ['kalender', 'Afhaal- en leverdagen']] as const).map(([k, label]) => (
+    <div style={{ display: 'flex', gap: 6, margin: '10px 0', flexWrap: 'wrap' }}>
+      {([['assortiment', 'Assortiment'], ['kalender', 'Afhaal- en leverdagen'], ['levering', 'Leverkosten'], ['filters', 'Filters']] as const).map(([k, label]) => (
         <button key={k} onClick={() => setTab(k)} style={{ padding: '6px 12px', borderRadius: 20, cursor: 'pointer', fontSize: 13, border: tab === k ? '2px solid #0d4589' : '1px solid #cbd5e1', background: tab === k ? '#eff6ff' : '#fff', fontWeight: tab === k ? 600 : 400 }}>{label}</button>
       ))}
     </div>
   );
-  if (tab === 'kalender') {
+  if (tab !== 'assortiment') {
     return (
       <div style={{ maxWidth: 900 }}>
         <h2 style={{ margin: 0 }}>Webshop</h2>
         {tabs}
-        <WebshopKalender />
+        {tab === 'kalender' && <WebshopKalender />}
+        {tab === 'levering' && <WebshopLevering />}
+        {tab === 'filters' && <WebshopFilters />}
       </div>
     );
   }

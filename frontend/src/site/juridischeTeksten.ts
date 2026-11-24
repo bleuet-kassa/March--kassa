@@ -12,19 +12,21 @@ export const JURIDISCH: Record<JuridischSoort, { sleutel: string; titel: string;
     sleutel: 'juridisch_privacy',
     titel: 'Privacyverklaring',
     pad: '/privacy',
-    tekst: `Laatst bijgewerkt op 5 november 2026.
+    tekst: `Laatst bijgewerkt op 24 november 2026.
 
 ## Wie is verantwoordelijk voor je gegevens?
 {bedrijf}, {adres}, ondernemingsnummer {ondernemingsnummer}, is verantwoordelijk voor de persoonsgegevens die via deze website en webshop van Marché verwerkt worden. Met vragen over je gegevens kan je terecht bij {email} of {telefoon}.
 
 ## Welke gegevens we verwerken
 - Bij een bestelling: je naam, e-mailadres, eventueel je telefoonnummer, je leveradres als je laat leveren, wat je bestelt, het bedrag, de gewenste afhaal- of leverdatum en de status van je betaling. Je kaart- of bankgegevens krijgen wij niet te zien.
+- Als je de leverkost laat berekenen: het leveradres dat je ingeeft (zonder je naam), ook als je daarna niet bestelt.
 - Bij een herroeping: je naam, e-mailadres, de gegevens van je bestelling en je eventuele toelichting.
 - Als je ons mailt of belt: wat je ons zelf meedeelt.
 - Bij elk bezoek: technische gegevens zoals je IP-adres. Die zijn nodig om de website te laten werken en misbruik tegen te gaan.
 
 ## Waarom we dat doen
 - Om je bestelling klaar te zetten of te leveren en je erover te contacteren. Dat is nodig om de overeenkomst met jou uit te voeren.
+- Om je de leverkost te tonen voor je bestelt. Dat doen we op jouw vraag, voor de overeenkomst gesloten wordt. Opgezochte adressen bewaren we zonder naam, zodat we hetzelfde adres niet telkens opnieuw moeten opzoeken. Dat is ons gerechtvaardigd belang.
 - Om onze boekhoudkundige en fiscale verplichtingen na te leven. Dat is een wettelijke verplichting.
 - Om de website te beveiligen en misbruik te voorkomen. Dat is ons gerechtvaardigd belang.
 
@@ -37,14 +39,20 @@ De website en de webshop gebruiken geen cookies voor statistieken of reclame en 
 - Onze medewerkers die bestellingen behandelen.
 - Render, dat de website en de database voor ons host. De gegevens staan op servers in Frankfurt (Duitsland). Render is een Amerikaans bedrijf.
 - Mollie B.V. (Nederland), die je online betaling afhandelt. Op de betaalpagina geef je je betaalgegevens rechtstreeks aan Mollie.
+- De OpenStreetMap Foundation (Verenigd Koninkrijk), via haar zoekdienst Nominatim. Om de leverkost te berekenen, zoeken we je leveradres (zonder je naam) daar op.
 - Combell, voor ons domein en onze e-mail.
 - Scrada en onze boekhouder, voor onze boekhouding.
 - Overheidsdiensten, als de wet ons daartoe verplicht.
+
+## Gegevens buiten de Europese Unie
+- De OpenStreetMap Foundation zit in het Verenigd Koninkrijk. De Europese Commissie besliste dat het Verenigd Koninkrijk persoonsgegevens passend beschermt (een adequaatheidsbesluit).
+- Render is een Amerikaans bedrijf. Het is aangesloten bij het EU-VS-gegevensprivacykader (EU-U.S. Data Privacy Framework), waarvoor de Europese Commissie hetzelfde besliste.
 
 ## Hoe lang we je gegevens bewaren
 - Betaalde bestellingen en facturen: zolang de boekhoud- en btw-regels dat vereisen, in principe 10 jaar.
 - Bestellingen die niet betaald werden: we wissen ze na 30 dagen.
 - Herroepingen, vragen en klachten: zolang nodig om ze af te handelen en een eventueel geschil op te lossen.
+- Opgezochte leveradressen (zonder naam): hoogstens 90 dagen. Een adres dat niet gevonden werd: een dag.
 - Technische gegevens: niet langer dan nodig voor de beveiliging.
 
 ## Je rechten
@@ -59,7 +67,7 @@ Passen we deze verklaring aan, dan vind je de nieuwe versie altijd op deze pagin
     sleutel: 'juridisch_voorwaarden',
     titel: 'Algemene voorwaarden',
     pad: '/voorwaarden',
-    tekst: `Laatst bijgewerkt op 5 november 2026.
+    tekst: `Laatst bijgewerkt op 24 november 2026.
 
 ## Wie we zijn
 De webshop Marché wordt uitgebaat door {bedrijf}, {adres}, ondernemingsnummer {ondernemingsnummer}, btw-nummer {btw}. Je bereikt ons via {email} of {telefoon}.
@@ -80,7 +88,7 @@ Wil je iets wijzigen of annuleren? Neem dan zo snel mogelijk contact met ons op.
 ## Afhalen en leveren
 Bij het bestellen kies je een afhaal- of leverdag uit de dagen die we aanbieden. Daar zie je ook hoeveel dagen op voorhand je moet bestellen. Leveren kan enkel op de dagen waarop we leveren aanbieden.
 
-[Vul in: in welke gemeenten je levert en wat een levering kost.]
+De leverkost hangt af van de afstand in vogelvlucht tussen onze winkel en je leveradres, en soms van het bedrag van je bestelling. Je ziet ze in je mandje voor je betaalt. Leveren we niet tot op jouw adres, dan zie je dat ook voor je bestelt.
 
 Haal je een bereid gerecht niet af en hoorden we niets van je, dan betalen we het niet terug.
 
