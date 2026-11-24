@@ -1,11 +1,15 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   getMeta, getProductenBeheer, getProduct, getProductByBarcode, nieuweBarcode,
-  createProduct, updateProduct, createCategorie, createAfdeling, createLeverancier, voorraadOntvangst,
+  createProduct, updateProduct, createCategorie, createAfdeling, createLeverancier,
   uploadSiteAfbeelding, zetProductCategorie, verwijderProduct,
   getStatiegeldSoorten, maakStatiegeldSoort,
   type Meta, type ProductVol, type ProductInput, type StatiegeldSoort,
 } from '../api/client';
+import { VoorraadDetail } from './VoorraadDetail';
+
+// Geen THT voor non-food, wijn en groenten (klantregel): standaard voor een nieuw artikel.
+const geenThtAfdeling = (naam?: string | null) => /onderhoud|hygi|lifestyle|wijn|groente/i.test(naam ?? '');
 
 // Beheerscherm (Fase 1): producten manueel of via barcode toevoegen/bewerken en
 // voorraad ontvangen. (Factuur-import volgt als aparte stap.)
@@ -168,6 +172,10 @@ export function ProductForm({
   const [levId, setLevId] = useState(product?.leverancierId ?? '');
   const [alcohol, setAlcohol] = useState(product?.isAlcohol ?? false);
   const [webshop, setWebshop] = useState(product?.webshopZichtbaar ?? false);
+  // THT nodig bij ontvangst: bestaand artikel = zoals bewaard; nieuw artikel = volgens de afdeling,
+  // tot iemand het vinkje zelf aanpast.
+  const [thtKeuze, setThtKeuze] = useState<boolean | null>(product ? (product.thtNodig ?? true) : null);
+  const thtNodig = thtKeuze ?? !geenThtAfdeling(meta.afdelingen.find((a) => a.id === afdId)?.naam);
   const [foto, setFoto] = useState(product?.fotoUrl ?? '');
   const [eenheid, setEenheid] = useState(product?.eenheid ?? 'STUK');
   const [fout, setFout] = useState('');
@@ -213,6 +221,7 @@ export function ProductForm({
       categorieId: catId || null,
       leverancierId: levId || null,
       statiegeldProductId: isStatiegeldSoort ? null : (statiegeldId || null),
+      thtNodig: isStatiegeldSoort ? false : thtNodig,
     };
     try {
       if (product) await updateProduct(product.id, input);
@@ -370,6 +379,12 @@ export function ProductForm({
         <input type="checkbox" checked={webshop} onChange={(e) => setWebshop(e.target.checked)} />
         Toon in de webshop (enkel zichtbaar zolang het product actief is)
       </label>
+      {!isStatiegeldSoort && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
+          <input type="checkbox" checked={thtNodig} onChange={(e) => setThtKeuze(e.target.checked)} />
+          THT nodig bij ontvangst (uit voor non-food, wijn en groenten)
+        </label>
+      )}
       <div style={{ margin: '0 0 12px' }}>
         <div style={muted}>Productfoto (webshop)</div>
         {foto
@@ -400,39 +415,13 @@ export function ProductForm({
         </button>
       )}
 
-      {product && <Ontvangst product={product} meta={meta} />}
-    </div>
-  );
-}
-
-// Voorraad bijboeken op een locatie (bv. bij een levering).
-function Ontvangst({ product, meta }: { product: ProductVol; meta: Meta }) {
-  const [locatieId, setLocatieId] = useState(meta.locaties[0]?.id ?? '');
-  const [aantal, setAantal] = useState('');
-  const [melding, setMelding] = useState('');
-
-  async function boek() {
-    const n = Number(aantal.replace(',', '.'));
-    if (!n) return;
-    await voorraadOntvangst(product.id, locatieId, n);
-    setMelding(`+${n} geboekt.`);
-    setAantal('');
-  }
-
-  return (
-    <div style={{ marginTop: 20, borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
-      <h3 style={{ margin: '0 0 8px' }}>Voorraad ontvangen</h3>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={locatieId} onChange={(e) => setLocatieId(e.target.value)} style={{ ...inp, width: 'auto' }}>
-          {meta.locaties.map((l) => <option key={l.id} value={l.id}>{l.naam}</option>)}
-        </select>
-        <input value={aantal} onChange={(e) => setAantal(e.target.value)} inputMode="decimal" placeholder="Aantal" style={{ ...inp, width: 120 }} />
-        <button onClick={boek} style={btnBlauw}>Boek ontvangst</button>
-        {melding && <span style={{ color: '#16a34a' }}>{melding}</span>}
-      </div>
-      <div style={{ ...muted, marginTop: 8 }}>
-        Huidige voorraad: {product.voorraad.map((v) => `${v.locatie?.naam ?? v.locatieId}: ${Number(v.aantal)}`).join(' · ') || '—'}
-      </div>
+      {product && !isStatiegeldSoort && !product.vrijePrijs && (
+        <div style={{ marginTop: 20, borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
+          <h3 style={{ margin: '0 0 8px' }}>Voorraad</h3>
+          {/* THT nodig staat hierboven in het formulier: niet nog eens in het voorraadblok. */}
+          <VoorraadDetail productId={product.id} metThtSchakelaar={false} />
+        </div>
+      )}
     </div>
   );
 }

@@ -115,6 +115,8 @@ model StockLocatie {
   verplaatsingenNaar Voorraadverplaatsing[] @relation("naarLocatie")
   verkopen          Verkoop[]
   dagafsluitingen   Dagafsluiting[]
+  ontvangsten       Voorraadontvangst[]
+  correcties        Voorraadcorrectie[]
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +193,10 @@ model Product {
   statiegeldProductId String?
   metStatiegeld Product[] @relation("ProductStatiegeld")
   webshopFilters ProductFilter[] // filters in de webshop waar dit artikel onder valt
+  // THT verplicht bij elke ontvangst (uit voor non-food, wijn en groenten, per artikel te kiezen).
+  thtNodig     Boolean  @default(true)
+  ontvangsten  Voorraadontvangst[]
+  correcties   Voorraadcorrectie[]
   createdAt    DateTime @default(now())
 
   btwTarief    BtwTarief   @relation(fields: [btwTariefId], references: [id])
@@ -221,6 +227,43 @@ model Voorraad {
   minimumDrempel Decimal? @db.Decimal(12, 3)
 
   @@unique([productId, locatieId])
+}
+
+// Eén ontvangst (levering) van een artikel: wanneer, hoeveel, en tot wanneer het houdbaar is.
+// Wat er nog van ligt, rekenen we uit de actuele voorraad: wat het eerst vervalt, gaat eerst weg.
+model Voorraadontvangst {
+  id           String       @id @default(cuid())
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId    String
+  locatie      StockLocatie @relation(fields: [locatieId], references: [id])
+  locatieId    String
+  aantal       Decimal      @db.Decimal(12, 3)
+  ontvangenOp  String       // YYYY-MM-DD
+  tht          String?      // YYYY-MM-DD, leeg voor artikels zonder THT
+  aankoopprijs Decimal?     @db.Decimal(10, 2) // per stuk/kg, zonder btw (optioneel)
+  bron         String       @default("MANUEEL") // MANUEEL | FACTUUR
+  opmerking    String?
+  door         String?      // naam van wie het ingaf
+  createdAt    DateTime     @default(now())
+
+  @@index([productId, locatieId])
+  @@index([tht])
+}
+
+// Voorraad aangepast buiten verkoop en ontvangst: afboeken (THT verlopen, beschadigd) of tellen.
+model Voorraadcorrectie {
+  id        String       @id @default(cuid())
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  locatie   StockLocatie @relation(fields: [locatieId], references: [id])
+  locatieId String
+  aantal    Decimal      @db.Decimal(12, 3) // verschil: negatief = eraf, positief = erbij
+  reden     String       // THT_VERLOPEN | BESCHADIGD | TELLING | ANDERE
+  opmerking String?
+  door      String?
+  createdAt DateTime     @default(now())
+
+  @@index([productId, locatieId])
 }
 
 model Voorraadverplaatsing {

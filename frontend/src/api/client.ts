@@ -505,6 +505,7 @@ export type ProductVol = Product & {
   // Statiegeld: een statiegeldsoort is zelf een product (isStatiegeld); een artikel verwijst ernaar.
   isStatiegeld?: boolean;
   statiegeldProductId?: string | null;
+  thtNodig?: boolean; // THT verplicht bij ontvangst
 };
 
 // Statiegeldsoorten (vaste bedragen, 0% BTW) — aan te maken vanuit kassa en beheer.
@@ -536,7 +537,63 @@ export type ProductInput = {
   categorieId?: string | null;
   leverancierId?: string | null;
   statiegeldProductId?: string | null; // statiegeldsoort die bij dit artikel hoort
+  thtNodig?: boolean; // THT verplicht bij ontvangst
 };
+
+// --- Voorraad: ontvangen met datum en THT, afboeken, tellen, centrale lijst, THT-alarm ---
+export type VoorraadLocatie = { id: string; naam: string; type: string };
+export type ThtStatus = 'VERLOPEN' | 'BIJNA' | 'OK';
+export type VoorraadRij = {
+  id: string; naam: string; eenheid: string; thtNodig: boolean; afdeling: string | null;
+  perLocatie: Record<string, number>; totaal: number;
+  eerstvolgendeTht: string | null; dagenTotTht: number | null; status: ThtStatus | null;
+  laatsteOntvangst: string | null; zonderOntvangst: number; negatief: boolean;
+};
+export type VoorraadLijst = { locaties: VoorraadLocatie[]; alarmDagen: number; telling: { verlopen: number; bijna: number }; rijen: VoorraadRij[]; afgekapt: boolean };
+export type VoorraadLot = {
+  id: string; locatie: string; ontvangenOp: string; tht: string | null; aantal: number; rest: number;
+  aankoopprijs: number | null; bron: string; door: string | null; opmerking: string | null;
+  status: ThtStatus | null; dagenTotTht: number | null;
+};
+export type VoorraadArtikel = {
+  product: { id: string; naam: string; eenheid: string; thtNodig: boolean; heeftVoorraad: boolean; afdeling: string | null };
+  locaties: (VoorraadLocatie & { aantal: number; zonderOntvangst: number })[];
+  totaal: number;
+  loten: VoorraadLot[];
+  correcties: { id: string; locatie: string; aantal: number; reden: string; opmerking: string | null; door: string | null; op: string }[];
+  alarmDagen: number;
+};
+export type VoorraadAlarm = { verlopen: number; bijna: number; alarmDagen: number; laatsteControle: { datum: string; moment: string; verlopen: number; bijna: number; verstuurd?: number } | null };
+const jsonPost = (pad: string, body: unknown, method = 'POST') =>
+  fetch(`${BASE}${pad}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(jsonOrThrow);
+export async function getVoorraad(zoek = '', afdelingId = '', filter = ''): Promise<VoorraadLijst> {
+  const q = new URLSearchParams({ zoek, afdelingId, filter });
+  return jsonOrThrow(await fetch(`${BASE}/voorraad?${q}`));
+}
+export async function getVoorraadAlarm(): Promise<VoorraadAlarm> {
+  return jsonOrThrow(await fetch(`${BASE}/voorraad/alarm`));
+}
+export async function getVoorraadArtikel(productId: string): Promise<VoorraadArtikel> {
+  return jsonOrThrow(await fetch(`${BASE}/voorraad/artikel/${productId}`));
+}
+export function voorraadOntvangen(input: { productId: string; locatieId?: string; aantal: string; ontvangenOp: string; tht?: string; aankoopprijs?: string; opmerking?: string }): Promise<VoorraadArtikel> {
+  return jsonPost('/voorraad/ontvangst', input);
+}
+export function voorraadAfboeken(input: { productId: string; locatieId?: string; aantal: string; reden: string; opmerking?: string }): Promise<VoorraadArtikel> {
+  return jsonPost('/voorraad/afboeken', input);
+}
+export function voorraadTellen(input: { productId: string; locatieId?: string; geteld: string; opmerking?: string }): Promise<VoorraadArtikel> {
+  return jsonPost('/voorraad/tellen', input);
+}
+export function zetThtNodig(productId: string, thtNodig: boolean): Promise<VoorraadArtikel> {
+  return jsonPost(`/voorraad/artikel/${productId}/tht`, { thtNodig }, 'PATCH');
+}
+export function zetVoorraadInstellingen(alarmDagen: number): Promise<{ alarmDagen: number }> {
+  return jsonPost('/voorraad/instellingen', { alarmDagen }, 'PUT');
+}
+export function controleerTht(): Promise<{ verlopen: unknown[]; bijna: unknown[]; verstuurd: number }> {
+  return jsonPost('/voorraad/controleer', {});
+}
 
 async function jsonOrThrow(res: Response) {
   if (!res.ok) {

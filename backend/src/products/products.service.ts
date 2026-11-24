@@ -21,6 +21,7 @@ export type ProductInput = {
   categorieId?: string | null;
   leverancierId?: string | null;
   statiegeldProductId?: string | null; // de statiegeldsoort die bij dit artikel hoort
+  thtNodig?: boolean; // THT verplicht bij ontvangst (niet meegestuurd = ongewijzigd / standaard aan)
 };
 
 @Injectable()
@@ -124,6 +125,7 @@ export class ProductsService {
         categorieId: input.categorieId || null,
         leverancierId: input.leverancierId || null,
         statiegeldProductId: input.statiegeldProductId || null,
+        ...(typeof input.thtNodig === 'boolean' ? { thtNodig: input.thtNodig } : {}),
       },
       include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
     });
@@ -192,6 +194,7 @@ export class ProductsService {
         leverancierId: input.leverancierId || null,
         // Een statiegeldsoort kan zelf geen statiegeld dragen; niet meegestuurd = ongewijzigd.
         ...(input.statiegeldProductId !== undefined ? { statiegeldProductId: input.statiegeldProductId && input.statiegeldProductId !== id ? input.statiegeldProductId : null } : {}),
+        ...(typeof input.thtNodig === 'boolean' ? { thtNodig: input.thtNodig } : {}),
       },
       include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
     });
@@ -234,15 +237,16 @@ export class ProductsService {
   }
 
   // Product verwijderen (alle medewerkers). Zit het product al in verkopen,
-  // bestellingen of verplaatsingen, dan wordt het enkel gedeactiveerd (verdwijnt
-  // uit kassa, beheer en webshop) zodat oude tickets en rapporten blijven kloppen.
+  // bestellingen, verplaatsingen of de voorraadgeschiedenis (ontvangsten, correcties), dan
+  // wordt het enkel gedeactiveerd (verdwijnt uit kassa, beheer en webshop) zodat oude
+  // tickets, rapporten en de voorraadgeschiedenis blijven kloppen.
   async verwijder(id: string) {
     const p = await this.prisma.product.findUnique({
       where: { id },
-      include: { _count: { select: { verkoopLijnen: true, importLijnen: true, verplaatsingen: true } } },
+      include: { _count: { select: { verkoopLijnen: true, importLijnen: true, verplaatsingen: true, ontvangsten: true, correcties: true } } },
     });
     if (!p) throw new NotFoundException('Product niet gevonden.');
-    const inGebruik = p._count.verkoopLijnen + p._count.importLijnen + p._count.verplaatsingen;
+    const inGebruik = p._count.verkoopLijnen + p._count.importLijnen + p._count.verplaatsingen + p._count.ontvangsten + p._count.correcties;
     if (inGebruik === 0) {
       try {
         await this.prisma.$transaction(async (tx) => {
@@ -256,7 +260,7 @@ export class ProductsService {
       }
     }
     await this.prisma.product.update({ where: { id }, data: { actief: false, webshopZichtbaar: false } });
-    return { ok: true, verwijderd: false, naam: p.naam, melding: `"${p.naam}" is uit de kassa en de webshop gehaald (gedeactiveerd, omdat het in eerdere verkopen voorkomt).` };
+    return { ok: true, verwijderd: false, naam: p.naam, melding: `"${p.naam}" is uit de kassa en de webshop gehaald (gedeactiveerd, omdat het in eerdere verkopen of de voorraadgeschiedenis voorkomt).` };
   }
 
   // Bepaalt de afdeling van een product: expliciet gekozen, anders afgeleid uit

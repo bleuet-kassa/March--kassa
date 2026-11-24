@@ -24,6 +24,7 @@ import { PersoneelDossier } from './pages/PersoneelDossier';
 import { Planning } from './pages/Planning';
 import { MijnRooster } from './pages/MijnRooster';
 import { Klantrekeningen } from './pages/Klantrekeningen';
+import { Voorraad } from './pages/Voorraad';
 import { PublicSite } from './site/PublicSite';
 import { WebshopPubliek } from './site/WebshopPubliek';
 import { Juridisch } from './site/Juridisch';
@@ -31,8 +32,25 @@ import { BevestigAfsluiting } from './pages/BevestigAfsluiting';
 import { Login } from './pages/Login';
 import { getVerkoper, logout, zetVerkoper } from './auth';
 import { heeftRecht, isAdminRol } from './rechten';
-import { getIk } from './api/client';
+import { getIk, getVoorraadAlarm } from './api/client';
 import { syncQueue, queueCount } from './offline';
+
+// Menulink Voorraad met een rode teller zolang er artikels (bijna) over de THT zijn.
+function VoorraadLink() {
+  const [aantal, setAantal] = useState(0);
+  useEffect(() => {
+    const ververs = () => { getVoorraadAlarm().then((a) => setAantal(a.verlopen + a.bijna)).catch(() => undefined); };
+    ververs();
+    const t = setInterval(ververs, 10 * 60 * 1000);
+    window.addEventListener('voorraad-gewijzigd', ververs);
+    return () => { clearInterval(t); window.removeEventListener('voorraad-gewijzigd', ververs); };
+  }, []);
+  return (
+    <Link to="/kassa/voorraad" title={aantal ? `${aantal} artikel(s) met THT-alarm` : undefined}>
+      Voorraad{aantal > 0 && <span style={{ marginLeft: 4, background: '#dc2626', color: '#fff', borderRadius: 999, padding: '0 6px', fontSize: 12, fontWeight: 700 }}>{aantal}</span>}
+    </Link>
+  );
+}
 
 // Toont online/offline-status en het aantal nog te synchroniseren verkopen,
 // synchroniseert automatisch bij het terugkeren van de verbinding.
@@ -159,6 +177,7 @@ function StaffApp() {
         {mag('kassa') && <Link to="/kassa">Kassa</Link>}
         {mag('verkopen') && <Link to="/kassa/verkopen">Verkopen</Link>}
         {mag('beheer') && <Link to="/kassa/beheer">Beheer</Link>}
+        {mag('beheer') && <VoorraadLink />}
         {mag('cadeaubonnen') && <Link to="/kassa/cadeaubonnen">Cadeaubons</Link>}
         {mag('open_rekeningen') && <Link to="/kassa/open-rekeningen">Open rekeningen</Link>}
         {(mag('open_rekeningen') || mag('rekeningen')) && <Link to="/kassa/klantrekeningen">Klantrekeningen</Link>}
@@ -203,6 +222,7 @@ function StaffApp() {
           <Route path="verkopen" element={mag('verkopen') ? <Verkopen /> : geenToegang} />
           <Route path="dagafsluiting" element={mag('dagafsluiting') ? <Dagafsluiting /> : geenToegang} />
           <Route path="beheer" element={mag('beheer') ? <Beheer /> : geenToegang} />
+          <Route path="voorraad" element={mag('beheer') ? <Voorraad /> : geenToegang} />
           <Route path="cadeaubonnen" element={mag('cadeaubonnen') ? <Cadeaubonnen /> : geenToegang} />
           <Route path="open-rekeningen" element={mag('open_rekeningen') ? <OpenRekeningen /> : geenToegang} />
           <Route path="agenda" element={mag('agenda') ? <Agenda /> : geenToegang} />

@@ -232,7 +232,7 @@ export class FacturenService {
         nieuw++;
       }
 
-      await this.stock.ontvangst({ productId, locatieId, aantal: r.aantal });
+      await this.stock.ontvangst({ productId, locatieId, aantal: r.aantal, bron: 'FACTUUR' });
     }
 
     return { nieuw, bijgeboekt, totaal: regels.length };
