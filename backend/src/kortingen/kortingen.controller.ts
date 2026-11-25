@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { KortingenService } from './kortingen.service';
-import { Recht } from '../auth/auth.guard';
+import { Recht, Rollen } from '../auth/auth.guard';
 
 @Recht('kortingen')
 @Controller('kortingen')
@@ -15,6 +15,13 @@ export class KortingenController {
   @Post('regelingen')
   nieuweRegeling(@Body() body: { naam: string; pct: number }) {
     return this.kortingen.nieuweRegeling(body);
+  }
+
+  // Kortingsgroep verwijderen (met de e-mailadressen erin): enkel een beheerder.
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Delete('regelingen/:id')
+  verwijderRegeling(@Param('id') id: string) {
+    return this.kortingen.verwijderRegeling(id);
   }
 
   @Get('begunstigden')

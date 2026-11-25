@@ -301,6 +301,15 @@ export function Kassa() {
     getFactuurKlanten().then((k) => setFactuurKlanten(Array.isArray(k) ? k : [])).catch(() => {});
   }
   useEffect(() => { laadData(); }, []);
+  // Een kortingsgroep die intussen verwijderd werd (na Vernieuwen): niet stil laten wegvallen van
+  // een open ticket, maar melden dat die korting er niet meer op staat.
+  useEffect(() => {
+    const bestaat = (id: string) => regelingen.some((r) => r.id === id);
+    if (!bonnen.some((b) => b.gekozenRegelingId && !bestaat(b.gekozenRegelingId))) return;
+    setBonnen((bs) => bs.map((b) => (b.gekozenRegelingId && !bestaat(b.gekozenRegelingId) ? { ...b, gekozenRegelingId: '' } : b)));
+    setFout('Een gekozen kortingsgroep bestaat niet meer: die korting staat niet meer op het open ticket.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regelingen]);
 
   // Toont kort een bevestiging na het handmatig verversen.
   const [vernieuwd, setVernieuwd] = useState(false);

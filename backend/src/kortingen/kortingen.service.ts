@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -6,8 +6,33 @@ import { PrismaService } from '../prisma/prisma.service';
 export class KortingenService {
   constructor(private prisma: PrismaService) {}
 
+  // Met het aantal e-mailadressen per regeling (voor de vraag bij verwijderen).
   regelingen() {
-    return this.prisma.kortingsregeling.findMany({ where: { actief: true }, orderBy: { naam: 'asc' } });
+    return this.prisma.kortingsregeling.findMany({
+      where: { actief: true },
+      orderBy: { naam: 'asc' },
+      include: { _count: { select: { begunstigden: true } } },
+    });
+  }
+
+  // Kortingsgroep verwijderen (enkel een beheerder): de e-mailadressen in het register die erbij
+  // horen, gaan mee weg. Verkopen met deze korting blijven ongewijzigd: die bewaren enkel de
+  // naam en het percentage, geen verwijzing.
+  async verwijderRegeling(id: string) {
+    const r = await this.prisma.kortingsregeling.findUnique({ where: { id: String(id ?? '') } });
+    if (!r) throw new NotFoundException('Deze kortingsgroep bestaat niet (meer).');
+    try {
+      const weg = await this.prisma.$transaction(async (tx) => {
+        const b = await tx.kortingsBegunstigde.deleteMany({ where: { regelingId: r.id } });
+        await tx.kortingsregeling.delete({ where: { id: r.id } });
+        return b.count;
+      });
+      return { ok: true, naam: r.naam, begunstigden: weg };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') throw new NotFoundException('Deze kortingsgroep bestaat niet (meer).');
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') throw new BadRequestException('Er werd net een e-mailadres aan deze kortingsgroep gekoppeld. Probeer opnieuw.');
+      throw e;
+    }
   }
 
   async nieuweRegeling(input: { naam: string; pct: number }) {

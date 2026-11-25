@@ -1,9 +1,11 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
-  getKortingsregelingen, nieuweKortingsregeling,
+  getKortingsregelingen, nieuweKortingsregeling, verwijderKortingsregeling,
   getBegunstigden, nieuweBegunstigde, verwijderBegunstigde,
   type Kortingsregeling, type Begunstigde,
 } from '../api/client';
+import { getVerkoper } from '../auth';
+import { isAdminRol } from '../rechten';
 
 // Beheer van kortingsregelingen (personeel / friends & family) en het
 // e-mailregister van begunstigden. Dat register bereidt ook de webshop voor:
@@ -13,6 +15,11 @@ export function Kortingen() {
   const [begunstigden, setBegunstigden] = useState<Begunstigde[]>([]);
   const [zoek, setZoek] = useState('');
   const [fout, setFout] = useState('');
+  const [melding, setMelding] = useState('');
+  // Kortingsgroep verwijderen: enkel een beheerder, na een bevestiging op het scherm.
+  const isAdmin = isAdminRol(getVerkoper()?.rol ?? '');
+  const [teVerwijderen, setTeVerwijderen] = useState<Kortingsregeling | null>(null);
+  const [bezig, setBezig] = useState(false);
 
   // Nieuwe regeling
   const [rNaam, setRNaam] = useState('');
@@ -50,14 +57,28 @@ export function Kortingen() {
   }
 
   async function schrap(id: string) {
-    await verwijderBegunstigde(id);
+    setFout('');
+    try { await verwijderBegunstigde(id); }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
     await laadBegunstigden();
+  }
+
+  async function verwijderGroep(r: Kortingsregeling) {
+    setFout(''); setMelding(''); setBezig(true);
+    try {
+      const x = await verwijderKortingsregeling(r.id);
+      setMelding(`Kortingsgroep "${x.naam}" verwijderd${x.begunstigden ? ` (met ${x.begunstigden} e-mailadres${x.begunstigden === 1 ? '' : 'sen'} uit het register)` : ''}.`);
+      if (bRegeling === r.id) setBRegeling('');
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Verwijderen mislukt'); }
+    finally { setTeVerwijderen(null); setBezig(false); }
+    await Promise.all([laadRegelingen(), laadBegunstigden()]);
   }
 
   return (
     <div style={{ maxWidth: 860 }}>
       <h2>Kortingen</h2>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
+      {melding && <p style={{ color: '#166534' }}>{melding}</p>}
 
       <h3 style={{ marginBottom: 8 }}>Regelingen</h3>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
@@ -71,14 +92,31 @@ export function Kortingen() {
         </div>
         <button onClick={voegRegelingToe} style={btnBlauw}>Toevoegen</button>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: teVerwijderen ? 10 : 24 }}>
         {regelingen.map((r) => (
-          <span key={r.id} style={{ padding: '6px 12px', borderRadius: 20, background: '#eff6ff', border: '1px solid #c7d2fe', fontSize: 14 }}>
+          <span key={r.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 20, background: '#eff6ff', border: '1px solid #c7d2fe', fontSize: 14 }}>
             {r.naam} — <strong>{Number(r.pct)}%</strong>
+            {isAdmin && (
+              <button onClick={() => { setTeVerwijderen(r); setMelding(''); setFout(''); }} title={`Kortingsgroep ${r.naam} verwijderen`} aria-label={`Kortingsgroep ${r.naam} verwijderen`}
+                style={{ border: 'none', background: 'none', color: '#b91c1c', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
+            )}
           </span>
         ))}
         {regelingen.length === 0 && <span style={{ color: '#999' }}>Nog geen regelingen.</span>}
       </div>
+      {teVerwijderen && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 24, fontSize: 14 }}>
+          <span style={{ flex: '1 1 260px' }}>
+            Kortingsgroep <strong>{teVerwijderen.naam}</strong> ({Number(teVerwijderen.pct)}%) verwijderen?{' '}
+            {teVerwijderen._count?.begunstigden
+              ? `${teVerwijderen._count.begunstigden} e-mailadres${teVerwijderen._count.begunstigden === 1 ? '' : 'sen'} in het register ${teVerwijderen._count.begunstigden === 1 ? 'gaat' : 'gaan'} mee weg. `
+              : ''}
+            Verkopen die deze korting al kregen, blijven ongewijzigd.
+          </span>
+          <button onClick={() => verwijderGroep(teVerwijderen)} disabled={bezig} style={{ ...btnMini, color: '#b91c1c', borderColor: '#fca5a5' }}>{bezig ? 'Bezig…' : 'Ja, verwijderen'}</button>
+          <button onClick={() => setTeVerwijderen(null)} style={btnMini}>Nee</button>
+        </div>
+      )}
 
       <h3 style={{ marginBottom: 8 }}>E-mailregister (begunstigden)</h3>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>

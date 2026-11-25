@@ -609,8 +609,11 @@ export class SalesService {
       const finalLineTotal = l.lijnTotaal != null ? Number(l.lijnTotaal) : Number(l.eenheidsprijs) * aantal; // beide kortingen
       // Statiegeld en cadeaubonnen krijgen nooit de verkoopbrede korting -> ook niet terugrekenen.
       const metSaleKorting = saleKorting > 0 && !l.product.isStatiegeld && l.product.interneCode !== 'CADEAU';
-      const naLijnTotal = metSaleKorting ? finalLineTotal / saleFactor : finalLineTotal; // vóór verkoopkorting
       const lineKorting = l.kortingPct != null ? Number(l.kortingPct) : 0;
+      // Bij 100% verkoopkorting valt er niets terug te rekenen (0 / 0): dan de prijs van het artikel.
+      const naLijnTotal = !metSaleKorting ? finalLineTotal
+        : saleFactor > 0 ? finalLineTotal / saleFactor
+        : Number(l.product.verkoopprijs) * aantal * (1 - lineKorting / 100); // vóór verkoopkorting
       const origineelTotaal = lineKorting > 0 ? r2(naLijnTotal / (1 - lineKorting / 100)) : null;
       return {
         naam: l.product.naam,
@@ -618,7 +621,7 @@ export class SalesService {
         // De échte opgeslagen stuk-/kg-prijs (vóór verkoopkorting) tonen — niet
         // afleiden uit lijntotaal/aantal, want bij een afgerond weeg-lijntotaal
         // zou dat een verkeerde prijs/kg geven.
-        eenheidsprijs: metSaleKorting ? r2(Number(l.eenheidsprijs) / saleFactor) : Number(l.eenheidsprijs),
+        eenheidsprijs: !metSaleKorting ? Number(l.eenheidsprijs) : saleFactor > 0 ? r2(Number(l.eenheidsprijs) / saleFactor) : Number(l.product.verkoopprijs),
         btwPercentage: Number(l.btwPercentage),
         totaal: r2(naLijnTotal),
         kortingPct: lineKorting > 0 ? lineKorting : null,
