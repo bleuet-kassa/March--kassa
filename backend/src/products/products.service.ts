@@ -29,6 +29,9 @@ export type ProductInput = {
   factor?: number | string | null;
 };
 
+// De gewone databaseverbinding, of een lopende transactie.
+type Db = PrismaService | Prisma.TransactionClient;
+
 // De verkoopprijs volgens de factor als die er is (en een aankoopprijs), anders de ingegeven prijs.
 function verkoopMetFactor(input: ProductInput, factor: number | null) {
   return factor != null && input.inkoopprijs != null && Number(input.inkoopprijs) > 0
@@ -91,8 +94,8 @@ export class ProductsService {
   }
 
   // Genereert een vrije in-store EAN-13 (volgt op de hoogste bestaande 20-code).
-  async nieuweBarcode(): Promise<string> {
-    const prods = await this.prisma.product.findMany({
+  async nieuweBarcode(db: Db = this.prisma): Promise<string> {
+    const prods = await db.product.findMany({
       where: { barcode: { startsWith: '20' } },
       select: { barcode: true },
     });
@@ -115,15 +118,20 @@ export class ProductsService {
     return tekst || null;
   }
 
-  async create(input: ProductInput) {
-    await this.controleerUniek(input.barcode, input.interneCode, null);
-    const barcode = input.barcode?.trim() || (await this.nieuweBarcode());
-    const afdelingId = await this.bepaalAfdeling(input);
+  create(input: ProductInput) {
+    return this.createIn(this.prisma, input);
+  }
+
+  // Zelfde als create, maar binnen een lopende transactie (bv. een hele factuur in één keer).
+  async createIn(db: Db, input: ProductInput) {
+    await this.controleerUniek(input.barcode, input.interneCode, null, db);
+    const barcode = input.barcode?.trim() || (await this.nieuweBarcode(db));
+    const afdelingId = await this.bepaalAfdeling(input, db);
     const factor = leesFactor(input.factor);
     // THT nodig: zoals gekozen, anders volgens afdeling en categorie (ook voor artikels die aan de
     // kassa of bij het inlezen van een factuur ontstaan).
-    const thtNodig = typeof input.thtNodig === 'boolean' ? input.thtNodig : await this.thtStandaardVoor(afdelingId, input.categorieId, input.naam);
-    return this.prisma.product.create({
+    const thtNodig = typeof input.thtNodig === 'boolean' ? input.thtNodig : await this.thtStandaardVoor(afdelingId, input.categorieId, input.naam, db);
+    return db.product.create({
       data: {
         naam: input.naam,
         omschrijving: this.omschrijving(input.omschrijving),
@@ -148,11 +156,9 @@ export class ProductsService {
     });
   }
 
-  private async thtStandaardVoor(afdelingId: string | null, categorieId?: string | null, naam?: string) {
-    const [a, c] = await Promise.all([
-      afdelingId ? this.prisma.afdeling.findUnique({ where: { id: afdelingId }, select: { naam: true } }) : null,
-      categorieId ? this.prisma.categorie.findUnique({ where: { id: categorieId }, select: { naam: true } }) : null,
-    ]);
+  private async thtStandaardVoor(afdelingId: string | null, categorieId?: string | null, naam?: string, db: Db = this.prisma) {
+    const a = afdelingId ? await db.afdeling.findUnique({ where: { id: afdelingId }, select: { naam: true } }) : null;
+    const c = categorieId ? await db.categorie.findUnique({ where: { id: categorieId }, select: { naam: true } }) : null;
     return thtStandaard(a?.naam, c?.naam, naam);
   }
 
@@ -293,10 +299,10 @@ export class ProductsService {
 
   // Bepaalt de afdeling van een product: expliciet gekozen, anders afgeleid uit
   // de categorie (zodat een product altijd onder de juiste sectie-tegel valt).
-  private async bepaalAfdeling(input: ProductInput): Promise<string | null> {
+  private async bepaalAfdeling(input: ProductInput, db: Db = this.prisma): Promise<string | null> {
     if (input.afdelingId) return input.afdelingId;
     if (input.categorieId) {
-      const c = await this.prisma.categorie.findUnique({
+      const c = await db.categorie.findUnique({
         where: { id: input.categorieId },
         select: { afdelingId: true },
       });
@@ -310,13 +316,14 @@ export class ProductsService {
     barcode?: string | null,
     interneCode?: string | null,
     eigenId?: string | null,
+    db: Db = this.prisma,
   ) {
     if (barcode?.trim()) {
-      const b = await this.prisma.product.findUnique({ where: { barcode: barcode.trim() } });
+      const b = await db.product.findUnique({ where: { barcode: barcode.trim() } });
       if (b && b.id !== eigenId) throw new BadRequestException(`Barcode ${barcode} is al in gebruik.`);
     }
     if (interneCode?.trim()) {
-      const c = await this.prisma.product.findUnique({ where: { interneCode: interneCode.trim() } });
+      const c = await db.product.findUnique({ where: { interneCode: interneCode.trim() } });
       if (c && c.id !== eigenId) throw new BadRequestException(`Interne code ${interneCode} is al in gebruik.`);
     }
   }

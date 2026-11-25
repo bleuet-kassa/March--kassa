@@ -200,6 +200,7 @@ model Product {
   factor       Decimal? @db.Decimal(6, 3)
   ontvangsten  Voorraadontvangst[]
   correcties   Voorraadcorrectie[]
+  factuurKoppelingen FactuurKoppeling[]
   createdAt    DateTime @default(now())
 
   btwTarief    BtwTarief   @relation(fields: [btwTariefId], references: [id])
@@ -912,6 +913,42 @@ model PersoneelsProfiel {
 
 // Uurrooster: één geplande dienst van een medewerker. Gemaakt op het Planning-scherm
 // (toegang "planning"); elke medewerker ziet zijn eigen diensten bij "Mijn rooster".
+// Een ingelezen leveranciersfactuur die verwerkt werd (tegen dubbel verwerken + geschiedenis).
+model FactuurImport {
+  id            String   @id @default(cuid())
+  sleutel       String   @unique // per inleesbeurt: dezelfde knop twee keer = één keer verwerkt
+  bestandHash   String?  // sha256 van de pdf: dezelfde factuur nog eens = waarschuwing
+  leverancierId String?
+  factuurnummer String?
+  factuurdatum  String?  // YYYY-MM-DD, zoals op de factuur
+  ontvangenOp   String   // YYYY-MM-DD
+  locatieId     String
+  nieuw         Int      @default(0)
+  bijgeboekt    Int      @default(0)
+  overgeslagen  Int      @default(0) // lijnen "niet voor de winkel"
+  door          String?
+  createdAt     DateTime @default(now())
+
+  @@index([bestandHash])
+  @@index([leverancierId, factuurnummer])
+}
+
+// Onthoudt per factuurregel (omschrijving zoals de leverancier ze schrijft) welk artikel het is,
+// of dat het niet voor de winkel is: de volgende factuur staat dan meteen goed.
+model FactuurKoppeling {
+  id             String   @id @default(cuid())
+  leverancierId  String   @default("") // "" = onbekende leverancier
+  omschrijving   String   // genormaliseerd (kleine letters, zonder accenten en leestekens)
+  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId      String?
+  nietVoorWinkel Boolean  @default(false)
+  perVerpakking  Int      @default(1) // stuks (of kg) per verpakking zoals gefactureerd, bv. tray van 24
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  @@unique([leverancierId, omschrijving])
+  @@index([omschrijving])
+}
+
 // Categorieën (ploegen) van het personeel, zelf te beheren: bv. Winkel, Keuken restaurant, Zaal
 // restaurant, Flexi restaurant. PersoneelsProfiel.afdelingen en .verantwoordelijkVoor bevatten
 // de id's. De eerste drie hebben als id de oude vaste sleutel (WINKEL, RESTAURANT, CATERING).

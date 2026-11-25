@@ -917,47 +917,73 @@ export async function createLeverancier(naam: string): Promise<Leverancier> {
 export type FactuurRegel = {
   omschrijving: string;
   aantal: number;
-  eenheidsprijs: number;
+  eenheidsprijs: number; // aankoopprijs zoals gefactureerd (per stuk, of per tray/doos), zonder btw
+  perVerpakking?: number; // stuks per tray/doos als dat op de factuur staat
   btwPercentage?: number;
+};
+// Een ingelezen regel, met wat de kassa er al van weet.
+export type InleesRegel = FactuurRegel & {
+  // keuze van een vorige factuur; zelfdeLeverancier false = bij een andere leverancier (enkel een voorstel)
+  koppeling: { productId: string | null; nietVoorWinkel: boolean; perVerpakking: number; zelfdeLeverancier: boolean } | null;
+  voorstellen: { productId: string; score: number }[]; // artikels met een gelijkaardige naam, beste eerst
 };
 export type InleesResultaat = {
   bron: 'ai' | 'lokaal';
   leverancier?: string;
-  regels: FactuurRegel[];
+  leverancierId: string | null;
+  factuurnummer: string | null;
+  factuurdatum: string | null;
+  regels: InleesRegel[];
   waarschuwing?: string;
+  sleutel: string; // deze inleesbeurt (één keer verwerken, ook bij een dubbele klik)
+  bestandHash: string;
+  eerderVerwerkt: { op: string; door: string | null; nieuw: number; bijgeboekt: number; factuurnummer: string | null } | null;
 };
 export type VerwerkRegel = {
-  naam: string;
-  aantal: number;
-  inkoopprijs: number;
-  verkoopprijs: number;
-  btwTariefId: string;
+  omschrijving: string; // zoals op de factuur
+  voorWinkel: boolean; // false = niet in de kassa en niet in de voorraad (onthouden)
+  productId: string | null; // bestaand artikel; leeg = nieuw artikel
+  aantal: string; // zoals gefactureerd (bv. 2 trays)
+  inkoopprijs: string; // zoals gefactureerd (per tray), zonder btw
+  perVerpakking: string; // stuks per tray/doos (1 = per stuk): de server rekent om naar stuks
+  tht: string | null;
+  // enkel voor een nieuw artikel:
+  naam?: string;
+  verkoopprijs?: string | null;
+  factor?: string | null;
+  btwTariefId?: string;
+  afdelingId?: string | null;
   isAlcohol?: boolean;
-  leverancierId?: string | null;
-  categorieId?: string | null;
-  productId?: string | null;
 };
+export type VerwerkInput = {
+  sleutel: string;
+  bestandHash: string | null;
+  leverancierId: string | null;
+  factuurnummer: string | null;
+  factuurdatum: string | null;
+  locatieId: string;
+  ontvangenOp: string;
+  toch?: boolean; // toch verwerken, al werd deze factuur al eens verwerkt
+  prijsBevestigd?: boolean; // fors hogere aankoopprijzen zijn nagekeken
+  regels: VerwerkRegel[];
+};
+export type Prijswijziging = { naam: string; oudeInkoop: number | null; inkoopprijs: number; oudeVerkoop: number; verkoopprijs: number };
+export type VerwerkResultaat = { alVerwerkt: boolean; nieuw: number; bijgeboekt: number; overgeslagen: number; zonderTht: number; prijswijzigingen: Prijswijziging[] };
 
 export async function factuurInlezen(file: File): Promise<InleesResultaat> {
   const fd = new FormData();
   fd.append('file', file);
-  const res = await fetch(`${BASE}/facturen/inlezen`, { method: 'POST', body: fd });
-  if (!res.ok) {
-    const b = await res.json().catch(() => null);
-    throw new Error(b?.message ?? 'Inlezen mislukt');
-  }
-  return res.json();
+  return jsonOrThrow(await fetch(`${BASE}/facturen/inlezen`, { method: 'POST', body: fd }));
 }
 
-export async function factuurVerwerken(
-  regels: VerwerkRegel[],
-  locatieId: string,
-): Promise<{ nieuw: number; bijgeboekt: number; totaal: number }> {
+// Fout met code AL_VERWERKT (409): deze factuur werd al verwerkt; opnieuw met toch: true.
+// Fout met code PRIJS_BEVESTIGEN (409): fors hogere aankoopprijs; opnieuw met prijsBevestigd: true.
+export async function factuurVerwerken(input: VerwerkInput): Promise<VerwerkResultaat> {
   return jsonOrThrow(
     await fetch(`${BASE}/facturen/verwerken`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regels, locatieId }),
+      body: JSON.stringify(input),
     }),
   );
 }

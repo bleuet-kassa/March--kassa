@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -14,24 +13,7 @@ export class StockService {
     });
   }
 
-  // Ontvangst: voorraad bijboeken op een locatie (bv. bij levering via een ingelezen factuur).
-  // Maakt de voorraadregel aan als die nog niet bestaat, en bewaart de ontvangst (datum
-  // vandaag, zonder THT) in de voorraadgeschiedenis. Ontvangen met datum en THT: zie /voorraad.
-  async ontvangst(params: { productId: string; locatieId: string; aantal: number; bron?: 'MANUEEL' | 'FACTUUR' }) {
-    const { productId, locatieId, aantal } = params;
-    const vandaag = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels' }).format(new Date());
-    return this.prisma.$transaction(async (tx) => {
-      const v = await tx.voorraad.upsert({
-        where: { productId_locatieId: { productId, locatieId } },
-        create: { productId, locatieId, aantal },
-        update: { aantal: { increment: aantal } },
-      });
-      if (Number(aantal) > 0) {
-        await tx.voorraadontvangst.create({ data: { productId, locatieId, aantal: new Prisma.Decimal(Number(aantal)), ontvangenOp: vandaag, tht: null, bron: params.bron ?? 'MANUEEL' } });
-      }
-      return v;
-    });
-  }
+  // Voorraad ontvangen: zie VoorraadService.ontvangst (met datum en THT) en het inlezen van facturen.
 
   // Verplaats voorraad tussen twee locaties (bv. winkel -> restaurant).
   // Alles in één transactie zodat bron en bestemming altijd kloppen.
