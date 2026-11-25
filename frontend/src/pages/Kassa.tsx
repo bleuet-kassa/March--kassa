@@ -36,6 +36,7 @@ import {
   isNetwerkfout,
 } from '../offline';
 import { heeftRecht } from '../rechten';
+import { maakZoekIndex, zoekOpNaam, zoektOpNaam, isCode } from '../kassaZoeken';
 import { StartVanDeDag, moetStartschermTonen } from './StartVanDeDag';
 
 type Lijn = {
@@ -206,8 +207,35 @@ export function Kassa() {
   // Startscherm met de spreuk van de dag: één keer per dag per toestel.
   const [startscherm, setStartscherm] = useState<boolean>(() => moetStartschermTonen());
   const inputRef = useRef<HTMLInputElement>(null);
-  const scanRef = useRef<(code: string) => void>(() => {});
+  const scanRef = useRef<(code: string, viaEnter?: boolean) => void>(() => {});
   const scanTimer = useRef<number | undefined>(undefined);
+  // Zoeken op naam in het scanvak (op de lokale productcache, dus ook offline). De lijst volgt
+  // het vak met een korte vertraging, zodat een scanner (supersnel getypte cijfers) geen lijst
+  // laat flikkeren.
+  const [zoekTekst, setZoekTekst] = useState('');
+  const [zoekOpen, setZoekOpen] = useState(false);
+  const [gekozen, setGekozen] = useState(-1); // met ↑/↓ aangeduide treffer
+  const blurTimer = useRef<number | undefined>(undefined);
+  const lijstRef = useRef<HTMLDivElement>(null);
+  // Een scanner typt supersnel (< 50 ms per teken): zo herkennen we een scan, ook als er nog
+  // zoektekst in het vak staat. Die oude tekst valt dan weg; enkel de gescande code telt.
+  const burst = useRef({ laatst: 0, aantal: 0 });
+  const zoekIndex = useMemo(() => maakZoekIndex(producten), [producten]);
+  useEffect(() => {
+    const t = window.setTimeout(() => setZoekTekst(barcode), 100);
+    return () => window.clearTimeout(t);
+  }, [barcode]);
+  const zoek = useMemo(() => zoekOpNaam(zoekIndex, zoekTekst), [zoekIndex, zoekTekst]);
+  const toonZoek = zoekOpen && zoektOpNaam(barcode) && zoek.treffers.length > 0;
+  const geenTreffer = zoekOpen && zoektOpNaam(barcode) && zoekTekst === barcode && zoek.treffers.length === 0 && /[^\d\s]/.test(barcode);
+  // De aangeduide treffer zichtbaar houden in de lijst (enkel de lijst scrollt, nooit de pagina).
+  useEffect(() => {
+    const lijst = lijstRef.current;
+    const rij = gekozen >= 0 ? (lijst?.children[gekozen] as HTMLElement | undefined) : undefined;
+    if (!lijst || !rij) return;
+    if (rij.offsetTop < lijst.scrollTop) lijst.scrollTop = rij.offsetTop;
+    else if (rij.offsetTop + rij.offsetHeight > lijst.scrollTop + lijst.clientHeight) lijst.scrollTop = rij.offsetTop + rij.offsetHeight - lijst.clientHeight;
+  }, [gekozen]);
   const verkoper = getVerkoper();
   // Kortingsregelingen (personeel/F&F) toepassen: toegang "kortingen" (beheerder heeft alles).
   const isAdmin = ADMIN_ROLLEN.includes((verkoper?.rol ?? '').toUpperCase()) || heeftRecht('kortingen');
@@ -317,7 +345,7 @@ export function Kassa() {
     let buf = '';
     let last = 0;
     let timer: number | undefined;
-    const verwerk = () => { if (buf.length >= 4) { const code = buf; buf = ''; scanRef.current(code); } };
+    const verwerk = (viaEnter: boolean) => { if (buf.length >= 4) { const code = buf; buf = ''; scanRef.current(code, viaEnter); } };
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null;
       if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return; // handmatig typen met rust laten
@@ -325,9 +353,9 @@ export function Kassa() {
       if (nu - last > 120) buf = ''; // trage toets = nieuwe reeks (geen scanner)
       last = nu;
       if (timer) window.clearTimeout(timer);
-      if (e.key === 'Enter') { verwerk(); return; }
+      if (e.key === 'Enter') { verwerk(true); return; }
       if (e.key.length === 1) buf += e.key;
-      timer = window.setTimeout(verwerk, 150); // scanner zonder Enter -> na korte pauze
+      timer = window.setTimeout(() => verwerk(false), 150); // scanner zonder Enter -> na korte pauze
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -484,23 +512,70 @@ export function Kassa() {
     voegToe(p, 1);
   }
 
-  async function scan() {
+  // Enter in het scanvak: een aangeduide treffer, anders een barcode of weeg-etiket, anders de naam.
+  async function bijEnter() {
     if (scanTimer.current) window.clearTimeout(scanTimer.current);
-    await scanCode(barcode);
-    setBarcode('');
+    const tekst = barcode.trim();
+    if (!tekst) return;
+    const getoond = toonZoek ? zoek.treffers : [];
+    if (gekozen >= 0 && getoond[gekozen]) { kiesGezocht(getoond[gekozen]); return; }
+    if (isCode(tekst, producten)) { await scanCode(tekst); setBarcode(''); return; }
+    const r = zoekOpNaam(zoekIndex, tekst);
+    if (r.enige) { kiesGezocht(r.enige); return; }
+    // Treffers, maar niet eenduidig: de lijst meteen tonen met de eerste aangeduid (Enter = die).
+    if (r.treffers.length > 0) { setZoekTekst(barcode); setZoekOpen(true); setGekozen(0); return; }
+    // Barcode achter tekst die niet als scan herkend werd (bv. geplakt): een EAN-/UPC-staart.
+    const staart = tekst.match(/\D(\d{8}|\d{12,13})$/)?.[1];
+    if (staart) { await scanCode(staart); setBarcode(''); return; }
+    // Geen naam, wel een code (een cijfer, geen spatie; bv. "4711" of "AB12CD"): zoals vroeger in
+    // de lokale cache en online opzoeken, anders de pop-up "Onbekende barcode".
+    if (/\d/.test(tekst) && !/\s/.test(tekst)) { await scanCode(tekst); setBarcode(''); return; }
+    piep(); // niets gevonden: de melding staat onder het vak, de tekst blijft om te verbeteren
   }
-  // Scanner zonder Enter-suffix: verwerk de code zodra het typen ~150ms stilvalt
-  // (en ze lang genoeg is). Elke wijziging herstart de timer.
-  function onBarcodeChange(v: string) {
+  // Scanner zonder Enter-suffix: verwerk de code zodra het typen ~150ms stilvalt. Enkel voor een
+  // reeks cijfers of een gekende barcode: een naam wordt nooit als barcode verwerkt.
+  function onBarcodeChange(ruw: string) {
+    const b = burst.current;
+    // Snelle reeks van minstens 6 tekens achter bestaande tekst = een scan: de oude tekst valt weg.
+    const v = b.aantal >= 6 && ruw.length > b.aantal && performance.now() - b.laatst < 100 ? ruw.slice(-b.aantal) : ruw;
     setBarcode(v);
+    setGekozen(-1);
+    setZoekOpen(true);
     if (scanTimer.current) window.clearTimeout(scanTimer.current);
     const val = v.trim();
-    if (val.length >= 6) {
+    if (val.length >= 6 && isCode(val, producten)) {
       scanTimer.current = window.setTimeout(() => { scanRef.current(val); setBarcode(''); }, 150);
     }
   }
-  // Steeds de nieuwste scanCode (met het actieve ticket) voor de globale opvang.
-  scanRef.current = scanCode;
+  // Artikel gekozen uit de zoeklijst: zoals een tik op de tegel (weegartikel: gewicht vragen).
+  function kiesGezocht(p: ProductVol) {
+    if (scanTimer.current) window.clearTimeout(scanTimer.current);
+    setBarcode(''); setZoekTekst(''); setGekozen(-1); setFout('');
+    kiesProduct(p);
+    inputRef.current?.focus();
+  }
+  // Weegvenster dicht (toegevoegd, geannuleerd of etiket afgedrukt): terug naar het scanvak.
+  function sluitWeeg() {
+    setWeegProduct(null);
+    inputRef.current?.focus();
+  }
+  // Staat er een venster open (ticket, weegvenster, klavier, nieuw artikel...)? Dan geen getypte
+  // tekst naar het scanvak erachter sturen.
+  const vensterOpen = !!ticket || startscherm || !!weegProduct || !!vrijProduct || nieuwArtikel !== null || leeggoedOpen
+    || ontvangstKlavier || splitKlavier !== null || kortingKlavier || kortingLijn !== null || aantalLijn !== null || !!bonPopup;
+  // Steeds de nieuwste scanCode (met het actieve ticket) voor de globale opvang. Snel getypte
+  // letters zonder Enter die geen gekende barcode zijn, gaan naar het zoekvak in plaats van
+  // "Onbekende barcode". Met Enter (zoals een scanner) blijft het een scan: een onbekende
+  // alfanumerieke barcode geeft dan nog altijd de pop-up om het artikel aan te maken.
+  scanRef.current = (code: string, viaEnter = false) => {
+    if (!viaEnter && /\D/.test(code.trim()) && !isCode(code, producten)) {
+      if (vensterOpen) return;
+      setOnbekendeBarcode(null); // er wordt op naam gezocht: de pop-up van een vorige scan mag weg
+      setBarcode(code.trim()); setGekozen(-1); setZoekOpen(true); inputRef.current?.focus();
+      return;
+    }
+    void scanCode(code);
+  };
 
   // Vraagt de etiketgegevens op en opent het printvenster (Zebra/gewone printer).
   async function etiketAfdrukken(p: ProductVol, kg: number) {
@@ -509,7 +584,7 @@ export function Kassa() {
       drukEtiketAf({ naam: e.naam, weegNummer: e.weegNummer, eenheidsprijs: e.eenheidsprijs, gewicht: e.gewicht, prijs: e.prijs, barcode: e.barcode });
       // Vernieuw de cache zodat het nieuwe weegnummer lokaal bekend is (voor scannen).
       ververCache().then(() => setProducten(getCachedProducten()));
-      setWeegProduct(null);
+      sluitWeeg();
     } catch (err) {
       setFout(err instanceof Error ? err.message : 'Etiket afdrukken mislukt');
     }
@@ -823,6 +898,7 @@ export function Kassa() {
     setBonPopup(null);
     setCatId(null);
     setFout('');
+    setBarcode(''); setGekozen(-1); // geen zoektekst van de vorige klant in het scanvak
   }
 
   if (ticket) {
@@ -907,14 +983,57 @@ export function Kassa() {
             Retour-modus: elk artikel dat je toevoegt (scannen of tegel) wordt <u>afgetrokken</u>. Zet uit om terug gewoon te verkopen.
           </div>
         )}
-        <input
-          ref={inputRef}
-          value={barcode}
-          onChange={(e) => onBarcodeChange(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') scan(); }}
-          placeholder="Scan of typ een barcode"
-          style={{ width: '100%', marginTop: 10, padding: 10, fontSize: 16, boxSizing: 'border-box', border: retourModus ? '2px solid #b91c1c' : undefined }}
-        />
+        {/* Scanvak: scannen, een barcode typen of zoeken op naam (lijst om aan te tikken; ↑/↓ en Enter). */}
+        <div style={{ position: 'relative', marginTop: 10 }}>
+          <input
+            ref={inputRef}
+            value={barcode}
+            onChange={(e) => onBarcodeChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key.length === 1) { // snelheid bijhouden: tekens < 50 ms na elkaar = scanner
+                const b = burst.current;
+                b.aantal = e.timeStamp - b.laatst < 50 ? b.aantal + 1 : 1;
+                b.laatst = e.timeStamp;
+              }
+              if (e.key === 'Enter') { e.preventDefault(); void bijEnter(); }
+              else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && toonZoek) {
+                e.preventDefault();
+                const n = zoek.treffers.length;
+                const omlaag = e.key === 'ArrowDown';
+                setGekozen((g) => (omlaag ? (g + 1) % n : g <= 0 ? n - 1 : g - 1));
+              } else if (e.key === 'Escape' && barcode) { e.preventDefault(); setBarcode(''); setGekozen(-1); }
+            }}
+            onFocus={() => { window.clearTimeout(blurTimer.current); setZoekOpen(true); }}
+            onBlur={() => { blurTimer.current = window.setTimeout(() => setZoekOpen(false), 150); }}
+            placeholder="Scan, typ een barcode of zoek op naam"
+            aria-label="Scan, typ een barcode of zoek op naam"
+            aria-expanded={toonZoek}
+            aria-autocomplete="list"
+            autoComplete="off"
+            style={{ width: '100%', padding: 10, fontSize: 16, boxSizing: 'border-box', border: retourModus ? '2px solid #b91c1c' : undefined }}
+          />
+          {toonZoek && (
+            <div role="listbox" aria-label="Gevonden artikels" ref={lijstRef}
+              style={{ position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 30, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,.15)', maxHeight: '55vh', overflowY: 'auto', marginTop: 2 }}>
+              {zoek.treffers.map((p, i) => (
+                <button key={p.id} type="button" role="option" aria-selected={i === gekozen}
+                  onMouseDown={(e) => e.preventDefault()} // focus in het vak houden
+                  onClick={() => kiesGezocht(p)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 48, padding: '8px 12px', border: 'none', borderBottom: '1px solid #f1f5f9', background: i === gekozen ? '#dbeafe' : '#fff', textAlign: 'left', cursor: 'pointer', fontSize: 15 }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.naam}</span>
+                    <span style={{ display: 'block', fontSize: 12, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {[p.afdeling?.naam ?? p.categorie?.naam, p.barcode].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>€ {Number(p.verkoopprijs).toFixed(2)}{p.eenheid === 'KG' ? ' /kg' : ''}</span>
+                </button>
+              ))}
+              {zoek.meer > 0 && <div style={{ padding: '6px 12px', fontSize: 12, color: '#6b7280' }}>… en nog {zoek.meer}: typ verder om te verfijnen.</div>}
+            </div>
+          )}
+        </div>
+        {geenTreffer && <p style={{ color: '#b45309', margin: '6px 0 0' }}>Geen artikel gevonden voor "{barcode.trim()}".</p>}
         {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
 
         {/* Volgorde: cadeaubon -> leeggoed -> nieuw artikel. De knoppen Diversen (per btw-voet)
@@ -1462,8 +1581,8 @@ export function Kassa() {
         <WeegModal
           product={weegProduct}
           onEtiket={(kg) => etiketAfdrukken(weegProduct, kg)}
-          onBevestig={(kg) => { voegToe(weegProduct, kg, true); setWeegProduct(null); }}
-          onSluit={() => setWeegProduct(null)}
+          onBevestig={(kg) => { voegToe(weegProduct, kg, true); sluitWeeg(); }}
+          onSluit={sluitWeeg}
         />
       )}
 
