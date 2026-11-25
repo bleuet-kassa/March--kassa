@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { WebshopService, WEBSHOP_WHERE, type BestellingInput, type HerroepingInput } from './webshop.service';
 import { LeveringService, type LeverInstellingen, type Leveradres } from './levering.service';
 import { FiltersService } from './filters.service';
+import { LivegangService } from './livegang.service';
 import { Publiek, Recht, Rollen } from '../auth/auth.guard';
 
 // Achter Cloudflare/Render is de echte bezoeker enkel zichtbaar via deze header.
@@ -11,7 +12,21 @@ const bezoeker = (req: Request) => String(req.headers['cf-connecting-ip'] ?? req
 // Publieke (niet-ingelogde) webshop-endpoints + beheer van bestellingen.
 @Controller('webshop')
 export class WebshopController {
-  constructor(private readonly webshop: WebshopService, private readonly levering: LeveringService, private readonly filters: FiltersService) {}
+  constructor(private readonly webshop: WebshopService, private readonly levering: LeveringService, private readonly filters: FiltersService, private readonly livegang: LivegangService) {}
+
+  // Controlelijst om de webshop live te zetten (met wachtwoord- en Mollie-controle): enkel een beheerder.
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Get('livegang')
+  livegangLijst() {
+    return this.livegang.lijst();
+  }
+
+  // Een punt van die lijst met de hand afvinken (bedrijfsnaam, juridische teksten, repository).
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Put('livegang/:sleutel')
+  livegangBevestig(@Param('sleutel') sleutel: string, @Body() body: { bevestigd: boolean }, @Req() req: Request & { user?: { naam?: string } }) {
+    return this.livegang.bevestig(sleutel, body?.bevestigd, req.user?.naam ?? null);
+  }
 
   // Publiek: de zoekfilters die de zaak zelf aanmaakte (enkel met artikels die online staan).
   @Publiek()

@@ -7,6 +7,9 @@ import { ProductForm } from './Beheer';
 import { WebshopKalender } from './WebshopKalender';
 import { WebshopLevering } from './WebshopLevering';
 import { WebshopFilters } from './WebshopFilters';
+import { WebshopLivegang } from './WebshopLivegang';
+import { getVerkoper } from '../auth';
+import { isAdminRol } from '../rechten';
 
 // Webshop-assortiment: snel producten in/uit de webshop zetten (dagelijks werk)
 // en manueel nieuwe producten toevoegen per afdeling. Enkel actieve producten
@@ -20,7 +23,8 @@ export function WebshopAssortiment() {
   const [enkelOnline, setEnkelOnline] = useState(false);
   const [bezigId, setBezigId] = useState('');
   const [form, setForm] = useState<{ product: ProductVol | null } | null>(null);
-  const [tab, setTab] = useState<'assortiment' | 'kalender' | 'levering' | 'filters'>('assortiment');
+  const [tab, setTab] = useState<'assortiment' | 'kalender' | 'levering' | 'filters' | 'livegang'>('assortiment');
+  const isAdmin = isAdminRol(getVerkoper()?.rol ?? ''); // "Live zetten" (controlelijst) enkel voor beheerders
 
   async function laadMeta() { setMeta(await getMeta()); }
   async function laadProducten() { setProducten(await getProductenBeheer(zoek)); }
@@ -67,10 +71,13 @@ export function WebshopAssortiment() {
     );
   }
 
-  // Onderdelen: wat er online staat, de afhaal- en leverdagen, de leverkosten en de zoekfilters.
+  // Onderdelen: wat er online staat, de afhaal- en leverdagen, de leverkosten, de zoekfilters en
+  // (voor beheerders) de controlelijst om live te gaan.
+  const onderdelen = [['assortiment', 'Assortiment'], ['kalender', 'Afhaal- en leverdagen'], ['levering', 'Leverkosten'], ['filters', 'Filters'],
+    ...(isAdmin ? [['livegang', 'Live zetten']] : [])] as [typeof tab, string][];
   const tabs = (
     <div style={{ display: 'flex', gap: 6, margin: '10px 0', flexWrap: 'wrap' }}>
-      {([['assortiment', 'Assortiment'], ['kalender', 'Afhaal- en leverdagen'], ['levering', 'Leverkosten'], ['filters', 'Filters']] as const).map(([k, label]) => (
+      {onderdelen.map(([k, label]) => (
         <button key={k} onClick={() => setTab(k)} style={{ padding: '6px 12px', borderRadius: 20, cursor: 'pointer', fontSize: 13, border: tab === k ? '2px solid #0d4589' : '1px solid #cbd5e1', background: tab === k ? '#eff6ff' : '#fff', fontWeight: tab === k ? 600 : 400 }}>{label}</button>
       ))}
     </div>
@@ -83,6 +90,7 @@ export function WebshopAssortiment() {
         {tab === 'kalender' && <WebshopKalender />}
         {tab === 'levering' && <WebshopLevering />}
         {tab === 'filters' && <WebshopFilters />}
+        {tab === 'livegang' && isAdmin && <WebshopLivegang />}
       </div>
     );
   }
