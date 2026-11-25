@@ -88,9 +88,12 @@ export class PersoneelService {
     return data;
   }
 
+  // Zelfde naam (hoofdletters tellen niet)? De lijst is klein: vergelijken in code, zodat tekens
+  // als _ % \ in een naam gewoon tekens blijven (een ILIKE zou ze als jokers lezen).
   private async naamVrij(naam: string | undefined, zonderId?: string) {
     if (!naam) return;
-    const zelfde = await this.prisma.personeelscategorie.findFirst({ where: { naam: { equals: naam, mode: 'insensitive' }, ...(zonderId ? { id: { not: zonderId } } : {}) } });
+    const alle = await this.prisma.personeelscategorie.findMany({ select: { id: true, naam: true } });
+    const zelfde = alle.find((c) => c.id !== zonderId && c.naam.toLocaleLowerCase('nl') === naam.toLocaleLowerCase('nl'));
     if (zelfde) throw new BadRequestException(`Er bestaat al een categorie "${zelfde.naam}".`);
   }
 
@@ -98,7 +101,11 @@ export class PersoneelService {
     const data = this.leesCategorie(input ?? {}, true) as { naam: string; locatie: string; volgorde?: number; actief?: boolean };
     await this.naamVrij(data.naam);
     const laatste = await this.prisma.personeelscategorie.aggregate({ _max: { volgorde: true } });
-    await this.prisma.personeelscategorie.create({ data: { naam: data.naam, locatie: data.locatie, volgorde: data.volgorde ?? (laatste._max.volgorde ?? 0) + 10, actief: data.actief ?? true } });
+    try {
+      await this.prisma.personeelscategorie.create({ data: { naam: data.naam, locatie: data.locatie, volgorde: data.volgorde ?? (laatste._max.volgorde ?? 0) + 10, actief: data.actief ?? true } });
+    } catch (e) {
+      this.dubbeleNaam(e, data.naam);
+    }
     return this.categorieen();
   }
 
@@ -107,8 +114,19 @@ export class PersoneelService {
     if (!c) throw new NotFoundException('Categorie niet gevonden.');
     const data = this.leesCategorie(input ?? {}, false);
     await this.naamVrij(data.naam as string | undefined, id);
-    await this.prisma.personeelscategorie.update({ where: { id }, data });
+    try {
+      await this.prisma.personeelscategorie.update({ where: { id }, data });
+    } catch (e) {
+      this.dubbeleNaam(e, String(data.naam ?? c.naam));
+    }
     return this.categorieen();
+  }
+
+  // Twee keer tegelijk dezelfde naam (bv. dubbel geklikt): de database weigert de tweede.
+  private dubbeleNaam(e: unknown, naam: string): never {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new BadRequestException(`Er bestaat al een categorie "${naam}".`);
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') throw new NotFoundException('Categorie niet gevonden.');
+    throw e;
   }
 
   // Verwijderen kan enkel als niemand er nog in zit; anders: uitzetten (blijft in de dossiers staan).

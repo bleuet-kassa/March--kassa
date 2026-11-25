@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   getPersoneelCategorieen, maakPersoneelCategorie, wijzigPersoneelCategorie, verwijderPersoneelCategorie,
   type Personeelscategorie,
@@ -20,17 +20,37 @@ export function PersoneelCategorieen() {
 
   useEffect(() => { getPersoneelCategorieen().then(setLijst).catch((e) => setFout(e instanceof Error ? e.message : 'Laden mislukt')); }, []);
 
-  async function doe(actie: () => Promise<Personeelscategorie[]>, tekst: string) {
+  // Voert een wijziging uit; true als ze lukte. Bij een fout de lijst opnieuw ophalen, zodat namen,
+  // aantallen en (elders) verwijderde categorieën weer kloppen met de server.
+  async function doe(actie: () => Promise<Personeelscategorie[]>, tekst: string): Promise<boolean> {
     setFout(''); setMelding(''); setBezig(true);
-    try { setLijst(await actie()); setMelding(tekst); }
-    catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); }
+    try { setLijst(await actie()); setMelding(tekst); return true; }
+    catch (e) {
+      setFout(e instanceof Error ? e.message : 'Bewaren mislukt');
+      getPersoneelCategorieen().then(setLijst).catch(() => {});
+      return false;
+    }
     finally { setBezig(false); }
   }
 
+  // Geen tweede keer toevoegen terwijl de eerste nog loopt (twee keer Enter, dubbele klik). Een ref,
+  // geen state: twee snelle toetsen komen binnen vóór React opnieuw tekent.
+  const toevoegenBezig = useRef(false);
   async function voegToe() {
-    if (!naam.trim()) { setFout('Geef een naam (bv. Keuken restaurant).'); return; }
-    await doe(() => maakPersoneelCategorie({ naam: naam.trim(), locatie }), `"${naam.trim()}" toegevoegd.`);
-    setNaam('');
+    if (toevoegenBezig.current) return;
+    const n = naam.trim();
+    if (!n) { setFout('Geef een naam (bv. Keuken restaurant).'); return; }
+    toevoegenBezig.current = true;
+    try { if (await doe(() => maakPersoneelCategorie({ naam: n, locatie }), `"${n}" toegevoegd.`)) setNaam(''); }
+    finally { toevoegenBezig.current = false; }
+  }
+
+  // Hernoemen bij het verlaten van het vak; lukt het niet, dan komt de bewaarde naam terug.
+  async function hernoem(el: HTMLInputElement, c: Personeelscategorie) {
+    const v = el.value.trim();
+    if (!v || v === c.naam) { el.value = c.naam; return; }
+    const ok = await doe(() => wijzigPersoneelCategorie(c.id, { naam: v }), `Hernoemd naar "${v}".`);
+    if (!ok && document.activeElement !== el) el.value = c.naam;
   }
 
   // Een plaats omhoog of omlaag: de volgorde van de twee buren omwisselen.
@@ -80,7 +100,7 @@ export function PersoneelCategorieen() {
                 <tr key={c.id} style={{ borderBottom: '1px solid #f0f0f0', opacity: c.actief ? 1 : 0.55 }}>
                   <td style={td}>
                     <input key={c.naam} defaultValue={c.naam} maxLength={60} aria-label={`Naam van ${c.naam}`}
-                      onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.naam) void doe(() => wijzigPersoneelCategorie(c.id, { naam: v }), `Hernoemd naar "${v}".`); else e.target.value = c.naam; }}
+                      onBlur={(e) => void hernoem(e.currentTarget, c)}
                       style={{ ...inp, width: 190, padding: 5 }} />
                   </td>
                   <td style={td}>

@@ -30,7 +30,13 @@ export function Planning() {
 
   async function laad() {
     setFout('');
-    try { const r = await getPlanning(start, plusDagen(start, 6)); setDiensten(r.diensten); setMensen(r.medewerkers); setCategorieen(r.categorieen ?? []); }
+    try {
+      const r = await getPlanning(start, plusDagen(start, 6));
+      const cats = r.categorieen ?? [];
+      setDiensten(r.diensten); setMensen(r.medewerkers); setCategorieen(cats);
+      // Gekozen categorie intussen verdwenen (verwijderd, of uitgezet en niemand heeft ze nog)? Terug naar iedereen.
+      setFilter((f) => (!f || cats.some((c) => c.id === f && (c.actief || r.medewerkers.some((m) => m.afdelingen.includes(c.id)))) ? f : ''));
+    }
     catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt'); }
   }
   useEffect(() => { laad(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [start]);
@@ -42,13 +48,17 @@ export function Planning() {
   const van = (gid: string, dag: string) => diensten.filter((d) => d.gebruikerId === gid && d.dag === dag);
   const weekTotaal = (gid: string) => diensten.filter((d) => d.gebruikerId === gid).reduce((s, d) => s + d.uren, 0);
 
+  // Nieuwe dienst. Met een ploeg als filter: de locatie van die ploeg, en de uren van de laatste dienst
+  // op die locatie. Zonder filter: zoals de vorige dienst van deze persoon, anders zijn eerste ploeg.
   function nieuw(gid: string, dag: string) {
-    const vorige = diensten.filter((d) => d.gebruikerId === gid).slice(-1)[0];
     const m = mensen.find((x) => x.id === gid);
-    // Locatie: die van de vorige dienst, anders waar de (gefilterde of eerste) ploeg van deze persoon werkt.
-    const ploeg = filter && m?.afdelingen.includes(filter) ? filter : m?.afdelingen[0];
+    const gefilterd = !!filter && !!m?.afdelingen.includes(filter);
+    const ploeg = gefilterd ? filter : m?.afdelingen[0];
     const ploegLocatie = categorieen.find((c) => c.id === ploeg)?.locatie ?? '';
-    setForm({ gebruikerId: gid, dag, start: vorige?.start ?? '09:00', eind: vorige?.eind ?? '17:00', pauzeMin: String(vorige?.pauzeMin ?? 30), locatie: vorige?.locatie ?? ploegLocatie, opmerking: '' });
+    const eigen = diensten.filter((d) => d.gebruikerId === gid);
+    const vorige = (gefilterd && ploegLocatie ? eigen.filter((d) => d.locatie === ploegLocatie).slice(-1)[0] : undefined) ?? eigen.slice(-1)[0];
+    const locatie = gefilterd ? ploegLocatie : vorige?.locatie ?? ploegLocatie;
+    setForm({ gebruikerId: gid, dag, start: vorige?.start ?? '09:00', eind: vorige?.eind ?? '17:00', pauzeMin: String(vorige?.pauzeMin ?? 30), locatie, opmerking: '' });
     setMelding('');
   }
   function bewerk(d: Dienst) {
