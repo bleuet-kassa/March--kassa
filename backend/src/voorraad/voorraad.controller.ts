@@ -29,9 +29,24 @@ export class VoorraadController {
     return this.voorraad.artikel(id);
   }
 
+  // Ook { bestaand: true }: de THT registreren van wat er al ligt, zonder de voorraad te verhogen.
+  // Body zonder 'bron': die bepaalt de server (een factuur boekt via de factuur-import).
   @Post('ontvangst')
   ontvangst(@Body() body: Parameters<VoorraadService['ontvangst']>[0], @Req() req: MetGebruiker) {
-    return this.voorraad.ontvangst(body, req.user?.naam ?? null);
+    return this.voorraad.ontvangst({ ...(body ?? {}), bron: undefined }, req.user?.naam ?? null);
+  }
+
+  // Een ontvangst verbeteren: THT, ontvangstdatum, opmerking (de voorraad verandert niet).
+  @Patch('ontvangst/:id')
+  wijzigOntvangst(@Param('id') id: string, @Body() body: Parameters<VoorraadService['wijzigOntvangst']>[1], @Req() req: MetGebruiker) {
+    return this.voorraad.wijzigOntvangst(id, body ?? {}, req.user?.naam ?? null);
+  }
+
+  // Een ontvangst annuleren (de voorraad gaat terug omlaag): enkel een beheerder.
+  @Rollen('BEHEER', 'BEHEERDER')
+  @Post('ontvangst/:id/annuleer')
+  annuleerOntvangst(@Param('id') id: string, @Req() req: MetGebruiker) {
+    return this.voorraad.annuleerOntvangst(id, req.user?.naam ?? null);
   }
 
   @Post('afboeken')

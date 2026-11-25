@@ -11,11 +11,7 @@ export class StockController {
     return this.stock.voorraadPerLocatie(locatieId);
   }
 
-  // POST /stock/ontvangst  { productId, locatieId, aantal }  -> voorraad bijboeken
-  @Post('ontvangst')
-  ontvangst(@Body() body: { productId: string; locatieId: string; aantal: number }) {
-    return this.stock.ontvangst(body);
-  }
+  // Voorraad ontvangen gaat via POST /voorraad/ontvangst (met datum, THT en de controles daarop).
 
   // POST /stock/verplaats  -> voorraad tussen locaties verplaatsen
   @Post('verplaats')

@@ -550,12 +550,16 @@ export type VoorraadRij = {
   perLocatie: Record<string, number>; totaal: number;
   eerstvolgendeTht: string | null; dagenTotTht: number | null; status: ThtStatus | null;
   laatsteOntvangst: string | null; zonderOntvangst: number; negatief: boolean;
+  zonderTht: number; // ligt er zonder gekende THT (geen ontvangst, of een ontvangst zonder THT)
 };
 export type VoorraadLijst = { locaties: VoorraadLocatie[]; alarmDagen: number; telling: { verlopen: number; bijna: number }; rijen: VoorraadRij[]; afgekapt: boolean };
 export type VoorraadLot = {
   id: string; locatie: string; ontvangenOp: string; tht: string | null; aantal: number; rest: number;
-  aankoopprijs: number | null; bron: string; door: string | null; opmerking: string | null;
+  aankoopprijs: number | null; bron: string; door: string | null; opmerking: string | null; // bron: MANUEEL | FACTUUR | BESTAAND
   status: ThtStatus | null; dagenTotTht: number | null;
+  geannuleerd: boolean; geannuleerdOp: string | null; geannuleerdDoor: string | null;
+  thtInvulbaar: boolean; // zonder THT, en mag er nog een krijgen (niet al gedekt door "THT van wat er ligt")
+  geteldNa: boolean; // na deze ontvangst geteld: annuleren verandert de voorraad niet meer
 };
 export type VoorraadArtikel = {
   product: {
@@ -564,7 +568,7 @@ export type VoorraadArtikel = {
   };
   // Na een ontvangst met een hogere aankoopprijs: wat er veranderde.
   prijsWijziging?: { oudeInkoop: number | null; inkoopprijs: number; oudeVerkoop: number; verkoopprijs: number } | null;
-  locaties: (VoorraadLocatie & { aantal: number; zonderOntvangst: number })[];
+  locaties: (VoorraadLocatie & { aantal: number; zonderOntvangst: number; zonderTht: number })[];
   totaal: number;
   loten: VoorraadLot[];
   correcties: { id: string; locatie: string; aantal: number; reden: string; opmerking: string | null; door: string | null; op: string }[];
@@ -583,8 +587,16 @@ export async function getVoorraadAlarm(): Promise<VoorraadAlarm> {
 export async function getVoorraadArtikel(productId: string): Promise<VoorraadArtikel> {
   return jsonOrThrow(await fetch(`${BASE}/voorraad/artikel/${productId}`));
 }
-export function voorraadOntvangen(input: { productId: string; locatieId?: string; aantal: string; ontvangenOp: string; tht?: string; aankoopprijs?: string; opmerking?: string }): Promise<VoorraadArtikel> {
+// bestaand: enkel de THT registreren van wat er al ligt (de voorraad blijft gelijk).
+// thtBevestigd: na de vraag "Klopt die THT?" (fout met code THT_BEVESTIGEN).
+export function voorraadOntvangen(input: { productId: string; locatieId?: string; aantal: string; ontvangenOp?: string; tht?: string; aankoopprijs?: string; opmerking?: string; bestaand?: boolean; thtBevestigd?: boolean }): Promise<VoorraadArtikel> {
   return jsonPost('/voorraad/ontvangst', input);
+}
+export function wijzigOntvangst(id: string, input: { tht?: string; ontvangenOp?: string; opmerking?: string; thtBevestigd?: boolean }): Promise<VoorraadArtikel> {
+  return jsonPost(`/voorraad/ontvangst/${id}`, input, 'PATCH');
+}
+export function annuleerOntvangst(id: string): Promise<VoorraadArtikel> {
+  return jsonPost(`/voorraad/ontvangst/${id}/annuleer`, {});
 }
 export function voorraadAfboeken(input: { productId: string; locatieId?: string; aantal: string; reden: string; opmerking?: string }): Promise<VoorraadArtikel> {
   return jsonPost('/voorraad/afboeken', input);
@@ -602,10 +614,15 @@ export function controleerTht(): Promise<{ verlopen: unknown[]; bijna: unknown[]
   return jsonPost('/voorraad/controleer', {});
 }
 
+// Fout van de server: de melding, plus (soms) een code zoals THT_BEVESTIGEN.
+export type ApiFout = Error & { code?: string; status?: number };
 async function jsonOrThrow(res: Response) {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.message ?? 'Bewerking mislukt');
+    const fout: ApiFout = new Error(body?.message ?? 'Bewerking mislukt');
+    if (typeof body?.code === 'string') fout.code = body.code;
+    fout.status = res.status;
+    throw fout;
   }
   return res.json();
 }
@@ -814,6 +831,20 @@ export async function terugbetaalBestelling(id: string, lijnen: { productId: str
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lijnen }),
   }));
 }
+// Controlelijst om de webshop live te zetten (enkel beheerders).
+export type LivegangStatus = 'OK' | 'ONTBREEKT' | 'LET_OP' | 'INFO';
+export type LivegangPunt = {
+  sleutel: string; titel: string; status: LivegangStatus; uitleg: string; waar: string | null; nodig: boolean;
+  handmatig?: { bevestigd: boolean; door: string | null; op: string | null }; details?: string[];
+};
+export type Livegang = { klaar: boolean; open: number; punten: LivegangPunt[]; gecontroleerdOp: string };
+export async function getLivegang(): Promise<Livegang> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/livegang`));
+}
+export async function zetLivegang(sleutel: string, bevestigd: boolean): Promise<Livegang> {
+  return jsonOrThrow(await fetch(`${BASE}/webshop/livegang/${encodeURIComponent(sleutel)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bevestigd }) }));
+}
+
 export type MollieStatus = { modus: BetaalModus; methoden: string[]; trageMethoden: string[]; fout: string | null };
 export async function getMollieStatus(): Promise<MollieStatus> {
   return jsonOrThrow(await fetch(`${BASE}/webshop/mollie-status`));
@@ -861,20 +892,6 @@ export async function createLeverancier(naam: string): Promise<Leverancier> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ naam }),
-    }),
-  );
-}
-
-export async function voorraadOntvangst(
-  productId: string,
-  locatieId: string,
-  aantal: number,
-): Promise<void> {
-  await jsonOrThrow(
-    await fetch(`${BASE}/stock/ontvangst`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId, locatieId, aantal }),
     }),
   );
 }
@@ -1150,7 +1167,7 @@ export async function getWeegEtiket(productId: string, gewicht: number): Promise
 }
 
 // --- Kortingen (personeel / friends & family) ---
-export type Kortingsregeling = { id: string; naam: string; pct: string; actief: boolean };
+export type Kortingsregeling = { id: string; naam: string; pct: string; actief: boolean; _count?: { begunstigden: number } };
 export type Begunstigde = {
   id: string;
   email: string;
@@ -1186,6 +1203,10 @@ export async function nieuweBegunstigde(input: { email: string; naam?: string; r
 }
 export async function verwijderBegunstigde(id: string): Promise<any> {
   return jsonOrThrow(await fetch(`${BASE}/kortingen/begunstigden/${id}`, { method: 'DELETE' }));
+}
+// Kortingsgroep verwijderen (enkel een beheerder); de e-mailadressen erin gaan mee weg.
+export async function verwijderKortingsregeling(id: string): Promise<{ ok: boolean; naam: string; begunstigden: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/kortingen/regelingen/${id}`, { method: 'DELETE' }));
 }
 export async function kortingVoorEmail(email: string): Promise<Kortingsregeling | null> {
   return (await fetch(`${BASE}/kortingen/voor-email?email=${encodeURIComponent(email)}`)).json();

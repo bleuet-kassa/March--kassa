@@ -244,10 +244,12 @@ model Voorraadontvangst {
   ontvangenOp  String       // YYYY-MM-DD
   tht          String?      // YYYY-MM-DD, leeg voor artikels zonder THT
   aankoopprijs Decimal?     @db.Decimal(10, 2) // per stuk/kg, zonder btw (optioneel)
-  bron         String       @default("MANUEEL") // MANUEEL | FACTUUR
+  bron         String       @default("MANUEEL") // MANUEEL | FACTUUR | BESTAAND (THT van wat er al lag, voorraad ongewijzigd)
   opmerking    String?
   door         String?      // naam van wie het ingaf
   createdAt    DateTime     @default(now())
+  geannuleerdOp   DateTime? // geannuleerd door een beheerder (telt niet meer mee)
+  geannuleerdDoor String?
 
   @@index([productId, locatieId])
   @@index([tht])

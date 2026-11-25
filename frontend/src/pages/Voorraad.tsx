@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   getVoorraad, getMeta, getVoorraadAlarm, controleerTht, zetVoorraadInstellingen,
@@ -8,7 +8,7 @@ import { getVerkoper } from '../auth';
 import { isAdminRol } from '../rechten';
 import { VoorraadDetail, ThtLabel, datumNl, hoeveelheid } from './VoorraadDetail';
 
-const FILTERS: [string, string][] = [['', 'Alles'], ['alarm', 'THT-alarm'], ['voorraad', 'Met voorraad'], ['negatief', 'Onder nul'], ['zonderTht', 'Zonder THT-registratie']];
+const FILTERS: [string, string][] = [['', 'Alles'], ['alarm', 'THT-alarm'], ['voorraad', 'Met voorraad'], ['negatief', 'Onder nul'], ['zonderTht', 'Zonder THT']];
 
 // Centrale voorraadlijst: per artikel de actuele voorraad per locatie (de kassa trekt bij elke
 // verkoop af), de eerstvolgende THT van wat er nog ligt, en het THT-alarm. Klik een artikel
@@ -26,8 +26,14 @@ export function Voorraad() {
   const [laatste, setLaatste] = useState<VoorraadAlarm['laatsteControle']>(null);
   const isAdmin = isAdminRol(getVerkoper()?.rol ?? '');
 
+  // Enkel het antwoord op de laatste vraag tonen: een trager antwoord voor een oudere zoekterm of
+  // filter mag de lijst niet overschrijven.
+  const verzoek = useRef(0);
   function laad() {
-    getVoorraad(zoek, afdelingId, filter).then((d) => { setData(d); setFout(''); }).catch((e) => setFout(e instanceof Error ? e.message : 'Laden mislukt'));
+    const nr = ++verzoek.current;
+    getVoorraad(zoek, afdelingId, filter)
+      .then((d) => { if (nr === verzoek.current) { setData(d); setFout(''); } })
+      .catch((e) => { if (nr === verzoek.current) setFout(e instanceof Error ? e.message : 'Laden mislukt'); });
   }
   useEffect(() => { const t = setTimeout(laad, 200); return () => clearTimeout(t); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [zoek, afdelingId, filter]);
   useEffect(() => {
@@ -109,7 +115,7 @@ export function Voorraad() {
                     <div style={{ fontSize: 12, color: '#6b7280' }}>
                       {r.afdeling ?? 'zonder afdeling'}
                       {!r.thtNodig && ' · geen THT'}
-                      {r.thtNodig && r.zonderOntvangst > 0 && <span style={{ color: '#92400e' }}> · {hoeveelheid(r.zonderOntvangst, r.eenheid)} zonder THT-registratie</span>}
+                      {r.thtNodig && r.zonderTht > 0 && <span style={{ color: '#92400e' }}> · {hoeveelheid(r.zonderTht, r.eenheid)} zonder THT</span>}
                     </div>
                   </td>
                   {kolommen.map((l) => {

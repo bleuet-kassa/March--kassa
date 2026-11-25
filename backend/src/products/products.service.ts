@@ -3,6 +3,7 @@ import { Prisma, Eenheid } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { genereerBarcode } from '../common/barcode';
 import { leesFactor, prijsUitFactor } from '../common/prijsfactor';
+import { thtStandaard } from '../common/tht';
 
 // Gegevens om een product aan te maken of te bewerken (vanuit het beheerscherm).
 export type ProductInput = {
@@ -119,6 +120,9 @@ export class ProductsService {
     const barcode = input.barcode?.trim() || (await this.nieuweBarcode());
     const afdelingId = await this.bepaalAfdeling(input);
     const factor = leesFactor(input.factor);
+    // THT nodig: zoals gekozen, anders volgens afdeling en categorie (ook voor artikels die aan de
+    // kassa of bij het inlezen van een factuur ontstaan).
+    const thtNodig = typeof input.thtNodig === 'boolean' ? input.thtNodig : await this.thtStandaardVoor(afdelingId, input.categorieId, input.naam);
     return this.prisma.product.create({
       data: {
         naam: input.naam,
@@ -138,10 +142,18 @@ export class ProductsService {
         categorieId: input.categorieId || null,
         leverancierId: input.leverancierId || null,
         statiegeldProductId: input.statiegeldProductId || null,
-        ...(typeof input.thtNodig === 'boolean' ? { thtNodig: input.thtNodig } : {}),
+        thtNodig,
       },
       include: { btwTarief: true, afdeling: true, categorie: true, leverancier: true },
     });
+  }
+
+  private async thtStandaardVoor(afdelingId: string | null, categorieId?: string | null, naam?: string) {
+    const [a, c] = await Promise.all([
+      afdelingId ? this.prisma.afdeling.findUnique({ where: { id: afdelingId }, select: { naam: true } }) : null,
+      categorieId ? this.prisma.categorie.findUnique({ where: { id: categorieId }, select: { naam: true } }) : null,
+    ]);
+    return thtStandaard(a?.naam, c?.naam, naam);
   }
 
   // --- statiegeld ---------------------------------------------------------------

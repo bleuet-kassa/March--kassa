@@ -7,9 +7,7 @@ import {
   type Meta, type ProductVol, type ProductInput, type StatiegeldSoort,
 } from '../api/client';
 import { VoorraadDetail } from './VoorraadDetail';
-
-// Geen THT voor non-food, wijn en groenten (klantregel): standaard voor een nieuw artikel.
-const geenThtAfdeling = (naam?: string | null) => /onderhoud|hygi|lifestyle|wijn|groente/i.test(naam ?? '');
+import { thtStandaard } from '../tht';
 
 // Beheerscherm (Fase 1): producten manueel of via barcode toevoegen/bewerken en
 // voorraad ontvangen. (Factuur-import volgt als aparte stap.)
@@ -173,10 +171,11 @@ export function ProductForm({
   const [levId, setLevId] = useState(product?.leverancierId ?? '');
   const [alcohol, setAlcohol] = useState(product?.isAlcohol ?? false);
   const [webshop, setWebshop] = useState(product?.webshopZichtbaar ?? false);
-  // THT nodig bij ontvangst: bestaand artikel = zoals bewaard; nieuw artikel = volgens de afdeling,
-  // tot iemand het vinkje zelf aanpast.
-  const [thtKeuze, setThtKeuze] = useState<boolean | null>(product ? (product.thtNodig ?? true) : null);
-  const thtNodig = thtKeuze ?? !geenThtAfdeling(meta.afdelingen.find((a) => a.id === afdId)?.naam);
+  // THT nodig bij ontvangst: enkel voor een nieuw artikel in dit formulier (volgens afdeling en
+  // categorie, tot iemand het vinkje aanpast). Bij een bestaand artikel bewaart het voorraadblok het
+  // meteen zelf, en stuurt dit formulier het niet mee (een verouderde waarde zou het terugzetten).
+  const [thtKeuze, setThtKeuze] = useState<boolean | null>(null);
+  const thtNodig = thtKeuze ?? thtStandaard(meta.afdelingen.find((a) => a.id === afdId)?.naam, meta.categorieen.find((c) => c.id === catId)?.naam, naam);
   const [foto, setFoto] = useState(product?.fotoUrl ?? '');
   const [eenheid, setEenheid] = useState(product?.eenheid ?? 'STUK');
   const [fout, setFout] = useState('');
@@ -237,7 +236,7 @@ export function ProductForm({
       categorieId: catId || null,
       leverancierId: levId || null,
       statiegeldProductId: isStatiegeldSoort ? null : (statiegeldId || null),
-      thtNodig: isStatiegeldSoort ? false : thtNodig,
+      thtNodig: isStatiegeldSoort ? false : product ? undefined : thtNodig,
     };
     try {
       if (product) await updateProduct(product.id, input);
@@ -408,7 +407,7 @@ export function ProductForm({
         <input type="checkbox" checked={webshop} onChange={(e) => setWebshop(e.target.checked)} />
         Toon in de webshop (enkel zichtbaar zolang het product actief is)
       </label>
-      {!isStatiegeldSoort && (
+      {!product && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
           <input type="checkbox" checked={thtNodig} onChange={(e) => setThtKeuze(e.target.checked)} />
           THT nodig bij ontvangst (uit voor non-food, wijn en groenten)
@@ -447,8 +446,8 @@ export function ProductForm({
       {product && !isStatiegeldSoort && !product.vrijePrijs && (
         <div style={{ marginTop: 20, borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
           <h3 style={{ margin: '0 0 8px' }}>Voorraad</h3>
-          {/* THT nodig staat hierboven in het formulier: niet nog eens in het voorraadblok. */}
-          <VoorraadDetail productId={product.id} metThtSchakelaar={false}
+          {/* "THT nodig" staat in het voorraadblok en wordt daar meteen bewaard. */}
+          <VoorraadDetail productId={product.id}
             onGewijzigd={(x) => {
               // Hogere aankoopprijs bij een ontvangst: het formulier hierboven neemt de nieuwe prijzen
               // over, anders zou "Wijzigingen opslaan" ze terugzetten.

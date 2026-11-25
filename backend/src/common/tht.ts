@@ -1,0 +1,19 @@
+// Moet een nieuw artikel bij ontvangst een THT krijgen? Klantregel (2026-11-24): niet voor
+// non-food, wijn en groenten; per artikel aan of uit te zetten. Wettelijk (EU 1169/2011, bijlage X)
+// hebben wijn en dranken vanaf 10% alcohol geen THT, maar bier, frisdrank, tonics, siropen,
+// koekjes en alcoholvrije dranken in de wijnkelder wel.
+// Zelfde regel als frontend/src/tht.ts (productformulier) en de migratie 20261125120000.
+const GEEN_THT_AFDELING = /^(onderhoud|private hygi|lifestyle|groente)/i;
+const WIJN_AFDELING = /^wijn/i;
+const MET_THT_IN_WIJNKELDER = /^(bier|frisdrank|overig)/i;
+const ACCESSOIRE = /coravin|vacu ?vin/i;
+const ALCOHOLVRIJ = /(^|[^0-9.,])0 ?%|non[ -]?alcoholic|alcoholvrij|alcohol[ -]?free/i;
+
+export function thtStandaard(afdeling?: string | null, categorie?: string | null, naam?: string | null): boolean {
+  const a = (afdeling ?? '').trim();
+  if (GEEN_THT_AFDELING.test(a)) return false;
+  if (!WIJN_AFDELING.test(a)) return true;
+  const n = naam ?? '';
+  if (ACCESSOIRE.test(n)) return false;
+  return MET_THT_IN_WIJNKELDER.test((categorie ?? '').trim()) || ALCOHOLVRIJ.test(n);
+}
