@@ -1,15 +1,14 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
-  getPersoneelsDossier, zetPersoneelsDossier, getPersoneelGevoelig, getOndernemingen,
-  type PersoneelsDossier, type ProfielInput, type Onderneming,
+  getPersoneelsDossier, zetPersoneelsDossier, getPersoneelGevoelig, getOndernemingen, getPersoneelCategorieen,
+  type PersoneelsDossier, type ProfielInput, type Onderneming, type Personeelscategorie,
 } from '../api/client';
 
 // Individuele pagina per medewerker (personeelsdossier). Voorlopig enkel voor de
 // beheerder: persoonsgegevens, contract, uurregime en plafonds, verlof, notities en
 // de omzet van deze medewerker. Toegangen en tankkaart blijven op de Personeel-lijst.
 const STATUTEN: [string, string][] = [['', '—'], ['VAST', 'Vast'], ['FLEXI', 'Flexi'], ['STUDENT', 'Student'], ['ZELFSTANDIG', 'Zelfstandig']];
-const AFDELINGEN: [string, string][] = [['WINKEL', 'Winkel'], ['RESTAURANT', 'Restaurant'], ['CATERING', 'Catering']];
 const euro = (n: number) => '€ ' + n.toFixed(2);
 const datumNl = (s: string | null) => (s ? new Date(s.length === 10 ? s + 'T12:00:00' : s).toLocaleDateString('nl-BE') : '—');
 
@@ -36,6 +35,8 @@ export function PersoneelDossier() {
   const [d, setD] = useState<PersoneelsDossier | null>(null);
   const [form, setForm] = useState<Form>({});
   const [ondernemingen, setOndernemingen] = useState<Onderneming[]>([]);
+  // De categorieën (ploegen) om aan te vinken; beheer op de pagina Personeel.
+  const [categorieen, setCategorieen] = useState<Personeelscategorie[] | null>(null); // null = nog aan het laden
   const [gevoelig, setGevoelig] = useState<{ rijksregister: string | null; iban: string | null } | null>(null);
   const [fout, setFout] = useState('');
   const [melding, setMelding] = useState('');
@@ -47,7 +48,12 @@ export function PersoneelDossier() {
     try { const r = await getPersoneelsDossier(id); setD(r); setForm(naarForm(r)); setGewijzigd(false); setGevoelig(null); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt'); }
   }
-  useEffect(() => { laad(); getOndernemingen().then(setOndernemingen).catch(() => {}); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id]);
+  useEffect(() => {
+    laad();
+    getOndernemingen().then(setOndernemingen).catch(() => {});
+    getPersoneelCategorieen().then(setCategorieen).catch(() => setCategorieen([]));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [id]);
 
   const zet = (k: string, v: string | string[]) => { setForm((f) => ({ ...f, [k]: v })); setGewijzigd(true); setMelding(''); };
   const wissel = (k: 'afdelingen' | 'verantwoordelijkVoor', a: string) => {
@@ -107,14 +113,26 @@ export function PersoneelDossier() {
       </span>
     </label>
   );
-  const vinkjes = (k: 'afdelingen' | 'verantwoordelijkVoor') => (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      {AFDELINGEN.map(([key, naam]) => {
-        const aan = ((form[k] as string[]) ?? []).includes(key);
-        return <button key={key} type="button" onClick={() => wissel(k, key)} style={{ ...chip, background: aan ? '#0d4589' : '#fff', color: aan ? '#fff' : '#111827', borderColor: aan ? '#0d4589' : '#cbd5e1' }}>{aan ? '✓ ' : ''}{naam}</button>;
-      })}
-    </div>
-  );
+  // Actieve categorieën, plus een uitgezette die deze persoon nog heeft (zodat je ze kan weghalen).
+  const vinkjes = (k: 'afdelingen' | 'verantwoordelijkVoor') => {
+    const gekozen = (form[k] as string[]) ?? [];
+    const zichtbaar = (categorieen ?? []).filter((c) => c.actief || gekozen.includes(c.id));
+    return (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {zichtbaar.map((c) => {
+          const aan = gekozen.includes(c.id);
+          return (
+            <button key={c.id} type="button" onClick={() => wissel(k, c.id)} title={c.actief ? undefined : 'Deze categorie staat uit'}
+              style={{ ...chip, background: aan ? '#0d4589' : '#fff', color: aan ? '#fff' : '#111827', borderColor: aan ? '#0d4589' : '#cbd5e1', opacity: c.actief ? 1 : 0.6 }}>
+              {aan ? '✓ ' : ''}{c.naam}{c.actief ? '' : ' (uit)'}
+            </button>
+          );
+        })}
+        {categorieen === null && <span style={{ fontSize: 13, color: '#6b7280' }}>Categorieën laden…</span>}
+        {categorieen?.length === 0 && <span style={{ fontSize: 13, color: '#6b7280' }}>Nog geen categorieën: maak ze aan op de pagina Personeel.</span>}
+      </div>
+    );
+  };
 
   return (
     <div style={{ maxWidth: 980 }}>
@@ -185,7 +203,7 @@ export function PersoneelDossier() {
             {veld('uitDienst', 'Uit dienst op', { type: 'date' })}
           </div>
           <div style={{ marginTop: 10 }}>
-            <div style={lab}>Werkt in</div>
+            <div style={lab}>Werkt in <span style={{ color: '#9ca3af' }}>(categorieën beheer je op de pagina <Link to="/kassa/personeel">Personeel</Link>)</span></div>
             {vinkjes('afdelingen')}
           </div>
           <div style={{ marginTop: 10 }}>

@@ -30,11 +30,14 @@ export class PlanningService {
   // Planning-scherm: alle diensten in de periode + de actieve medewerkers met hun regime.
   async week(van: string, tot: string) {
     if (!DAG.test(van) || !DAG.test(tot)) throw new BadRequestException('Geef een geldige periode.');
-    const [diensten, mensen] = await Promise.all([
+    const [diensten, mensen, categorieen] = await Promise.all([
       this.prisma.dienst.findMany({ where: { dag: { gte: van, lte: tot } }, orderBy: [{ dag: 'asc' }, { start: 'asc' }] }),
       this.prisma.gebruiker.findMany({ where: { actief: true }, include: { profiel: true }, orderBy: { naam: 'asc' } }),
+      // De ploegen (Winkel, Keuken restaurant, Zaal restaurant...) om op te filteren.
+      this.prisma.personeelscategorie.findMany({ orderBy: [{ volgorde: 'asc' }, { naam: 'asc' }], select: { id: true, naam: true, locatie: true, actief: true } }),
     ]);
     return {
+      categorieen,
       diensten: diensten.map((d) => this.naarBuiten(d)),
       medewerkers: mensen.map((u) => ({
         id: u.id, naam: [u.profiel?.voornaam, u.profiel?.achternaam].filter(Boolean).join(' ') || u.naam,

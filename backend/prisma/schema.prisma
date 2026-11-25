@@ -912,6 +912,18 @@ model PersoneelsProfiel {
 
 // Uurrooster: één geplande dienst van een medewerker. Gemaakt op het Planning-scherm
 // (toegang "planning"); elke medewerker ziet zijn eigen diensten bij "Mijn rooster".
+// Categorieën (ploegen) van het personeel, zelf te beheren: bv. Winkel, Keuken restaurant, Zaal
+// restaurant, Flexi restaurant. PersoneelsProfiel.afdelingen en .verantwoordelijkVoor bevatten
+// de id's. De eerste drie hebben als id de oude vaste sleutel (WINKEL, RESTAURANT, CATERING).
+model Personeelscategorie {
+  id        String   @id @default(cuid())
+  naam      String   @unique
+  locatie   String   // WINKEL | RESTAURANT | CATERING: waar deze ploeg werkt (standaardlocatie van een dienst)
+  volgorde  Int      @default(0)
+  actief    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 model Dienst {
   id          String    @id @default(cuid())
   gebruiker   Gebruiker @relation(fields: [gebruikerId], references: [id], onDelete: Cascade)

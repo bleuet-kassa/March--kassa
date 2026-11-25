@@ -6,7 +6,9 @@ import { effectieveRechten } from '../common/rechten';
 
 // Personeelsdossier per medewerker (voorlopig enkel voor de beheerder).
 export const STATUTEN = ['VAST', 'FLEXI', 'STUDENT', 'ZELFSTANDIG'] as const;
-export const AFDELINGEN = ['WINKEL', 'RESTAURANT', 'CATERING'] as const;
+// Waar een ploeg werkt; de ploegen (categorieën) zelf beheert de zaak (Personeelscategorie).
+export const LOCATIES = ['WINKEL', 'RESTAURANT', 'CATERING'] as const;
+export type CategorieInput = { naam?: string; locatie?: string; volgorde?: number; actief?: boolean };
 
 export type ProfielInput = {
   voornaam?: string | null; achternaam?: string | null; telefoon?: string | null; privEmail?: string | null; adres?: string | null;
@@ -46,6 +48,78 @@ export class PersoneelService {
   constructor(private prisma: PrismaService) {}
 
   private n(v: Prisma.Decimal | null | undefined) { return v != null ? Number(v) : null; }
+
+  // --- categorieën (ploegen): Winkel, Keuken restaurant, Zaal restaurant, Flexi restaurant... -----
+  // Met het aantal medewerkers per categorie (om te zien wat nog gebruikt wordt).
+  async categorieen() {
+    const [lijst, profielen] = await Promise.all([
+      this.prisma.personeelscategorie.findMany({ orderBy: [{ volgorde: 'asc' }, { naam: 'asc' }] }),
+      this.prisma.personeelsProfiel.findMany({ select: { afdelingen: true, verantwoordelijkVoor: true } }),
+    ]);
+    return lijst.map((c) => ({
+      ...c,
+      medewerkers: profielen.filter((p) => p.afdelingen.includes(c.id)).length,
+      verantwoordelijken: profielen.filter((p) => p.verantwoordelijkVoor.includes(c.id)).length,
+    }));
+  }
+
+  private leesCategorie(input: CategorieInput, volledig: boolean) {
+    const data: Prisma.PersoneelscategorieUncheckedUpdateInput = {};
+    if (volledig || input.naam !== undefined) {
+      const naam = String(input.naam ?? '').trim().replace(/\s+/g, ' ');
+      if (!naam) throw new BadRequestException('Geef een naam (bv. Keuken restaurant).');
+      if (naam.length > 60) throw new BadRequestException('De naam is te lang (hoogstens 60 tekens).');
+      data.naam = naam;
+    }
+    if (volledig || input.locatie !== undefined) {
+      const l = String(input.locatie ?? '').trim().toUpperCase();
+      if (!(LOCATIES as readonly string[]).includes(l)) throw new BadRequestException('Kies waar deze ploeg werkt: winkel, restaurant of catering.');
+      data.locatie = l;
+    }
+    if (input.volgorde !== undefined) {
+      const v = Number(input.volgorde);
+      if (!Number.isInteger(v) || v < 0 || v > 100000) throw new BadRequestException('Ongeldige volgorde.');
+      data.volgorde = v;
+    }
+    if (input.actief !== undefined) {
+      if (typeof input.actief !== 'boolean') throw new BadRequestException('Ongeldige waarde.');
+      data.actief = input.actief;
+    }
+    return data;
+  }
+
+  private async naamVrij(naam: string | undefined, zonderId?: string) {
+    if (!naam) return;
+    const zelfde = await this.prisma.personeelscategorie.findFirst({ where: { naam: { equals: naam, mode: 'insensitive' }, ...(zonderId ? { id: { not: zonderId } } : {}) } });
+    if (zelfde) throw new BadRequestException(`Er bestaat al een categorie "${zelfde.naam}".`);
+  }
+
+  async maakCategorie(input: CategorieInput) {
+    const data = this.leesCategorie(input ?? {}, true) as { naam: string; locatie: string; volgorde?: number; actief?: boolean };
+    await this.naamVrij(data.naam);
+    const laatste = await this.prisma.personeelscategorie.aggregate({ _max: { volgorde: true } });
+    await this.prisma.personeelscategorie.create({ data: { naam: data.naam, locatie: data.locatie, volgorde: data.volgorde ?? (laatste._max.volgorde ?? 0) + 10, actief: data.actief ?? true } });
+    return this.categorieen();
+  }
+
+  async wijzigCategorie(id: string, input: CategorieInput) {
+    const c = await this.prisma.personeelscategorie.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Categorie niet gevonden.');
+    const data = this.leesCategorie(input ?? {}, false);
+    await this.naamVrij(data.naam as string | undefined, id);
+    await this.prisma.personeelscategorie.update({ where: { id }, data });
+    return this.categorieen();
+  }
+
+  // Verwijderen kan enkel als niemand er nog in zit; anders: uitzetten (blijft in de dossiers staan).
+  async verwijderCategorie(id: string) {
+    const c = await this.prisma.personeelscategorie.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Categorie niet gevonden.');
+    const inGebruik = await this.prisma.personeelsProfiel.count({ where: { OR: [{ afdelingen: { has: id } }, { verantwoordelijkVoor: { has: id } }] } });
+    if (inGebruik) throw new BadRequestException(`"${c.naam}" staat nog bij ${inGebruik} medewerker${inGebruik === 1 ? '' : 's'}. Haal ze er eerst uit, of zet de categorie uit.`);
+    await this.prisma.personeelscategorie.delete({ where: { id } });
+    return this.categorieen();
+  }
 
   async profiel(id: string) {
     const u = await this.prisma.gebruiker.findUnique({ where: { id }, include: { profiel: true } });
@@ -126,7 +200,9 @@ export class PersoneelService {
       return s;
     });
     zet('ondernemingId', (v) => tekst(v as string | null));
-    for (const k of ['afdelingen', 'verantwoordelijkVoor'] as const) zet(k, (v) => [...new Set(((v as string[] | null) ?? []).map(String))].filter((a) => (AFDELINGEN as readonly string[]).includes(a)));
+    // Categorieën: enkel bestaande (ook uitgezette, zodat een oude toewijzing blijft staan).
+    const bestaande = new Set((await this.prisma.personeelscategorie.findMany({ select: { id: true } })).map((c) => c.id));
+    for (const k of ['afdelingen', 'verantwoordelijkVoor'] as const) zet(k, (v) => [...new Set(((v as string[] | null) ?? []).map(String))].filter((a) => bestaande.has(a)));
     for (const k of ['urenPerWeek', 'urenPerDag', 'maxUrenDag', 'maxUrenWeek', 'maxUrenMaand', 'jaarContingent', 'verlofdagenJaar', 'verlofdagenSaldo', 'recupUrenSaldo'] as const) zet(k, (v) => {
       if (v === null || (v as unknown) === '') return null;
       const n = Number(String(v).replace(',', '.'));

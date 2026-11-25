@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Put } from '@nestjs/common';
-import { PersoneelService, type ProfielInput } from './personeel.service';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { PersoneelService, type CategorieInput, type ProfielInput } from './personeel.service';
 import { Rollen } from '../auth/auth.guard';
 
 // Personeelsdossier per medewerker — voorlopig ENKEL voor beheerders (eigenaars).
@@ -7,6 +7,27 @@ import { Rollen } from '../auth/auth.guard';
 @Controller('personeel')
 export class PersoneelController {
   constructor(private readonly personeel: PersoneelService) {}
+
+  // Categorieën (ploegen) van het personeel. Deze routes staan vóór ':id', anders vangt die ze op.
+  @Get('categorieen')
+  categorieen() {
+    return this.personeel.categorieen();
+  }
+
+  @Post('categorieen')
+  maakCategorie(@Body() body: CategorieInput) {
+    return this.personeel.maakCategorie(body ?? {});
+  }
+
+  @Patch('categorieen/:id')
+  wijzigCategorie(@Param('id') id: string, @Body() body: CategorieInput) {
+    return this.personeel.wijzigCategorie(id, body ?? {});
+  }
+
+  @Delete('categorieen/:id')
+  verwijderCategorie(@Param('id') id: string) {
+    return this.personeel.verwijderCategorie(id);
+  }
 
   // GET /personeel/:id -> account + dossier (gevoelige velden gemaskeerd) + omzet
   @Get(':id')

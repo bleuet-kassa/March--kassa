@@ -6,6 +6,7 @@ import {
 } from '../api/client';
 import { getVerkoper } from '../auth';
 import { RECHTEN, STANDAARD_RECHTEN, isAdminRol } from '../rechten';
+import { PersoneelCategorieen } from './PersoneelCategorieen';
 
 const ROLLEN = ['KASSA', 'BEHEER', 'BEHEERDER'];
 const GROEPEN = ['Dagelijks', 'Beheer', 'Cijfers'];
@@ -261,6 +262,9 @@ export function Personeel() {
         </tbody>
       </table>
       </div>
+
+      {/* Ploegen (Winkel, Keuken restaurant, Zaal restaurant...): enkel de beheerder beheert ze. */}
+      {magToekennen && <PersoneelCategorieen />}
     </div>
   );
 }

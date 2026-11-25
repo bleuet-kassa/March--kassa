@@ -77,6 +77,19 @@ async function main() {
     await prisma.openingsuur.upsert({ where: { dag: u.dag }, create: u, update: {} });
   }
 
+  // Categorieën (ploegen) van het personeel: zelfde standaard als de migratie 20261125150000.
+  const ploegen = [
+    { id: 'WINKEL', naam: 'Winkel', locatie: 'WINKEL', volgorde: 10 },
+    { id: 'RESTAURANT', naam: 'Restaurant', locatie: 'RESTAURANT', volgorde: 20 },
+    { id: 'RESTAURANT_KEUKEN', naam: 'Keuken restaurant', locatie: 'RESTAURANT', volgorde: 30 },
+    { id: 'RESTAURANT_ZAAL', naam: 'Zaal restaurant', locatie: 'RESTAURANT', volgorde: 40 },
+    { id: 'RESTAURANT_FLEXI', naam: 'Flexi restaurant', locatie: 'RESTAURANT', volgorde: 50 },
+    { id: 'CATERING', naam: 'Catering', locatie: 'CATERING', volgorde: 60 },
+  ];
+  for (const c of ploegen) {
+    await prisma.personeelscategorie.upsert({ where: { id: c.id }, create: c, update: {} });
+  }
+
   const btwVoeding = await prisma.btwTarief.create({
     data: { naam: 'Voeding 6%', percentage: 6 },
   });

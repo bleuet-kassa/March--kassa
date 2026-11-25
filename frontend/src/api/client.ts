@@ -238,7 +238,9 @@ export async function getRekeningUittreksel(sleutel: string, van?: string, tot?:
 export type Dienst = { id: string; gebruikerId: string; dag: string; start: string; eind: string; pauzeMin: number; locatie: string | null; opmerking: string | null; uren: number };
 export type DienstInput = { gebruikerId: string; dag: string; start: string; eind: string; pauzeMin?: number; locatie?: string | null; opmerking?: string | null };
 export type PlanningMedewerker = { id: string; naam: string; afdelingen: string[]; statuut: string | null; urenPerWeek: number | null; maxUrenDag: number; maxUrenWeek: number };
-export async function getPlanning(van: string, tot: string): Promise<{ diensten: Dienst[]; medewerkers: PlanningMedewerker[] }> {
+// Een categorie (ploeg) van het personeel, bv. Keuken restaurant; locatie = waar die ploeg werkt.
+export type PlanningCategorie = { id: string; naam: string; locatie: string; actief: boolean };
+export async function getPlanning(van: string, tot: string): Promise<{ categorieen: PlanningCategorie[]; diensten: Dienst[]; medewerkers: PlanningMedewerker[] }> {
   return jsonOrThrow(await fetch(`${BASE}/planning?van=${van}&tot=${tot}`));
 }
 export async function maakDienst(input: DienstInput): Promise<Dienst> {
@@ -281,6 +283,21 @@ export async function getPersoneelsDossier(id: string): Promise<PersoneelsDossie
 }
 export async function zetPersoneelsDossier(id: string, input: ProfielInput): Promise<PersoneelsDossier> {
   return jsonOrThrow(await fetch(`${BASE}/personeel/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+// Categorieën (ploegen) van het personeel: Winkel, Keuken restaurant, Zaal restaurant... (enkel beheerders).
+export type Personeelscategorie = PlanningCategorie & { volgorde: number; medewerkers: number; verantwoordelijken: number };
+export type CategorieInput = { naam?: string; locatie?: string; volgorde?: number; actief?: boolean };
+export async function getPersoneelCategorieen(): Promise<Personeelscategorie[]> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/categorieen`));
+}
+export async function maakPersoneelCategorie(input: CategorieInput): Promise<Personeelscategorie[]> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/categorieen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function wijzigPersoneelCategorie(id: string, input: CategorieInput): Promise<Personeelscategorie[]> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/categorieen/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+}
+export async function verwijderPersoneelCategorie(id: string): Promise<Personeelscategorie[]> {
+  return jsonOrThrow(await fetch(`${BASE}/personeel/categorieen/${encodeURIComponent(id)}`, { method: 'DELETE' }));
 }
 export async function getPersoneelGevoelig(id: string): Promise<{ rijksregister: string | null; iban: string | null }> {
   return jsonOrThrow(await fetch(`${BASE}/personeel/${id}/gevoelig`));

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { getPlanning, maakDienst, wijzigDienst, verwijderDienst, kopieerPlanningWeek, type Dienst, type PlanningMedewerker } from '../api/client';
+import { getPlanning, maakDienst, wijzigDienst, verwijderDienst, kopieerPlanningWeek, type Dienst, type PlanningMedewerker, type PlanningCategorie } from '../api/client';
 
 // Planning: uurroosters maken per week. Rijen = medewerkers, kolommen = dagen.
 // Klik op een vakje om een dienst toe te voegen, op een dienst om ze aan te passen.
@@ -19,7 +19,9 @@ export function Planning() {
   const [start, setStart] = useState(maandag(vandaag));
   const [diensten, setDiensten] = useState<Dienst[]>([]);
   const [mensen, setMensen] = useState<PlanningMedewerker[]>([]);
-  const [filter, setFilter] = useState('');
+  // Categorieën (ploegen): Winkel, Keuken restaurant, Zaal restaurant... (beheer op de pagina Personeel).
+  const [categorieen, setCategorieen] = useState<PlanningCategorie[]>([]);
+  const [filter, setFilter] = useState(''); // id van een categorie, leeg = iedereen
   const [form, setForm] = useState<Form | null>(null);
   const [fout, setFout] = useState('');
   const [melding, setMelding] = useState('');
@@ -28,19 +30,25 @@ export function Planning() {
 
   async function laad() {
     setFout('');
-    try { const r = await getPlanning(start, plusDagen(start, 6)); setDiensten(r.diensten); setMensen(r.medewerkers); }
+    try { const r = await getPlanning(start, plusDagen(start, 6)); setDiensten(r.diensten); setMensen(r.medewerkers); setCategorieen(r.categorieen ?? []); }
     catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt'); }
   }
   useEffect(() => { laad(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [start]);
 
   const zichtbaar = useMemo(() => mensen.filter((m) => !filter || m.afdelingen.includes(filter)), [mensen, filter]);
+  const naamCategorie = (id: string) => categorieen.find((c) => c.id === id)?.naam ?? id.toLowerCase();
+  // Filterknoppen: de actieve categorieën, en een uitgezette zolang iemand ze nog heeft.
+  const filters = categorieen.filter((c) => c.actief || mensen.some((m) => m.afdelingen.includes(c.id)));
   const van = (gid: string, dag: string) => diensten.filter((d) => d.gebruikerId === gid && d.dag === dag);
   const weekTotaal = (gid: string) => diensten.filter((d) => d.gebruikerId === gid).reduce((s, d) => s + d.uren, 0);
 
   function nieuw(gid: string, dag: string) {
     const vorige = diensten.filter((d) => d.gebruikerId === gid).slice(-1)[0];
     const m = mensen.find((x) => x.id === gid);
-    setForm({ gebruikerId: gid, dag, start: vorige?.start ?? '09:00', eind: vorige?.eind ?? '17:00', pauzeMin: String(vorige?.pauzeMin ?? 30), locatie: vorige?.locatie ?? (m?.afdelingen[0] ?? ''), opmerking: '' });
+    // Locatie: die van de vorige dienst, anders waar de (gefilterde of eerste) ploeg van deze persoon werkt.
+    const ploeg = filter && m?.afdelingen.includes(filter) ? filter : m?.afdelingen[0];
+    const ploegLocatie = categorieen.find((c) => c.id === ploeg)?.locatie ?? '';
+    setForm({ gebruikerId: gid, dag, start: vorige?.start ?? '09:00', eind: vorige?.eind ?? '17:00', pauzeMin: String(vorige?.pauzeMin ?? 30), locatie: vorige?.locatie ?? ploegLocatie, opmerking: '' });
     setMelding('');
   }
   function bewerk(d: Dienst) {
@@ -83,8 +91,8 @@ export function Planning() {
         <button onClick={() => setStart(maandag(vandaag))} style={btnGrijs}>Deze week</button>
         <button onClick={() => setStart(plusDagen(start, 7))} style={btnGrijs}>volgende ›</button>
         <strong>{vanIso(start).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – {vanIso(plusDagen(start, 6)).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {[['', 'Iedereen'], ['WINKEL', 'Winkel'], ['RESTAURANT', 'Restaurant'], ['CATERING', 'Catering']].map(([k, n]) => (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {[['', 'Iedereen'], ...filters.map((c) => [c.id, c.naam])].map(([k, n]) => (
             <button key={k} onClick={() => setFilter(k)} style={{ ...btnMini, fontWeight: filter === k ? 700 : 400, background: filter === k ? '#111827' : '#fff', color: filter === k ? '#fff' : '#111827' }}>{n}</button>
           ))}
         </div>
@@ -132,7 +140,7 @@ export function Planning() {
               const over = m.urenPerWeek != null && tot > m.urenPerWeek + 0.001;
               return (
                 <tr key={m.id}>
-                  <td style={{ ...td, fontWeight: 600 }}>{m.naam}<div style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>{[m.statuut?.toLowerCase(), ...m.afdelingen.map((a) => a.toLowerCase())].filter(Boolean).join(' · ')}</div></td>
+                  <td style={{ ...td, fontWeight: 600 }}>{m.naam}<div style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>{[m.statuut?.toLowerCase(), ...m.afdelingen.map(naamCategorie)].filter(Boolean).join(' · ')}</div></td>
                   {dagen.map((dag) => (
                     <td key={dag} onClick={() => nieuw(m.id, dag)} style={{ ...td, cursor: 'pointer', verticalAlign: 'top', background: dag === vandaag ? '#f8fbff' : undefined }} title="Klik om een dienst toe te voegen">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -157,7 +165,7 @@ export function Planning() {
                 </tr>
               );
             })}
-            {zichtbaar.length === 0 && <tr><td colSpan={9} style={{ ...td, color: '#6b7280' }}>Geen medewerkers{filter ? ' in deze afdeling (stel de afdelingen in via het personeelsdossier)' : ''}.</td></tr>}
+            {zichtbaar.length === 0 && <tr><td colSpan={9} style={{ ...td, color: '#6b7280' }}>Geen medewerkers{filter ? ' in deze categorie (duid ze aan in het personeelsdossier, bij "Werkt in")' : ''}.</td></tr>}
           </tbody>
         </table>
       </div>
