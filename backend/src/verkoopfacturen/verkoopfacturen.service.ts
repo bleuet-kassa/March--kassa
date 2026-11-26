@@ -147,7 +147,15 @@ export class VerkoopfacturenService {
   }
 
   // Factuur voor één ticket (klant aan de kassa gekozen). Al gefactureerd -> bestaande.
-  async maakVoorVerkoop(verkoopId: string) {
+  // Na elkaar, nooit tegelijk: twee schermen die tegelijk de ontbrekende ticketfacturen aanmaken
+  // (Boekhouding, Klant factuur, de kassa) mogen één ticket geen twee facturen (nummers) geven.
+  private ticketRij: Promise<unknown> = Promise.resolve();
+  maakVoorVerkoop(verkoopId: string) {
+    const beurt = this.ticketRij.then(() => this.maakVoorVerkoopNu(verkoopId));
+    this.ticketRij = beurt.catch(() => undefined);
+    return beurt;
+  }
+  private async maakVoorVerkoopNu(verkoopId: string) {
     const v = await this.prisma.verkoop.findUnique({ where: { id: verkoopId }, include: VERKOOP_INCLUDE });
     if (!v) throw new NotFoundException('Verkoop niet gevonden.');
     if (v.factuurId) return this.prisma.verkoopfactuur.findUnique({ where: { id: v.factuurId } });
@@ -314,10 +322,60 @@ export class VerkoopfacturenService {
   // Betaalde tickets waarvoor aan de kassa een factuur gevraagd werd en die nog geen
   // factuur hebben (aankopen op rekening horen hier niet bij: die worden gebundeld).
   async maakTicketFacturen() {
+    return (await this.maakOntbrekendeTicketFacturen()).gemaakt;
+  }
+  private async maakOntbrekendeTicketFacturen() {
     const open = await this.prisma.verkoop.findMany({ where: { factuurGewenst: true, factuurId: null, geannuleerd: false, betaalwijze: { not: null } }, select: { id: true } });
-    let n = 0;
-    for (const { id } of open) { try { await this.maakVoorVerkoop(id); n++; } catch (e) { this.log.warn(`Ticketfactuur ${id}: ${e instanceof Error ? e.message : e}`); } }
-    return n;
+    let gemaakt = 0;
+    const fouten: { verkoopId: string; fout: string }[] = [];
+    for (const { id } of open) {
+      try { await this.maakVoorVerkoop(id); gemaakt++; }
+      catch (e) {
+        const fout = e instanceof Error ? e.message : String(e);
+        fouten.push({ verkoopId: id, fout });
+        this.log.warn(`Ticketfactuur ${id}: ${fout}`);
+      }
+    }
+    return { gemaakt, fouten };
+  }
+
+  // Facturen die aan de kassa gevraagd werden ("Factuur voor deze verkoop"), voor de pagina
+  // Klant factuur: eerst wat nog naar de klant moet (Scrada voor bedrijven met BTW-nummer, e-mail
+  // voor particulieren), met terugwerkende kracht. Een ticket met factuurvraag zonder factuur
+  // (bv. door een fout bij het afrekenen) krijgt er eerst alsnog één; lukt dat niet, dan staat
+  // het apart vermeld met de reden. ookVerstuurd: ook wat al verstuurd is (laatste 3 maanden).
+  async kassaFacturen(opties: { ookVerstuurd?: boolean } = {}) {
+    const { fouten } = await this.maakOntbrekendeTicketFacturen();
+    const nietVerstuurd: Prisma.VerkoopfactuurWhereInput = { OR: [{ scradaStatus: { in: ['NIET_VERSTUURD', 'FOUT'] } }, { scradaStatus: 'NIET_NODIG', gemaildOp: null }] };
+    const sinds = new Date();
+    sinds.setMonth(sinds.getMonth() - 3);
+    const [rows, zonder] = await Promise.all([
+      this.prisma.verkoopfactuur.findMany({
+        where: { bron: 'TICKET', ...(opties.ookVerstuurd ? { OR: [nietVerstuurd, { datum: { gte: sinds } }] } : nietVerstuurd) },
+        orderBy: { datum: 'desc' }, take: 500,
+        include: { verkopen: { select: { id: true, datum: true, geannuleerd: true }, take: 1 }, klant: { select: { email: true } } },
+      }),
+      fouten.length
+        ? this.prisma.verkoop.findMany({ where: { id: { in: fouten.map((f) => f.verkoopId) } }, select: { id: true, datum: true, totaal: true, klant: { select: { naam: true } }, rekeningBedrijf: { select: { naam: true } } }, orderBy: { datum: 'desc' } })
+        : Promise.resolve([]),
+    ]);
+    return {
+      facturen: rows.map((f) => {
+        const naarScrada = f.scradaStatus !== 'NIET_NODIG';
+        return {
+          id: f.id, nummer: f.nummer, datum: f.datum, verkoopId: f.verkopen[0]?.id ?? null, verkoopDatum: f.verkopen[0]?.datum ?? f.datum,
+          klantNaam: f.klantNaam, klantBtw: f.klantBtw, klantEmail: f.klantEmail ?? f.klant?.email ?? null, totaalIncl: Number(f.totaalIncl),
+          betaalstatus: f.betaalstatus, betaalwijze: f.betaalwijze, naarScrada,
+          // Verkoop achteraf geannuleerd: deze factuur niet meer versturen.
+          verkoopGeannuleerd: !!f.verkopen[0]?.geannuleerd,
+          // Geen ticket meer gekoppeld (verkoop verwijderd of een dubbele factuur): niet versturen.
+          verkoopOntbreekt: f.verkopen.length === 0,
+          verstuurd: naarScrada ? f.scradaStatus === 'VERSTUURD' : !!f.gemaildOp,
+          scradaStatus: f.scradaStatus, scradaVerstuurdOp: f.scradaVerstuurdOp, scradaFout: f.scradaFout, gemaildOp: f.gemaildOp, gemaildNaar: f.gemaildNaar,
+        };
+      }),
+      zonderFactuur: zonder.map((v) => ({ verkoopId: v.id, datum: v.datum, totaal: Number(v.totaal), klantNaam: v.rekeningBedrijf?.naam ?? v.klant?.naam ?? null, fout: fouten.find((f) => f.verkoopId === v.id)?.fout ?? '' })),
+    };
   }
 
   // Bewaarde klanten om aan de kassa te kiezen (factuur / op rekening), met wat er
@@ -371,7 +429,7 @@ export class VerkoopfacturenService {
   // --- rekening per e-mail (particulieren: niet via Scrada/Peppol) --------------------------
   mailStatus() { return this.mail.status(); }
 
-  private rekeningHtml(f: { nummer: string; datum: Date; vervaldatum: Date | null; periode: string | null; klantNaam: string; klantAdres: string | null; lijnen: unknown; perBtw: unknown; totaalIncl: Prisma.Decimal | number; betaaldBedrag: Prisma.Decimal | number; betaalstatus: string }, inst: FactuurInstellingen, winkel: { naam: string; btwNummer: string | null; adres: string | null } | null) {
+  private rekeningHtml(f: { nummer: string; datum: Date; vervaldatum: Date | null; periode: string | null; klantNaam: string; klantAdres: string | null; lijnen: unknown; perBtw: unknown; totaalIncl: Prisma.Decimal | number; betaaldBedrag: Prisma.Decimal | number; betaalstatus: string; bron?: string }, inst: FactuurInstellingen, winkel: { naam: string; btwNummer: string | null; adres: string | null } | null) {
     const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
     const eur = (n: number) => '€ ' + n.toFixed(2).replace('.', ',');
     const dNl = (d: Date | string) => new Date(d).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' });
@@ -391,7 +449,7 @@ export class VerkoopfacturenService {
       <h3 style="margin:0 0 8px">Rekening ${esc(f.nummer)}${f.periode ? ` — ${esc(f.periode)}` : ''}</h3>
       <div style="margin-bottom:12px">${esc(f.klantNaam)}${f.klantAdres ? `<br>${esc(f.klantAdres)}` : ''}<br><span style="color:#6b7280">Datum: ${dNl(f.datum)}</span></div>
       <p>Beste ${esc(f.klantNaam)},</p>
-      <p>Hierbij het overzicht van uw aankopen op rekening.</p>
+      <p>${f.bron === 'TICKET' ? 'Hierbij de rekening van uw aankoop, zoals gevraagd aan de kassa.' : 'Hierbij het overzicht van uw aankopen op rekening.'}</p>
       ${tekst}
       <table style="border-collapse:collapse;width:100%;font-size:13px">
         <thead><tr style="background:#f3f4f6"><th style="padding:6px 8px;text-align:left">Datum</th><th style="padding:6px 8px;text-align:left">Omschrijving</th><th style="padding:6px 8px;text-align:right">Aantal</th><th style="padding:6px 8px;text-align:right">Bedrag</th></tr></thead>

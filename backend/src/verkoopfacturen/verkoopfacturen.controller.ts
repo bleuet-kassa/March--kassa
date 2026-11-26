@@ -19,6 +19,14 @@ export class VerkoopfacturenController {
     return this.facturen.overzicht();
   }
 
+  // GET /verkoopfacturen/kassa-facturen?alle=1 -> facturen gevraagd aan de kassa ("Factuur voor
+  // deze verkoop"): eerst wat nog naar de klant moet. Maakt ontbrekende ticketfacturen alsnog aan.
+  @Recht('rekeningen', 'boekhouding')
+  @Get('kassa-facturen')
+  kassaFacturen(@Query('alle') alle?: string) {
+    return this.facturen.kassaFacturen({ ookVerstuurd: alle === '1' });
+  }
+
   // GET /verkoopfacturen/klanten -> bewaarde factuurklanten (B2B) voor de keuze aan de kassa
   @Get('klanten')
   klanten() {

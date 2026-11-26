@@ -7,6 +7,7 @@ import {
   type RekeningBedrijf, type RekeningLid, type RekeningVerkoop, type Ticket,
 } from '../api/client';
 import { TicketWeergave } from './Kassa';
+import { KassaFacturenBlok } from './KassaFacturen';
 
 const euro = (n: number | null | undefined) => '€ ' + Number(n ?? 0).toFixed(2);
 
@@ -168,6 +169,8 @@ export function Rekeningen() {
       </div>
       <p style={{ color: '#6b7280', marginTop: 4 }}>Bedrijven waarvan personeelsleden "op rekening" kopen. Op het einde van de maand factureer je het openstaande bedrag.</p>
       {fout && <p style={{ color: 'crimson' }}>{fout}</p>}
+
+      <KassaFacturenBlok onDetail={(id) => void toonDetail(id)} />
 
       <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14, margin: '12px 0 20px', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div><div style={muted}>Bedrijf</div><input value={nieuwNaam} onChange={(e) => setNieuwNaam(e.target.value)} style={{ ...inp, width: 180 }} /></div>

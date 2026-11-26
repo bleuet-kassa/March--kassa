@@ -1136,6 +1136,23 @@ export type FactuurVerzendResultaat = { modus: string; aangemaakt: number; gevon
 export async function getVerkoopfacturen(): Promise<Verkoopfactuur[]> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen`));
 }
+// Facturen gevraagd aan de kassa ("Factuur voor deze verkoop"), voor Klant factuur: eerst wat nog
+// naar de klant moet (Scrada voor bedrijven met BTW-nummer, e-mail voor particulieren).
+export type KassaFactuur = {
+  id: string; nummer: string; datum: string; verkoopId: string | null; verkoopDatum: string;
+  klantNaam: string; klantBtw: string | null; klantEmail: string | null; totaalIncl: number;
+  betaalstatus: string; betaalwijze: string | null; naarScrada: boolean; verstuurd: boolean;
+  verkoopGeannuleerd: boolean; // verkoop achteraf geannuleerd: niet versturen
+  verkoopOntbreekt: boolean; // geen ticket meer gekoppeld (verwijderd of dubbele factuur): niet versturen
+  scradaStatus: string; scradaVerstuurdOp: string | null; scradaFout: string | null; gemaildOp: string | null; gemaildNaar: string | null;
+};
+export type KassaFacturen = {
+  facturen: KassaFactuur[];
+  zonderFactuur: { verkoopId: string; datum: string; totaal: number; klantNaam: string | null; fout: string }[]; // factuur kon niet gemaakt worden
+};
+export async function getKassaFacturen(ookVerstuurd = false): Promise<KassaFacturen> {
+  return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/kassa-facturen${ookVerstuurd ? '?alle=1' : ''}`));
+}
 export async function getFactuurOverzicht(): Promise<FactuurOverzicht> {
   return jsonOrThrow(await fetch(`${BASE}/verkoopfacturen/overzicht`));
 }
